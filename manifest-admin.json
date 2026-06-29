@@ -1,0 +1,24 @@
+{
+  "name": "Sabores Royal Admin",
+  "short_name": "SR Admin",
+  "description": "Panel de administración de Sabores Royal",
+  "start_url": "./index.html?mode=admin",
+  "display": "standalone",
+  "background_color": "#0f1c45",
+  "theme_color": "#c5a028",
+  "orientation": "portrait",
+  "icons": [
+    {
+      "src": "icon-admin-192.png",
+      "sizes": "192x192",
+      "type": "image/png",
+      "purpose": "any maskable"
+    },
+    {
+      "src": "icon-admin-512.png",
+      "sizes": "512x512",
+      "type": "image/png",
+      "purpose": "any maskable"
+    }
+  ]
+}

@@ -1,0 +1,24 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+<title>Sabores Royal Admin</title>
+<link rel="manifest" href="manifest-admin.json">
+<meta name="theme-color" content="#c5a028">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+<meta name="apple-mobile-web-app-title" content="SR Admin">
+<link rel="apple-touch-icon" href="apple-touch-icon-admin.png">
+<style>
+  *{margin:0;padding:0;box-sizing:border-box;}
+  html,body{width:100%;height:100%;overflow:hidden;background:#0f1c45;}
+  iframe{position:fixed;top:0;left:0;width:100%;height:100%;border:none;}
+</style>
+</head>
+<body>
+  <script>
+    document.write('<iframe src="./index.html?mode=admin&v=' + Date.now() + '" allowfullscreen style="position:fixed;top:0;left:0;width:100%;height:100%;border:none;"></iframe>');
+  </script>
+</body>
+</html>
