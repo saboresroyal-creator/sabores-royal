@@ -1,22 +1,7 @@
-const CACHE = 'sabores-royal-v2';
-const ASSETS = [
-  './',
-  './index.html',
-  './admin.html',
-  './manifest.json',
-  './manifest-admin.json',
-  './icon-clients-192.png',
-  './icon-clients-512.png',
-  './icon-admin-192.png',
-  './icon-admin-512.png',
-  './apple-touch-icon.png',
-  './apple-touch-icon-admin.png',
-];
+const CACHE = 'sabores-royal-v3';
 
 self.addEventListener('install', e => {
-  e.waitUntil(
-    caches.open(CACHE).then(c => c.addAll(ASSETS)).then(() => self.skipWaiting())
-  );
+  self.skipWaiting();
 });
 
 self.addEventListener('activate', e => {
@@ -31,16 +16,14 @@ self.addEventListener('fetch', e => {
   if (e.request.method !== 'GET') return;
   if (e.request.url.includes('/api/')) return;
 
+  // Network-first: siempre busca la versión nueva, cae en caché solo si no hay internet
   e.respondWith(
-    caches.match(e.request).then(cached => {
-      if (cached) return cached;
-      return fetch(e.request).then(res => {
-        if (res.ok) {
-          const clone = res.clone();
-          caches.open(CACHE).then(c => c.put(e.request, clone));
-        }
-        return res;
-      }).catch(() => caches.match('./index.html'));
-    })
+    fetch(e.request).then(res => {
+      if (res.ok) {
+        const clone = res.clone();
+        caches.open(CACHE).then(c => c.put(e.request, clone));
+      }
+      return res;
+    }).catch(() => caches.match(e.request))
   );
 });
