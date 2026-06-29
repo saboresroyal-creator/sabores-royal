@@ -1,0 +1,41 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Sabores Royal - Tienda</title>
+  <link rel="stylesheet" href="styles.css" />
+</head>
+<body>
+  <header>
+    <h1>Sabores Royal</h1>
+    <p>Catálogo, carrito y pedidos integrados con Supabase.</p>
+  </header>
+
+  <main>
+    <section class="products-section">
+      <h2>Productos</h2>
+      <div id="products" class="product-grid"></div>
+    </section>
+
+    <section class="cart-section">
+      <h2>Carrito</h2>
+      <div id="cart-items" class="cart-items"></div>
+      <div class="cart-summary">
+        <strong>Total: </strong><span id="cart-total">$0</span>
+      </div>
+      <div class="checkout-form">
+        <h3>Datos del cliente</h3>
+        <input id="full_name" placeholder="Nombre completo" />
+        <input id="phone" placeholder="Teléfono" />
+        <input id="email" placeholder="Email" />
+        <input id="address" placeholder="Dirección" />
+        <button id="checkout-button">Enviar pedido</button>
+      </div>
+      <div id="message" class="message"></div>
+    </section>
+  </main>
+
+  <script src="app.js"></script>
+</body>
+</html>
