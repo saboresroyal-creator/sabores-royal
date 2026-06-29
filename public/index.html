@@ -12,7 +12,6 @@
 <link rel="apple-touch-icon" href="apple-touch-icon.png">
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link href="https://fonts.googleapis.com/css2?family=Playfair+Display:wght@500;600;700;800&family=DM+Sans:wght@400;500;600;700&display=swap" rel="stylesheet">
-<script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2/dist/umd/supabase.js"></script>
 <style>
 :root{
   --navy:#0f1c45; --navy2:#1a2a5e; --navy3:#24356f;
@@ -507,15 +506,30 @@ function loadState(){
 /* =========================================================
    API SYNC — sincronización directa con Supabase
    ========================================================= */
-function getDb(){
-  if(!window._sbClient) window._sbClient = window.supabase.createClient(SUPABASE_URL, SUPABASE_KEY);
-  return window._sbClient;
+async function supaFetch(path, method, body){
+  const url = SUPABASE_URL + '/rest/v1' + path;
+  const headers = {
+    'Content-Type': 'application/json',
+    'apikey': SUPABASE_KEY,
+    'Authorization': 'Bearer ' + SUPABASE_KEY,
+  };
+  if(method === 'POST' || method === 'PATCH') headers['Prefer'] = 'return=representation';
+  const res = await fetch(url, {
+    method: method||'GET',
+    headers,
+    body: body ? JSON.stringify(body) : undefined,
+  });
+  const text = await res.text();
+  if(!res.ok){
+    let err; try{ err = JSON.parse(text); }catch(e){ err = {message: text}; }
+    throw new Error(err.message || err.details || 'HTTP ' + res.status);
+  }
+  return text ? JSON.parse(text) : null;
 }
 
 async function apiSyncProducts(){
   try{
-    const { data, error } = await getDb().from('products').select('*');
-    if(error) throw error;
+    const data = await supaFetch('/products?select=*', 'GET');
     if(!data || data.length===0) return;
     const apiMapped = data.map(p=>({
       id: String(p.id),
@@ -540,7 +554,7 @@ async function apiSyncProducts(){
     state.products = newProducts;
     saveState();
     if(changed && !document.getElementById("product-modal-overlay")) render();
-  }catch(e){ console.warn("No se pudo sincronizar productos desde Supabase:", e); }
+  }catch(e){ console.warn("Sync Supabase:", e); }
 }
 
 async function apiSaveProduct(product){
@@ -562,27 +576,26 @@ async function apiSaveProduct(product){
       min_grams: product.minGrams||null,
     };
     if(product._apiId){
-      const { error } = await getDb().from('products').update(body).eq('id', product._apiId);
-      if(error) throw error;
+      await supaFetch('/products?id=eq.' + product._apiId, 'PATCH', body);
     }else{
-      const { data, error } = await getDb().from('products').insert([body]).select('id').single();
-      if(error) throw error;
-      product._apiId = data.id;
-      product.id = String(data.id);
-      saveState();
+      const data = await supaFetch('/products?select=id', 'POST', body);
+      if(data && data[0]){
+        product._apiId = data[0].id;
+        product.id = String(data[0].id);
+        saveState();
+      }
     }
   }catch(e){
-    console.warn("No se pudo guardar producto en Supabase:", e);
-    toast("Error Supabase: " + (e.message||JSON.stringify(e)), "err");
+    console.warn("Error guardando producto:", e);
+    alert("Error al guardar en Supabase:\n\n" + e.message);
   }
 }
 
 async function apiDeleteProduct(product){
   if(!product || !product._apiId) return;
   try{
-    const { error } = await getDb().from('products').delete().eq('id', product._apiId);
-    if(error) throw error;
-  }catch(e){ console.warn("No se pudo eliminar producto de Supabase:", e); }
+    await supaFetch('/products?id=eq.' + product._apiId, 'DELETE');
+  }catch(e){ console.warn("Error eliminando producto:", e); }
 }
 
 async function apiSaveOrder(order){
@@ -590,28 +603,26 @@ async function apiSaveOrder(order){
     const phone = order.phone;
     if(!phone) return;
     let clientId;
-    const { data: existing } = await getDb().from('clients').select('id').eq('phone', phone).limit(1);
+    const existing = await supaFetch('/clients?select=id&phone=eq.' + encodeURIComponent(phone) + '&limit=1', 'GET');
     if(existing && existing.length>0){
       clientId = existing[0].id;
     }else{
-      const { data: newClient, error: ce } = await getDb().from('clients').insert([{
+      const newClient = await supaFetch('/clients?select=id', 'POST', {
         full_name: order.name, phone, address: order.address||""
-      }]).select('id').single();
-      if(ce) throw ce;
-      clientId = newClient.id;
+      });
+      clientId = newClient[0].id;
     }
-    const { data: newOrder, error: oe } = await getDb().from('orders').insert([{
+    const newOrder = await supaFetch('/orders?select=id', 'POST', {
       client_id: clientId, total: order.total, status:'Pendiente', payment_method: order.payment_method||'Efectivo'
-    }]).select('id').single();
-    if(oe) throw oe;
+    });
+    const orderId = newOrder[0].id;
     const items = order.items
-      .map(it=>({ order_id: newOrder.id, product_id: Number(it._apiId||it.productId)||null, quantity: it.qty, unit_price: it.price }))
+      .map(it=>({ order_id: orderId, product_id: Number(it._apiId||it.productId)||null, quantity: it.qty, unit_price: it.price }))
       .filter(it=>it.product_id);
     if(items.length>0){
-      const { error: ie } = await getDb().from('order_items').insert(items);
-      if(ie) throw ie;
+      await supaFetch('/order_items', 'POST', items);
     }
-  }catch(e){ console.warn("No se pudo guardar pedido en Supabase:", e); }
+  }catch(e){ console.warn("Error guardando pedido:", e); }
 }
 </script>
 <script>
