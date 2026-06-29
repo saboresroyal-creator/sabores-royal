@@ -1520,8 +1520,10 @@ function updateProductPriceInline(productId, field, value){
   toast("Precio actualizado", "ok");
 }
 function deleteProduct(id){
+  const toDelete = state.products.find(p=>p.id===id);
   state.products = state.products.filter(p=>p.id!==id);
   saveState(); render();
+  if(toDelete) apiDeleteProduct(toDelete);
 }
 
 /* ---------- PRODUCT MODAL (create/edit) ---------- */
@@ -1634,17 +1636,21 @@ function saveProductModal(id){
   const minGrams = sellByWeight ? (Number(document.getElementById("pm-min-grams").value)|| 50) : null;
   if(!name){ toast("Ingresá un nombre", "err"); return; }
   if(sellByWeight && !pricePerKg){ toast("Ingresá el precio por kilo", "err"); return; }
+  let savedProduct;
   if(id){
     const p = state.products.find(pr=>pr.id===id);
     Object.assign(p, {name, section, cat, sub, price, wholesalePrice, stock, desc, sellByWeight, pricePerKg, wholesalePricePerKg, minGrams, photo:adminPhotoDraft.current||p.photo});
+    savedProduct = p;
   }else{
-    state.products.push({
+    savedProduct = {
       id: "p"+Date.now(), section, cat, sub, name, price, wholesalePrice, stock, desc,
       sellByWeight, pricePerKg, wholesalePricePerKg, minGrams,
       photo: adminPhotoDraft.current||""
-    });
+    };
+    state.products.push(savedProduct);
   }
   saveState();
+  apiSaveProduct(savedProduct);
   closeProductModal();
   render();
   toast("Producto guardado", "ok");
@@ -3127,6 +3133,7 @@ if(localStorage.getItem('_openAdmin') || new URLSearchParams(location.search).ge
   if(location.search) history.replaceState(null,'',location.pathname);
 }
 render();
+apiSyncProducts();
 
 if('serviceWorker' in navigator){
   navigator.serviceWorker.register('sw.js');
