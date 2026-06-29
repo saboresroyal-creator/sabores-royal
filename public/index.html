@@ -1572,7 +1572,7 @@ function openProductModal(id){
       <div id="pm-weight-price-group" style="display:${p&&p.sellByWeight?'block':'none'};">
         <div class="form-group"><label>Precio por kilo</label><input id="pm-price-per-kg" type="number" value="${p&&p.pricePerKg?p.pricePerKg:''}" placeholder="Ej: 8000"></div>
         <div class="form-group"><label>Precio mayorista por kilo (opcional)</label><input id="pm-wholesale-price-per-kg" type="number" value="${p&&p.wholesalePricePerKg?p.wholesalePricePerKg:''}" placeholder="Dejá vacío si no aplica"></div>
-        <div class="form-group"><label>Cantidad mínima a vender (gramos)</label><input id="pm-min-grams" type="number" value="${p&&p.minGrams?p.minGrams:100}" placeholder="100"></div>
+        <div class="form-group"><label>Cantidad mínima a vender (gramos)</label><input id="pm-min-grams" type="number" value="${p&&p.minGrams?p.minGrams:50}" placeholder="50"></div>
       </div>
 
       <div class="form-group"><label>Stock</label><input id="pm-stock" type="number" value="${p?p.stock:''}" placeholder="0"></div>
