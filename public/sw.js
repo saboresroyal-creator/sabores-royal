@@ -1,16 +1,16 @@
-const CACHE = 'sabores-royal-v1';
+const CACHE = 'sabores-royal-v2';
 const ASSETS = [
-  '/',
-  '/index.html',
-  '/admin.html',
-  '/manifest.json',
-  '/manifest-admin.json',
-  '/icon-clients-192.png',
-  '/icon-clients-512.png',
-  '/icon-admin-192.png',
-  '/icon-admin-512.png',
-  '/apple-touch-icon.png',
-  '/apple-touch-icon-admin.png',
+  './',
+  './index.html',
+  './admin.html',
+  './manifest.json',
+  './manifest-admin.json',
+  './icon-clients-192.png',
+  './icon-clients-512.png',
+  './icon-admin-192.png',
+  './icon-admin-512.png',
+  './apple-touch-icon.png',
+  './apple-touch-icon-admin.png',
 ];
 
 self.addEventListener('install', e => {
@@ -40,7 +40,7 @@ self.addEventListener('fetch', e => {
           caches.open(CACHE).then(c => c.put(e.request, clone));
         }
         return res;
-      }).catch(() => caches.match('/index.html'));
+      }).catch(() => caches.match('./index.html'));
     })
   );
 });
