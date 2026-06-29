@@ -3102,14 +3102,15 @@ function sendPriceListWA(){
    INIT
    ========================================================= */
 loadState();
-if(localStorage.getItem('_openAdmin')){
+if(localStorage.getItem('_openAdmin') || new URLSearchParams(location.search).get('mode')==='admin'){
   localStorage.removeItem('_openAdmin');
   state.route = {screen:'admin'};
+  if(location.search) history.replaceState(null,'',location.pathname);
 }
 render();
 
 if('serviceWorker' in navigator){
-  navigator.serviceWorker.register('/sw.js');
+  navigator.serviceWorker.register('sw.js');
 }
 </script>
 </body>
