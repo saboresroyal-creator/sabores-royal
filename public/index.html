@@ -615,6 +615,7 @@ async function apiSaveOrder(order){
    NAVIGATION
    ========================================================= */
 function nav(screen, params){
+  if(screen==='admin' && !IS_ADMIN_APP) return;
   state.route = Object.assign({screen}, params||{});
   render();
   window.scrollTo(0,0);
@@ -840,9 +841,6 @@ function renderHome(){
       <img src="${LOGO_DATA_URL}" class="home-logo" alt="Sabores Royal">
       <h1>Sabores Royal</h1>
       <p>Maipú 734 · Rosario</p>
-      <button onclick="nav('admin')" style="position:absolute; top:14px; right:14px; width:34px; height:34px; border-radius:10px; background:rgba(255,255,255,0.06); border:1px solid var(--glass-bd); display:flex; align-items:center; justify-content:center; color:rgba(255,255,255,0.4);">
-        <span style="width:16px; height:16px; display:inline-flex;">${ic('lock')}</span>
-      </button>
     </div>
     ${state.banners && state.banners.length>0 ? `
       <div style="display:flex; gap:12px; overflow-x:auto; padding:0 16px 16px; scroll-snap-type:x mandatory;">
@@ -3129,10 +3127,14 @@ function sendPriceListWA(){
    INIT
    ========================================================= */
 loadState();
-if(localStorage.getItem('_openAdmin') || new URLSearchParams(location.search).get('mode')==='admin'){
+const IS_ADMIN_APP = !!localStorage.getItem('_openAdmin') || new URLSearchParams(location.search).get('mode')==='admin';
+if(IS_ADMIN_APP){
   localStorage.removeItem('_openAdmin');
   state.route = {screen:'admin'};
   if(location.search) history.replaceState(null,'',location.pathname);
+}else{
+  if(state.route && state.route.screen==='admin') state.route = {screen:'home'};
+  state.adminAuthed = false;
 }
 render();
 apiSyncProducts();
