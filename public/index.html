@@ -1,4 +1,4 @@
-<!DOCTYPE html>
+﻿<!DOCTYPE html>
 <html lang="es">
 <head>
 <meta charset="UTF-8">
@@ -663,7 +663,7 @@ function setCartGrams(productId, grams){
   const item = state.cart.find(c=>c.id===productId && c.grams);
   if(!item) return;
   const p = state.products.find(pr=>pr.id===productId);
-  const min = p?.minGrams || 100;
+  const min = p?.minGrams || 50;
   if(grams<min){ state.cart = state.cart.filter(c=>c!==item); }
   else{ item.grams = grams; }
   saveState(); render();
@@ -946,7 +946,7 @@ function renderProductDetail(id){
   const p = state.products.find(pr=>pr.id===id);
   if(!p) return renderHome();
   if(p.sellByWeight){
-    const grams = state.route.grams || p.minGrams || 100;
+    const grams = state.route.grams || p.minGrams || 50;
     const pricePerKgEff = effectivePriceForWeight(p);
     const lineTotal = (pricePerKgEff/1000)*grams;
     return `
@@ -970,7 +970,7 @@ function renderProductDetail(id){
         <div style="display:flex; gap:8px; margin:10px 0;">
           ${[100,250,500,1000].map(g=>`<button class="chip ${grams===g?'active':''}" onclick="setDetailGrams(${g})">${g>=1000?(g/1000)+'kg':g+'g'}</button>`).join('')}
         </div>
-        <p style="font-size:11.5px; color:rgba(255,255,255,0.4); margin-bottom:6px;">Mínimo: ${p.minGrams||100}g</p>
+        <p style="font-size:11.5px; color:rgba(255,255,255,0.4); margin-bottom:6px;">Mínimo: ${p.minGrams||50}g</p>
       </div>
       <div class="sticky-cta">
         <button class="btn-primary" onclick="addToCartByWeight('${p.id}', ${grams}); nav('catalog',{section:'${p.section}'})">${ic('cart2')} Agregar al carrito — ${money(lineTotal)}</button>
@@ -1007,13 +1007,13 @@ function changeDetailQty(delta){
 }
 function changeDetailGrams(delta){
   const p = state.products.find(pr=>pr.id===state.route.id);
-  const min = p?.minGrams || 100;
+  const min = p?.minGrams || 50;
   const g = Math.max(min, (state.route.grams||min)+delta);
   state.route.grams = g; render();
 }
 function setDetailGrams(val){
   const p = state.products.find(pr=>pr.id===state.route.id);
-  const min = p?.minGrams || 100;
+  const min = p?.minGrams || 50;
   state.route.grams = Math.max(min, Number(val)||min);
   render();
 }
@@ -1047,7 +1047,7 @@ function renderCart(){
         const p = state.products.find(pr=>pr.id===item.id);
         if(!p) return '';
         if(item.grams){
-          const min = p.minGrams||100;
+          const min = p.minGrams|| 50;
           return `<div class="cart-item">
             <img src="${p.photo||''}" onerror="this.style.display='none'">
             <div class="cart-item-body">
@@ -1631,7 +1631,7 @@ function saveProductModal(id){
   const pricePerKg = sellByWeight ? (Number(document.getElementById("pm-price-per-kg").value)||0) : null;
   const wholesalePerKgRaw = sellByWeight ? document.getElementById("pm-wholesale-price-per-kg").value.trim() : "";
   const wholesalePricePerKg = wholesalePerKgRaw ? Number(wholesalePerKgRaw) : null;
-  const minGrams = sellByWeight ? (Number(document.getElementById("pm-min-grams").value)||100) : null;
+  const minGrams = sellByWeight ? (Number(document.getElementById("pm-min-grams").value)|| 50) : null;
   if(!name){ toast("Ingresá un nombre", "err"); return; }
   if(sellByWeight && !pricePerKg){ toast("Ingresá el precio por kilo", "err"); return; }
   if(id){
