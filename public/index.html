@@ -570,7 +570,10 @@ async function apiSaveProduct(product){
       product.id = String(data.id);
       saveState();
     }
-  }catch(e){ console.warn("No se pudo guardar producto en Supabase:", e); }
+  }catch(e){
+    console.warn("No se pudo guardar producto en Supabase:", e);
+    toast("Error Supabase: " + (e.message||JSON.stringify(e)), "err");
+  }
 }
 
 async function apiDeleteProduct(product){
