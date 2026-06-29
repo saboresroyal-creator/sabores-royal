@@ -545,13 +545,14 @@ async function apiSyncProducts(){
 
 async function apiSaveProduct(product){
   try{
+    const photoUrl = (product.photo && !product.photo.startsWith('data:')) ? product.photo : null;
     const body = {
       name: product.name,
       description: product.desc||"",
       price: product.price,
       wholesale_price: product.wholesalePrice||null,
       stock: product.stock||0,
-      photo_url: product.photo||null,
+      photo_url: photoUrl,
       section: product.section,
       cat: product.cat,
       sub: product.sub||null,
@@ -3134,6 +3135,7 @@ const IS_ADMIN_APP = !!localStorage.getItem('_openAdmin') || new URLSearchParams
 if(IS_ADMIN_APP){
   localStorage.removeItem('_openAdmin');
   state.route = {screen:'admin'};
+  state.adminAuthed = false;
   if(location.search) history.replaceState(null,'',location.pathname);
 }else{
   if(state.route && state.route.screen==='admin') state.route = {screen:'home'};
