@@ -506,6 +506,8 @@ function loadState(){
 /* =========================================================
    API SYNC — sincronización directa con Supabase
    ========================================================= */
+const _pendingSaves = new Set();
+
 async function supaFetch(path, method, body){
   const url = SUPABASE_URL + '/rest/v1' + path;
   const headers = {
@@ -548,7 +550,7 @@ async function apiSyncProducts(){
       wholesalePricePerKg: p.wholesale_price_per_kg ? Number(p.wholesale_price_per_kg) : null,
       minGrams: p.min_grams||null,
     }));
-    const localOnly = state.products.filter(p=>!p._apiId);
+    const localOnly = state.products.filter(p=>!p._apiId && !_pendingSaves.has(p.id));
     const newProducts = [...apiMapped, ...localOnly];
     const changed = JSON.stringify(newProducts) !== JSON.stringify(state.products);
     state.products = newProducts;
@@ -558,6 +560,7 @@ async function apiSyncProducts(){
 }
 
 async function apiSaveProduct(product){
+  _pendingSaves.add(product.id);
   try{
     const photoUrl = (product.photo && !product.photo.startsWith('data:')) ? product.photo : null;
     const body = {
@@ -580,14 +583,20 @@ async function apiSaveProduct(product){
     }else{
       const data = await supaFetch('/products?select=id', 'POST', body);
       if(data && data[0]){
+        const oldId = product.id;
         product._apiId = data[0].id;
         product.id = String(data[0].id);
+        _pendingSaves.delete(oldId);
+        _pendingSaves.add(product.id);
+        state.products = state.products.filter(p=>p===product || p.id!==product.id);
         saveState();
       }
     }
   }catch(e){
     console.warn("Error guardando producto:", e);
     alert("Error al guardar en Supabase:\n\n" + e.message);
+  }finally{
+    _pendingSaves.delete(product.id);
   }
 }
 
