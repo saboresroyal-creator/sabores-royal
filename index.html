@@ -533,7 +533,9 @@ async function apiSyncProducts(){
   try{
     const data = await supaFetch('/products?select=*', 'GET');
     if(!data || data.length===0) return;
-    const apiMapped = data.map(p=>({
+    const apiMapped = data.map(p=>{
+      const local = state.products.find(lp=>lp._apiId===p.id);
+      return {
       id: String(p.id),
       _apiId: p.id,
       name: p.name,
@@ -541,7 +543,7 @@ async function apiSyncProducts(){
       price: Number(p.price)||0,
       wholesalePrice: p.wholesale_price ? Number(p.wholesale_price) : null,
       stock: p.stock||0,
-      photo: p.photo_url||"",
+      photo: p.photo_url || (local?local.photo:"") || "",
       section: p.section||"market",
       cat: p.cat||"General",
       sub: p.sub||"",
@@ -549,7 +551,7 @@ async function apiSyncProducts(){
       pricePerKg: p.price_per_kg ? Number(p.price_per_kg) : null,
       wholesalePricePerKg: p.wholesale_price_per_kg ? Number(p.wholesale_price_per_kg) : null,
       minGrams: p.min_grams||null,
-    }));
+    };});
     const localOnly = state.products.filter(p=>!p._apiId && !_pendingSaves.has(p.id));
     const newProducts = [...apiMapped, ...localOnly];
     const changed = JSON.stringify(newProducts) !== JSON.stringify(state.products);
@@ -593,7 +595,7 @@ async function apiSaveProduct(product){
       price: product.price,
       wholesale_price: product.wholesalePrice||null,
       stock: product.stock||0,
-      photo_url: photoUrl,
+      ...(photoUrl !== null ? {photo_url: photoUrl} : {}),
       section: product.section,
       cat: product.cat,
       sub: product.sub||null,
