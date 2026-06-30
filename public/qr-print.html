@@ -4,227 +4,220 @@
 <meta charset="UTF-8">
 <title>QR Sabores Royal</title>
 <style>
-  @import url('https://fonts.googleapis.com/css2?family=Playfair+Display:wght@700;900&family=Inter:wght@400;500;600;700&display=swap');
+  @import url('https://fonts.googleapis.com/css2?family=Cormorant+Garamond:wght@600;700&family=Montserrat:wght@400;500;600;700;800&display=swap');
 
   *{ margin:0; padding:0; box-sizing:border-box; }
 
   body{
-    font-family:'Inter', sans-serif;
-    background:#e8e0d0;
+    font-family:'Montserrat', sans-serif;
+    background:#d6cfc4;
     display:flex; align-items:center; justify-content:center;
-    min-height:100vh;
-    padding:40px 20px;
+    min-height:100vh; padding:40px 20px;
   }
 
   .poster{
-    width:380px;
-    background:#0b1730;
-    border-radius:28px;
+    width:400px;
+    background:#faf8f4;
+    border-radius:4px;
     overflow:hidden;
+    box-shadow:0 30px 90px rgba(0,0,0,0.3), 0 2px 6px rgba(0,0,0,0.15);
     position:relative;
-    box-shadow:0 24px 80px rgba(0,0,0,0.4);
   }
 
-  /* Franja dorada superior */
-  .gold-bar{ height:6px; background:linear-gradient(90deg,#a07820,#e8c84a,#c5a028,#f0d060,#a07820); }
+  /* ── FRANJA SUPERIOR ── */
+  .top-stripe{
+    height:8px;
+    background:linear-gradient(90deg, #8a6a10 0%, #d4a820 30%, #f0cc50 50%, #d4a820 70%, #8a6a10 100%);
+  }
 
-  /* Header */
+  /* ── CABECERA ── */
   .header{
-    padding:36px 28px 28px;
+    background:#0d1e48;
+    padding:32px 32px 28px;
     text-align:center;
     position:relative;
-    background:radial-gradient(ellipse at 50% -10%, rgba(197,160,40,0.22) 0%, transparent 65%);
+    overflow:hidden;
+  }
+  .header::after{
+    content:'';
+    position:absolute; bottom:0; left:0; right:0; height:1px;
+    background:linear-gradient(90deg,transparent,rgba(212,168,32,0.6),transparent);
   }
 
+  /* patrón sutil */
   .header::before{
     content:'';
-    position:absolute; inset:0;
-    background:url("data:image/svg+xml,%3Csvg width='60' height='60' viewBox='0 0 60 60' xmlns='http://www.w3.org/2000/svg'%3E%3Cg fill='none' fill-rule='evenodd'%3E%3Cg fill='%23c5a028' fill-opacity='0.04'%3E%3Cpath d='M36 34v-4h-2v4h-4v2h4v4h2v-4h4v-2h-4zm0-30V0h-2v4h-4v2h4v4h2V6h4V4h-4zM6 34v-4H4v4H0v2h4v4h2v-4h4v-2H6zM6 4V0H4v4H0v2h4v4h2V6h4V4H6z'/%3E%3C/g%3E%3C/g%3E%3C/svg%3E");
+    position:absolute; inset:0; opacity:.04;
+    background-image:repeating-linear-gradient(45deg,#d4a820 0,#d4a820 1px,transparent 0,transparent 50%);
+    background-size:14px 14px;
   }
 
-  .logo-wrap{
-    position:relative; display:inline-block;
-    margin-bottom:18px;
-  }
-  .logo-wrap img{
-    width:100px; height:100px;
-    border-radius:24px;
-    display:block;
-    border:3px solid rgba(197,160,40,0.5);
-    box-shadow:0 0 0 6px rgba(197,160,40,0.08), 0 12px 40px rgba(0,0,0,0.5);
-  }
-  .logo-glow{
-    position:absolute; inset:-8px;
-    border-radius:32px;
-    background:radial-gradient(circle, rgba(197,160,40,0.18), transparent 70%);
+  .logo{
+    width:96px; height:96px;
+    border-radius:22px;
+    border:2.5px solid rgba(212,168,32,0.55);
+    display:block; margin:0 auto 16px;
+    position:relative; z-index:1;
+    box-shadow:0 4px 24px rgba(0,0,0,0.4);
   }
 
-  .brand-name{
-    font-family:'Playfair Display', serif;
-    font-size:28px; font-weight:900;
-    color:#ffffff;
-    letter-spacing:.5px;
-    line-height:1;
-    margin-bottom:6px;
-  }
-  .brand-name span{ color:#c5a028; }
-
-  .tagline{
-    font-size:10.5px; font-weight:600;
-    color:rgba(197,160,40,0.7);
-    letter-spacing:3px;
-    text-transform:uppercase;
-    margin-bottom:4px;
+  .store-name{
+    font-family:'Cormorant Garamond', serif;
+    font-size:34px; font-weight:700;
+    color:#ffffff; line-height:1;
+    position:relative; z-index:1;
+    letter-spacing:1px;
   }
 
-  .address{
-    font-size:11px; color:rgba(255,255,255,0.35);
-    letter-spacing:.5px;
+  .store-sub{
+    font-size:9px; font-weight:700;
+    color:#d4a820; letter-spacing:4px;
+    text-transform:uppercase; margin-top:8px;
+    position:relative; z-index:1;
   }
 
-  /* Divisor */
-  .divider{
-    display:flex; align-items:center; gap:12px;
-    padding:0 28px; margin:4px 0;
-  }
-  .divider-line{ flex:1; height:1px; background:linear-gradient(90deg,transparent,rgba(197,160,40,0.35),transparent); }
-  .divider-icon{ color:rgba(197,160,40,0.6); font-size:13px; }
-
-  /* QR section */
-  .qr-section{
-    padding:20px 28px 24px;
-    display:flex; flex-direction:column; align-items:center; gap:18px;
+  .store-address{
+    font-size:10.5px; color:rgba(255,255,255,0.4);
+    margin-top:5px; position:relative; z-index:1;
+    letter-spacing:.3px;
   }
 
-  .qr-cta{
-    font-size:13px; font-weight:600; color:rgba(255,255,255,0.7);
-    letter-spacing:.3px; text-align:center;
+  /* ── CUERPO CENTRAL ── */
+  .body{
+    padding:32px 32px 28px;
+    display:flex; flex-direction:column; align-items:center; gap:20px;
+    background:#faf8f4;
   }
-  .qr-cta strong{ color:#fff; font-size:14px; display:block; margin-bottom:3px; }
 
-  .qr-frame{
+  .cta-text{
+    text-align:center;
+  }
+  .cta-text h2{
+    font-family:'Cormorant Garamond', serif;
+    font-size:22px; font-weight:700;
+    color:#0d1e48; line-height:1.2;
+    margin-bottom:5px;
+  }
+  .cta-text p{
+    font-size:11px; color:#888; font-weight:500; letter-spacing:.2px;
+  }
+
+  /* QR */
+  .qr-wrap{
     position:relative;
-    padding:14px;
-    background:#ffffff;
-    border-radius:20px;
-    box-shadow:0 8px 32px rgba(0,0,0,0.4);
+    background:#fff;
+    padding:16px;
+    border:1px solid #e8e0d0;
+    border-radius:6px;
+    box-shadow:0 4px 20px rgba(0,0,0,0.08);
   }
-  .qr-frame img{
-    width:200px; height:200px;
-    display:block; border-radius:4px;
-  }
-  /* Esquinas decorativas */
-  .qr-frame::before, .qr-frame::after{
-    content:'';
+  .qr-wrap img{ width:200px; height:200px; display:block; }
+
+  /* esquinas doradas */
+  .corner{
     position:absolute;
-    width:22px; height:22px;
-    border-color:#c5a028;
+    width:18px; height:18px;
+    border-color:#d4a820;
     border-style:solid;
   }
-  .qr-frame::before{ top:-3px; left:-3px; border-width:3px 0 0 3px; border-radius:4px 0 0 0; }
-  .qr-frame::after{ bottom:-3px; right:-3px; border-width:0 3px 3px 0; border-radius:0 0 4px 0; }
+  .corner.tl{ top:-1px; left:-1px; border-width:3px 0 0 3px; }
+  .corner.tr{ top:-1px; right:-1px; border-width:3px 3px 0 0; }
+  .corner.bl{ bottom:-1px; left:-1px; border-width:0 0 3px 3px; }
+  .corner.br{ bottom:-1px; right:-1px; border-width:0 3px 3px 0; }
 
-  /* Steps */
+  /* pasos */
   .steps{
-    display:flex; justify-content:center; gap:6px; width:100%;
+    display:flex; gap:0; width:100%;
+    border:1px solid #e8e0d0; border-radius:6px; overflow:hidden;
   }
   .step{
-    flex:1; display:flex; flex-direction:column; align-items:center; gap:7px;
-    background:rgba(255,255,255,0.05);
-    border:1px solid rgba(255,255,255,0.08);
-    border-radius:14px; padding:12px 6px;
+    flex:1; padding:12px 8px; text-align:center;
+    border-right:1px solid #e8e0d0; background:#fff;
   }
-  .step-num{
-    width:26px; height:26px; border-radius:50%;
-    background:linear-gradient(135deg,#c5a028,#e8c84a);
-    color:#0b1730; font-size:12px; font-weight:800;
-    display:flex; align-items:center; justify-content:center;
+  .step:last-child{ border-right:none; }
+  .step-n{
+    font-size:18px; font-weight:800; color:#d4a820;
+    font-family:'Cormorant Garamond',serif; line-height:1; margin-bottom:5px;
   }
-  .step-text{ font-size:10px; color:rgba(255,255,255,0.6); text-align:center; line-height:1.3; font-weight:500; }
+  .step-t{ font-size:9.5px; color:#555; font-weight:600; line-height:1.3; }
 
-  /* Puntos Royal */
-  .puntos-section{
-    margin:0 28px 28px;
-    border-radius:18px;
+  /* ── PUNTOS ROYAL ── */
+  .puntos{
+    margin:0 32px 32px;
+    border:1.5px solid #d4a820;
+    border-radius:4px;
     overflow:hidden;
-    border:1.5px solid rgba(197,160,40,0.4);
   }
-  .puntos-header{
-    background:linear-gradient(90deg,rgba(197,160,40,0.25),rgba(197,160,40,0.1));
-    padding:11px 16px;
-    display:flex; align-items:center; gap:10px;
-    border-bottom:1px solid rgba(197,160,40,0.25);
-  }
-  .puntos-crown{ font-size:20px; }
-  .puntos-title{
-    font-family:'Playfair Display', serif;
-    font-size:14px; font-weight:700; color:#e8c84a;
-    line-height:1.1;
-  }
-  .puntos-sub{ font-size:10px; color:rgba(197,160,40,0.7); margin-top:1px; }
 
-  .puntos-items{ padding:4px 0; }
-  .puntos-item{
+  .puntos-head{
+    background:#0d1e48;
+    padding:12px 18px;
     display:flex; align-items:center; gap:12px;
-    padding:9px 16px;
-    border-bottom:1px solid rgba(255,255,255,0.05);
   }
-  .puntos-item:last-child{ border-bottom:none; }
-  .puntos-item-icon{
-    width:30px; height:30px; border-radius:10px; flex:none;
-    background:rgba(197,160,40,0.12);
-    display:flex; align-items:center; justify-content:center;
-    font-size:14px;
+  .puntos-head svg{ flex:none; }
+  .puntos-head-text h3{
+    font-family:'Cormorant Garamond',serif;
+    font-size:16px; font-weight:700; color:#d4a820; line-height:1;
   }
-  .puntos-item-text{ font-size:11.5px; color:rgba(255,255,255,0.75); line-height:1.35; }
-  .puntos-item-text b{ color:#fff; font-weight:600; }
+  .puntos-head-text p{
+    font-size:9.5px; color:rgba(255,255,255,0.45); margin-top:2px; letter-spacing:.3px;
+  }
 
-  /* Footer */
+  .puntos-body{ background:#fff; }
+  .puntos-row{
+    display:flex; align-items:center; gap:14px;
+    padding:11px 18px;
+    border-bottom:1px solid #f0ebe0;
+  }
+  .puntos-row:last-child{ border-bottom:none; }
+  .puntos-row svg{ flex:none; }
+  .puntos-row-text{ font-size:11px; color:#333; line-height:1.4; }
+  .puntos-row-text b{ color:#0d1e48; font-weight:700; }
+
+  /* ── FOOTER ── */
   .footer{
-    padding:14px 28px 16px;
-    background:rgba(0,0,0,0.25);
+    background:#f0ebe0;
+    padding:12px 32px;
     text-align:center;
-    border-top:1px solid rgba(255,255,255,0.06);
+    border-top:1px solid #e0d8cc;
   }
-  .footer p{ font-size:10px; color:rgba(255,255,255,0.25); letter-spacing:.5px; }
-  .footer strong{ color:rgba(197,160,40,0.6); }
+  .footer p{ font-size:9.5px; color:#aaa; letter-spacing:.5px; }
 
-  /* Franja dorada inferior */
-  .gold-bar-bottom{ height:4px; background:linear-gradient(90deg,#a07820,#e8c84a,#c5a028,#f0d060,#a07820); }
+  .bot-stripe{
+    height:6px;
+    background:linear-gradient(90deg, #8a6a10 0%, #d4a820 30%, #f0cc50 50%, #d4a820 70%, #8a6a10 100%);
+  }
 
   @media print{
-    body{ background:#ccc; padding:0; min-height:unset; }
-    .poster{ box-shadow:none; border-radius:0; width:100%; max-width:380px; }
+    body{ background:#bbb; padding:0; min-height:unset; }
+    .poster{ box-shadow:none; margin:0 auto; }
   }
 </style>
 </head>
 <body>
 <div class="poster">
-  <div class="gold-bar"></div>
+
+  <div class="top-stripe"></div>
 
   <div class="header">
-    <div class="logo-wrap">
-      <div class="logo-glow"></div>
-      <img src="icon-clients-192.png" alt="Sabores Royal">
-    </div>
-    <div class="brand-name">Sabores <span>Royal</span></div>
-    <div class="tagline">Tienda de especialidades</div>
-    <div class="address">Maipú 734 · Rosario, Santa Fe</div>
+    <img class="logo" src="icon-clients-192.png" alt="Sabores Royal">
+    <div class="store-name">Sabores Royal</div>
+    <div class="store-sub">Tienda de especialidades</div>
+    <div class="store-address">Maipú 734 &nbsp;·&nbsp; Rosario, Santa Fe</div>
   </div>
 
-  <div class="divider">
-    <div class="divider-line"></div>
-    <div class="divider-icon">✦</div>
-    <div class="divider-line"></div>
-  </div>
+  <div class="body">
 
-  <div class="qr-section">
-    <div class="qr-cta">
-      <strong>¡Pedí desde tu celular!</strong>
-      Escaneá el código y accedé a nuestro catálogo
+    <div class="cta-text">
+      <h2>Accedé a nuestro catálogo<br>desde tu celular</h2>
+      <p>Escaneá el código con la cámara de tu teléfono</p>
     </div>
 
-    <div class="qr-frame">
+    <div class="qr-wrap">
+      <div class="corner tl"></div>
+      <div class="corner tr"></div>
+      <div class="corner bl"></div>
+      <div class="corner br"></div>
       <img
         src="https://api.qrserver.com/v1/create-qr-code/?size=400x400&qzone=1&ecc=M&data=https%3A%2F%2Fsensational-selkie-f824d8.netlify.app"
         alt="QR Sabores Royal"
@@ -233,69 +226,59 @@
 
     <div class="steps">
       <div class="step">
-        <div class="step-num">1</div>
-        <div class="step-text">Escaneá el QR con tu cámara</div>
+        <div class="step-n">1</div>
+        <div class="step-t">Escaneá<br>el código</div>
       </div>
       <div class="step">
-        <div class="step-num">2</div>
-        <div class="step-text">Creá tu cuenta gratis</div>
+        <div class="step-n">2</div>
+        <div class="step-t">Creá tu<br>cuenta gratis</div>
       </div>
       <div class="step">
-        <div class="step-num">3</div>
-        <div class="step-text">¡Explorá y pedí!</div>
+        <div class="step-n">3</div>
+        <div class="step-t">Explorá<br>y pedí</div>
       </div>
     </div>
+
   </div>
 
-  <div class="puntos-section">
-    <div class="puntos-header">
-      <!-- Diamond icon -->
-      <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="#e8c84a" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round">
-        <polygon points="12 2 19 8 12 22 5 8 12 2"/>
-        <polyline points="5 8 12 13 19 8"/>
+  <div class="puntos">
+    <div class="puntos-head">
+      <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="#d4a820" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round">
+        <polygon points="12 2 15.09 8.26 22 9.27 17 14.14 18.18 21.02 12 17.77 5.82 21.02 7 14.14 2 9.27 8.91 8.26 12 2"/>
       </svg>
-      <div>
-        <div class="puntos-title">Programa Puntos Royal</div>
-        <div class="puntos-sub">Beneficios exclusivos para clientes</div>
+      <div class="puntos-head-text">
+        <h3>Programa Puntos Royal</h3>
+        <p>Beneficios exclusivos para nuestros clientes</p>
       </div>
     </div>
-    <div class="puntos-items">
-      <div class="puntos-item">
-        <div class="puntos-item-icon">
-          <!-- Coin/currency icon -->
-          <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="#c5a028" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round">
-            <circle cx="12" cy="12" r="10"/>
-            <path d="M12 6v2m0 8v2M9 9.5A2.5 2.5 0 0112 7a2.5 2.5 0 010 5 2.5 2.5 0 010 5 2.5 2.5 0 01-3-2.5"/>
-          </svg>
-        </div>
-        <div class="puntos-item-text"><b>Ganás puntos</b> con cada compra — $100 = 1 punto</div>
+    <div class="puntos-body">
+      <div class="puntos-row">
+        <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="#d4a820" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round">
+          <line x1="12" y1="1" x2="12" y2="23"/><path d="M17 5H9.5a3.5 3.5 0 000 7h5a3.5 3.5 0 010 7H6"/>
+        </svg>
+        <div class="puntos-row-text"><b>Acumulás puntos</b> con cada compra — $100 = 1 punto</div>
       </div>
-      <div class="puntos-item">
-        <div class="puntos-item-icon">
-          <!-- Tag/discount icon -->
-          <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="#c5a028" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round">
-            <path d="M20.59 13.41l-7.17 7.17a2 2 0 01-2.83 0L2 12V2h10l8.59 8.59a2 2 0 010 2.82z"/>
-            <line x1="7" y1="7" x2="7.01" y2="7"/>
-          </svg>
-        </div>
-        <div class="puntos-item-text"><b>Canjeá tus puntos</b> por descuentos y premios</div>
+      <div class="puntos-row">
+        <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="#d4a820" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round">
+          <polyline points="20 12 20 22 4 22 4 12"/><rect x="2" y="7" width="20" height="5"/><line x1="12" y1="22" x2="12" y2="7"/><path d="M12 7H7.5a2.5 2.5 0 010-5C11 2 12 7 12 7z"/><path d="M12 7h4.5a2.5 2.5 0 000-5C13 2 12 7 12 7z"/>
+        </svg>
+        <div class="puntos-row-text"><b>Canjeá tus puntos</b> por descuentos y premios</div>
       </div>
-      <div class="puntos-item">
-        <div class="puntos-item-icon">
-          <!-- Shield/medal icon -->
-          <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="#c5a028" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round">
-            <path d="M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10z"/>
-          </svg>
-        </div>
-        <div class="puntos-item-text">Tres niveles: <b>Bronce · Plata · Oro</b></div>
+      <div class="puntos-row">
+        <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="#d4a820" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round">
+          <path d="M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10z"/>
+        </svg>
+        <div class="puntos-row-text">Alcanzá los niveles <b>Bronce, Plata y Oro</b></div>
       </div>
     </div>
   </div>
 
   <div class="footer">
-    <p><strong>sensational-selkie-f824d8.netlify.app</strong></p>
+    <p>sensational-selkie-f824d8.netlify.app</p>
   </div>
-  <div class="gold-bar-bottom"></div>
+
+  <div class="bot-stripe"></div>
+
 </div>
 </body>
 </html>
