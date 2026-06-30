@@ -1013,42 +1013,48 @@ function renderBottomNav(){
 
 /* ---------- BIENVENIDA / LOGIN CLIENTE ---------- */
 function renderClientWelcome(){
+  const inputStyle = "width:100%; padding:16px 18px; border-radius:18px; background:rgba(255,255,255,0.07); border:1.5px solid rgba(255,255,255,0.13); color:var(--cream); outline:none; font-size:15px; letter-spacing:.2px; transition:border-color .2s;";
+  const labelStyle = "display:block; font-size:11.5px; font-weight:700; color:rgba(255,255,255,0.45); letter-spacing:.8px; text-transform:uppercase; margin-bottom:8px;";
+  const fieldStyle = "display:flex; flex-direction:column; width:100%;";
   const mode = state.route.accMode;
   if(mode === "register"){
     const phone = state.route.accPhone || "";
     return `
-    <div class="screen" style="display:flex; flex-direction:column; align-items:center; justify-content:center; min-height:100vh; padding:32px 24px; text-align:center; background:radial-gradient(circle at 50% 10%, rgba(197,160,40,0.18), transparent 70%);">
-      <img src="${LOGO_DATA_URL}" style="width:90px; border-radius:20px; margin-bottom:18px;">
-      <h2 style="color:var(--white); font-size:20px; margin-bottom:6px;">Creá tu cuenta</h2>
-      <p style="color:rgba(255,255,255,0.5); font-size:13px; margin-bottom:24px;">Solo la primera vez. Después ingresás directo.</p>
-      <div style="width:100%; max-width:320px; display:flex; flex-direction:column; gap:10px;">
-        <div class="form-group" style="margin:0;"><label>Nombre completo *</label><input id="reg-name" placeholder="Ej: María González" autocomplete="name"></div>
-        <div class="form-group" style="margin:0;"><label>Teléfono *</label>
-          <div style="display:flex; gap:8px;">
-            <div style="padding:13px 14px; border-radius:12px; background:var(--glass); border:1px solid var(--glass-bd); color:var(--cream); font-weight:700;">+54</div>
-            <input id="reg-phone" value="${phone.replace('+54','')}" placeholder="11 1234 5678" style="flex:1;" type="tel" autocomplete="tel">
+    <div class="screen" style="display:flex; flex-direction:column; align-items:center; justify-content:center; min-height:100vh; padding:36px 28px; text-align:center; background:radial-gradient(circle at 50% 5%, rgba(197,160,40,0.2), transparent 65%);">
+      <img src="${LOGO_DATA_URL}" style="width:82px; border-radius:20px; margin-bottom:16px; box-shadow:0 6px 24px rgba(0,0,0,0.4);">
+      <h2 style="color:var(--white); font-size:22px; font-weight:800; margin-bottom:5px;">Creá tu cuenta</h2>
+      <p style="color:rgba(255,255,255,0.45); font-size:13px; margin-bottom:30px;">Solo la primera vez. Después ingresás directo.</p>
+      <div style="width:100%; max-width:340px; display:flex; flex-direction:column; gap:14px;">
+        <div style="${fieldStyle}"><span style="${labelStyle}">Nombre completo *</span><input id="reg-name" placeholder="Ej: María González" autocomplete="name" style="${inputStyle}"></div>
+        <div style="${fieldStyle}"><span style="${labelStyle}">Teléfono *</span>
+          <div style="display:flex; gap:10px; align-items:center;">
+            <div style="padding:16px 16px; border-radius:18px; background:rgba(255,255,255,0.07); border:1.5px solid rgba(255,255,255,0.13); color:var(--gold2); font-weight:700; font-size:15px; flex:none;">+54</div>
+            <input id="reg-phone" value="${phone.replace('+54','')}" placeholder="11 1234 5678" type="tel" autocomplete="tel" style="${inputStyle}">
           </div>
         </div>
-        <div class="form-group" style="margin:0;"><label>DNI (opcional)</label><input id="reg-doc" placeholder="Ej: 30 123 456" type="tel" autocomplete="off"></div>
-        <div class="form-group" style="margin:0;"><label>Ciudad (opcional)</label><input id="reg-city" placeholder="Ej: Rosario" autocomplete="address-level2"></div>
-        <button class="btn-primary" style="margin-top:6px;" onclick="completeRegistration()">Crear cuenta y entrar</button>
-        <button class="btn-secondary" style="font-size:12.5px;" onclick="state.route.accMode=null; render()">Volver</button>
+        <div style="${fieldStyle}"><span style="${labelStyle}">DNI (opcional)</span><input id="reg-doc" placeholder="Ej: 30 123 456" type="tel" autocomplete="off" style="${inputStyle}"></div>
+        <div style="${fieldStyle}"><span style="${labelStyle}">Ciudad (opcional)</span><input id="reg-city" placeholder="Ej: Rosario" autocomplete="address-level2" style="${inputStyle}"></div>
+        <button class="btn-primary" style="margin-top:4px; padding:16px; font-size:15px; border-radius:18px;" onclick="completeRegistration()">Crear cuenta y entrar</button>
+        <button class="btn-secondary" style="font-size:13px; border-radius:18px;" onclick="state.route.accMode=null; render()">Volver</button>
       </div>
     </div>`;
   }
   return `
-  <div class="screen" style="display:flex; flex-direction:column; align-items:center; justify-content:center; min-height:100vh; padding:32px 24px; text-align:center; background:radial-gradient(circle at 50% 10%, rgba(197,160,40,0.18), transparent 70%);">
-    <img src="${LOGO_DATA_URL}" style="width:110px; border-radius:24px; margin-bottom:20px; box-shadow:0 8px 32px rgba(197,160,40,0.25);">
-    <h1 style="color:var(--white); font-size:26px; font-weight:800; margin-bottom:6px;">Sabores Royal</h1>
-    <p style="color:var(--gold2); font-size:12px; letter-spacing:1.5px; text-transform:uppercase; margin-bottom:32px;">Maipú 734 · Rosario</p>
-    <div style="width:100%; max-width:300px; display:flex; flex-direction:column; gap:12px;">
-      <p style="color:rgba(255,255,255,0.6); font-size:13.5px;">Ingresá tu número para continuar</p>
-      <div style="display:flex; gap:8px;">
-        <div style="padding:13px 14px; border-radius:12px; background:var(--glass); border:1px solid var(--glass-bd); color:var(--cream); font-weight:700; flex:none;">+54</div>
-        <input id="acc-phone" placeholder="11 1234 5678" style="flex:1;" type="tel" inputmode="numeric" autocomplete="tel" onkeydown="if(event.key==='Enter') loginAccount()">
+  <div class="screen" style="display:flex; flex-direction:column; align-items:center; justify-content:center; min-height:100vh; padding:36px 28px; text-align:center; background:radial-gradient(circle at 50% 5%, rgba(197,160,40,0.2), transparent 65%);">
+    <img src="${LOGO_DATA_URL}" style="width:110px; border-radius:26px; margin-bottom:20px; box-shadow:0 10px 40px rgba(197,160,40,0.3);">
+    <h1 style="color:var(--white); font-size:28px; font-weight:800; margin-bottom:6px; letter-spacing:-.3px;">Sabores Royal</h1>
+    <p style="color:var(--gold2); font-size:11px; letter-spacing:2px; text-transform:uppercase; margin-bottom:10px;">Maipú 734 · Rosario</p>
+    <div style="width:3px; height:3px; border-radius:50%; background:rgba(197,160,40,0.4); margin:0 auto 28px;"></div>
+    <div style="width:100%; max-width:320px; display:flex; flex-direction:column; gap:14px;">
+      <div style="${fieldStyle}">
+        <span style="${labelStyle}">Tu número de teléfono</span>
+        <div style="display:flex; gap:10px; align-items:center;">
+          <div style="padding:16px 16px; border-radius:18px; background:rgba(255,255,255,0.07); border:1.5px solid rgba(255,255,255,0.13); color:var(--gold2); font-weight:700; font-size:15px; flex:none;">+54</div>
+          <input id="acc-phone" placeholder="11 1234 5678" type="tel" inputmode="numeric" autocomplete="tel" style="${inputStyle}" onkeydown="if(event.key==='Enter') loginAccount()">
+        </div>
       </div>
-      <button class="btn-primary" onclick="loginAccount()">Ingresar</button>
-      <p style="font-size:11.5px; color:rgba(255,255,255,0.35); margin-top:4px;">Si es la primera vez te pedimos un par de datos para crear tu cuenta.</p>
+      <button class="btn-primary" style="padding:16px; font-size:15px; border-radius:18px;" onclick="loginAccount()">Continuar</button>
+      <p style="font-size:11.5px; color:rgba(255,255,255,0.3); line-height:1.5;">Si es tu primera vez te pedimos un par de datos para crear tu cuenta.</p>
     </div>
   </div>`;
 }
