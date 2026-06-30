@@ -178,8 +178,24 @@ img{display:block; max-width:100%;}
 .btn-secondary{width:100%; padding:14px; border-radius:14px; background:var(--glass); color:var(--white);
   font-weight:600; font-size:14px; border:1px solid var(--glass-bd);}
 /* ---------- NOVEDADES / OFERTAS ---------- */
-.home-sec-header{display:flex; align-items:center; justify-content:space-between; padding:18px 16px 8px;}
-.home-sec-label{font-size:16px; font-weight:700; color:var(--white); letter-spacing:-.2px;}
+.home-sec-header{display:flex; align-items:center; justify-content:space-between; padding:22px 16px 10px;}
+.home-sec-label{
+  font-size:19px; font-weight:800; color:var(--white); letter-spacing:-.3px;
+  display:flex; align-items:center; gap:10px;
+}
+.home-sec-label::before{
+  content:''; display:inline-block; width:4px; height:22px; border-radius:3px;
+  background:var(--gold); flex-shrink:0;
+}
+
+.wholesale-badge{
+  display:inline-flex; align-items:center; gap:6px;
+  margin:6px auto 0; padding:6px 16px; border-radius:20px;
+  background:linear-gradient(90deg, rgba(197,160,40,0.25), rgba(197,160,40,0.12));
+  border:1.5px solid rgba(197,160,40,0.6);
+  color:var(--gold2); font-size:12px; font-weight:700; letter-spacing:.5px;
+  text-transform:uppercase;
+}
 .content-strip{display:flex; gap:12px; overflow-x:auto; padding:0 16px 16px; scroll-snap-type:x mandatory; -webkit-overflow-scrolling:touch;}
 .content-strip::-webkit-scrollbar{display:none;}
 .nov-card{flex:none; width:240px; scroll-snap-align:start; border-radius:16px; overflow:hidden; background:var(--glass); border:1px solid var(--glass-bd);}
@@ -482,6 +498,9 @@ let state = {
   currentClientPhone: null,
   route: {screen:"home"},
   adminAuthed: false,
+  adminIsSuperAdmin: false,
+  adminLoggedName: "",
+  subAdmins: [],
   adminTab: "pedidos",
   config:{storeName:"Sabores Royal", address:"Maipú 734, Rosario", waNumber:WA_NUMBER},
   fiscal:{
@@ -603,7 +622,7 @@ async function uploadProductPhoto(base64, productId){
 
 async function apiSyncContent(){
   try{
-    const data = await supaFetch('/app_settings?setting_key=in.(novedades,ofertas,banner_novedades,banner_ofertas)&select=setting_key,setting_value', 'GET');
+    const data = await supaFetch('/app_settings?setting_key=in.(novedades,ofertas,banner_novedades,banner_ofertas,sub_admins)&select=setting_key,setting_value', 'GET');
     if(!data || data.length===0) return;
     let changed = false;
     data.forEach(row=>{
@@ -620,6 +639,9 @@ async function apiSyncContent(){
         }
         if(row.setting_key==='banner_ofertas' && JSON.stringify(parsed)!==JSON.stringify(state.bannerOfertas)){
           state.bannerOfertas = parsed; changed = true;
+        }
+        if(row.setting_key==='sub_admins' && JSON.stringify(parsed)!==JSON.stringify(state.subAdmins)){
+          state.subAdmins = parsed||[]; changed = true;
         }
       }catch(e){}
     });
@@ -638,6 +660,18 @@ async function apiSaveContent(key){
       await supaFetch('/app_settings', 'POST', {setting_key: key, setting_value: val});
     }
   }catch(e){ console.warn('Error guardando contenido:', e); toast('Error guardando: '+e.message, 'err'); }
+}
+
+async function apiSaveSubAdmins(){
+  try{
+    const val = JSON.stringify(state.subAdmins);
+    const existing = await supaFetch('/app_settings?setting_key=eq.sub_admins&select=id', 'GET');
+    if(existing && existing.length>0){
+      await supaFetch('/app_settings?setting_key=eq.sub_admins', 'PATCH', {setting_value: val});
+    }else{
+      await supaFetch('/app_settings', 'POST', {setting_key:'sub_admins', setting_value: val});
+    }
+  }catch(e){ console.warn('Error guardando admins:', e); toast('Error: '+e.message,'err'); }
 }
 
 async function apiSaveSectionBanner(type){
@@ -967,6 +1001,7 @@ function renderHome(){
       <img src="${LOGO_DATA_URL}" class="home-logo" alt="Sabores Royal">
       <h1>Sabores Royal</h1>
       <p>Maipú 734 · Rosario</p>
+      ${(()=>{ const cl = state.currentClientPhone ? state.clients[state.currentClientPhone] : null; return cl && cl.wholesale ? `<div class="wholesale-badge">⭐ Cliente Mayorista</div>` : ''; })()}
     </div>
     ${state.banners && state.banners.length>0 ? `
       <div style="display:flex; gap:12px; overflow-x:auto; padding:0 16px 16px; scroll-snap-type:x mandatory;">
@@ -1570,7 +1605,10 @@ function renderAdmin(){
   <div class="screen">
     <div class="topbar">
       <button class="back" onclick="nav('home')">${ic('chevron')}</button>
-      <h2>Admin Sabores Royal</h2>
+      <div style="display:flex; flex-direction:column; align-items:center; line-height:1.2;">
+        <h2 style="font-size:15px;">Admin Sabores Royal</h2>
+        <span style="font-size:11px; color:var(--gold2); opacity:.85;">${state.adminLoggedName||'Administrador'}</span>
+      </div>
       <button onclick="adminLogout()" style="color:var(--danger);">${ic('logout')}</button>
     </div>
     <div class="admin-tabs">
@@ -1594,11 +1632,63 @@ function renderAdmin(){
 }
 function tryAdminLogin(){
   const val = document.getElementById("admin-pass-input").value;
-  if(val===ADMIN_PASS){ state.adminAuthed = true; render(); }
-  else{ toast("Contraseña incorrecta", "err"); }
+  if(val===ADMIN_PASS){
+    state.adminAuthed = true; state.adminIsSuperAdmin = true; state.adminLoggedName = "Admin General";
+    render();
+  } else {
+    const sub = (state.subAdmins||[]).find(a=>a.password===val);
+    if(sub){
+      state.adminAuthed = true; state.adminIsSuperAdmin = false; state.adminLoggedName = sub.name;
+      render();
+    } else {
+      toast("Contraseña incorrecta", "err");
+    }
+  }
 }
-function adminLogout(){ state.adminAuthed=false; nav("home"); }
+function adminLogout(){ state.adminAuthed=false; state.adminIsSuperAdmin=false; state.adminLoggedName=""; nav("home"); }
 function setAdminTab(tab){ state.adminTab = tab; render(); }
+
+/* ---------- ADMIN: GESTIÓN DE SUB-ADMINS ---------- */
+let subAdminDraft = { name:"", password:"" };
+function openSubAdminModal(idx){
+  const a = idx!==null && idx!==undefined ? state.subAdmins[idx] : null;
+  subAdminDraft = a ? Object.assign({}, a) : { name:"", password:"" };
+  const overlay = document.createElement("div");
+  overlay.className = "modal-overlay";
+  overlay.id = "subadmin-modal-overlay";
+  overlay.innerHTML = `
+    <div class="modal-sheet">
+      <div class="modal-handle"></div>
+      <h3 class="modal-title">${idx!==null&&idx!==undefined?'Editar administrador':'Nuevo administrador'}</h3>
+      <div class="form-group"><label>Nombre</label><input id="sa-name" value="${subAdminDraft.name}" placeholder="Ej: María"></div>
+      <div class="form-group"><label>Contraseña</label><input id="sa-pass" type="password" value="${subAdminDraft.password}" placeholder="Contraseña para ingresar al admin" autocomplete="new-password"></div>
+      <div style="display:flex; gap:10px; margin-top:6px;">
+        <button class="btn-secondary" style="flex:1;" onclick="closeSubAdminModal()">Cancelar</button>
+        <button class="btn-primary" style="flex:1;" onclick="saveSubAdmin(${idx})">Guardar</button>
+      </div>
+    </div>`;
+  document.body.appendChild(overlay);
+}
+function closeSubAdminModal(){ const el=document.getElementById("subadmin-modal-overlay"); if(el) el.remove(); }
+function saveSubAdmin(idx){
+  const name = document.getElementById("sa-name").value.trim();
+  const password = document.getElementById("sa-pass").value;
+  if(!name){ toast("Ingresá un nombre","err"); return; }
+  if(!password || password.length<4){ toast("La contraseña debe tener al menos 4 caracteres","err"); return; }
+  if(password===ADMIN_PASS){ toast("Esa contraseña está reservada","err"); return; }
+  const item = { name, password };
+  if(idx!==null && idx!==undefined && state.subAdmins[idx]){ state.subAdmins[idx] = item; }
+  else{ state.subAdmins.push(item); }
+  saveState(); closeSubAdminModal(); render();
+  toast("Administrador guardado","ok");
+  apiSaveSubAdmins();
+}
+function deleteSubAdmin(idx){
+  if(!confirm("¿Eliminar este administrador?")) return;
+  state.subAdmins.splice(idx,1);
+  saveState(); render();
+  apiSaveSubAdmins();
+}
 
 /* ---------- ADMIN: PEDIDOS ---------- */
 function renderAdminPedidos(){
@@ -2152,6 +2242,36 @@ function renderAdminConfig(){
     <div class="form-group" style="margin-top:14px;"><label>Nombre del negocio</label><input id="cfg-name" value="${state.config.storeName}" onchange="updateConfig('storeName', this.value)"></div>
     <div class="form-group"><label>Dirección</label><input id="cfg-address" value="${state.config.address}" onchange="updateConfig('address', this.value)"></div>
     <div class="form-group"><label>WhatsApp de contacto</label><input id="cfg-wa" value="${state.config.waNumber}" onchange="updateConfig('waNumber', this.value)"></div>
+
+    <h3 style="color:var(--gold2); font-size:14px; margin:18px 16px 4px;">QR para clientes</h3>
+    <div style="padding:0 16px 16px;">
+      <p style="font-size:12.5px; color:rgba(255,255,255,0.6); margin-bottom:12px;">Mostrá este código para que tus clientes descarguen la app en su celular.</p>
+      <div style="display:flex; flex-direction:column; align-items:center; gap:10px;">
+        <div style="background:#fff; padding:10px; border-radius:14px; display:inline-block;">
+          <img id="qr-img" src="https://api.qrserver.com/v1/create-qr-code/?size=220x220&qzone=1&data=${encodeURIComponent((()=>{ try{ return window.location.origin + window.location.pathname.replace('admin.html','index.html').replace(/\?.*$/,''); }catch(e){ return ''; } })())}" alt="QR" style="width:220px; height:220px; display:block; border-radius:6px;">
+        </div>
+        <p style="font-size:11.5px; color:rgba(255,255,255,0.45); text-align:center;">El cliente escanea el QR → abre la app → la agrega al inicio</p>
+        <button class="btn-secondary" style="font-size:12.5px;" onclick="(()=>{ const a=document.createElement('a'); a.href=document.getElementById('qr-img').src; a.download='qr-sabores-royal.png'; a.target='_blank'; a.click(); })()">Descargar QR</button>
+      </div>
+    </div>
+
+    ${state.adminIsSuperAdmin ? `
+    <h3 style="color:var(--gold2); font-size:14px; margin:18px 16px 4px;">Administradores</h3>
+    <div style="padding:0 16px 6px;">
+      <p style="font-size:12px; color:rgba(255,255,255,0.5); margin-bottom:10px;">Podés agregar colaboradores con su propio acceso. Solo vos (Admin General) podés gestionar esto.</p>
+      ${(state.subAdmins||[]).length===0 ? `<p style="font-size:13px; color:rgba(255,255,255,0.4); margin-bottom:10px;">Todavía no hay administradores adicionales.</p>` : (state.subAdmins||[]).map((a,i)=>`
+        <div style="display:flex; align-items:center; gap:12px; padding:10px 0; border-bottom:1px solid var(--glass-bd);">
+          <div style="flex:1;">
+            <div style="font-weight:600; font-size:13.5px;">${a.name}</div>
+            <div style="font-size:11.5px; opacity:.5; margin-top:2px;">Contraseña: ${'•'.repeat(a.password.length)}</div>
+          </div>
+          <button class="icon-btn" onclick="openSubAdminModal(${i})">${ic('edit')}</button>
+          <button class="icon-btn" style="color:var(--danger);" onclick="deleteSubAdmin(${i})">${ic('trash')}</button>
+        </div>
+      `).join('')}
+      <button class="btn-outline-gold" style="margin-top:10px; width:100%;" onclick="openSubAdminModal(null)">+ Agregar administrador</button>
+    </div>
+    ` : ''}
 
     <h3 style="color:var(--gold2); font-size:14px; margin:18px 16px 4px;">Datos fiscales (comprobantes)</h3>
     <div class="form-group"><label>Razón social</label><input value="${state.fiscal.razonSocial}" onchange="updateFiscal('razonSocial', this.value)"></div>
@@ -3558,11 +3678,11 @@ const IS_ADMIN_APP = !!localStorage.getItem('_openAdmin') || new URLSearchParams
 if(IS_ADMIN_APP){
   localStorage.removeItem('_openAdmin');
   state.route = {screen:'admin'};
-  state.adminAuthed = false;
+  state.adminAuthed = false; state.adminIsSuperAdmin = false; state.adminLoggedName = "";
   if(location.search) history.replaceState(null,'',location.pathname);
 }else{
   state.route = {screen:'home'};
-  state.adminAuthed = false;
+  state.adminAuthed = false; state.adminIsSuperAdmin = false; state.adminLoggedName = "";
 }
 render();
 apiSyncProducts();
