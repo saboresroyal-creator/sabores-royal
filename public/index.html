@@ -559,10 +559,34 @@ async function apiSyncProducts(){
   }catch(e){ console.warn("Sync Supabase:", e); }
 }
 
+async function uploadProductPhoto(base64, productId){
+  const [header, data] = base64.split(',');
+  const mime = header.match(/:(.*?);/)[1];
+  const binary = atob(data);
+  const bytes = new Uint8Array(binary.length);
+  for(let i=0;i<binary.length;i++) bytes[i]=binary.charCodeAt(i);
+  const ext = mime.split('/')[1]||'jpg';
+  const filename = 'product_' + productId + '_' + Date.now() + '.' + ext;
+  const res = await fetch(SUPABASE_URL+'/storage/v1/object/product-photos/'+filename, {
+    method:'POST',
+    headers:{'apikey':SUPABASE_KEY,'Authorization':'Bearer '+SUPABASE_KEY,'Content-Type':mime,'x-upsert':'true'},
+    body: new Blob([bytes],{type:mime}),
+  });
+  if(!res.ok){ const t=await res.text(); throw new Error('Foto: '+t); }
+  return SUPABASE_URL+'/storage/v1/object/public/product-photos/'+filename;
+}
+
 async function apiSaveProduct(product){
   _pendingSaves.add(product.id);
   try{
-    const photoUrl = (product.photo && !product.photo.startsWith('data:')) ? product.photo : null;
+    let photoUrl = (product.photo && !product.photo.startsWith('data:')) ? product.photo : null;
+    if(product.photo && product.photo.startsWith('data:')){
+      try{
+        photoUrl = await uploadProductPhoto(product.photo, product._apiId||product.id);
+        product.photo = photoUrl;
+        saveState();
+      }catch(pe){ console.warn('No se pudo subir foto:', pe); }
+    }
     const body = {
       name: product.name,
       description: product.desc||"",
