@@ -674,6 +674,23 @@ async function apiSaveSubAdmins(){
   }catch(e){ console.warn('Error guardando admins:', e); toast('Error: '+e.message,'err'); }
 }
 
+async function apiSyncClients(){
+  try{
+    const rows = await supaFetch('/clients?select=full_name,phone,address&order=created_at.desc&limit=500','GET');
+    if(!rows || rows.length===0) return;
+    let changed = false;
+    rows.forEach(c=>{
+      if(!c.phone) return;
+      const phone = c.phone.startsWith('+') ? c.phone : '+54'+c.phone;
+      if(!state.clients[phone]){
+        state.clients[phone] = { phone, name:c.full_name||'', address:c.address||'', doc:'', city:'', province:'', points:0, orders:[] };
+        changed = true;
+      }
+    });
+    if(changed){ saveState(); render(); }
+  }catch(e){ console.warn('Sync clientes:', e); }
+}
+
 async function apiSaveSectionBanner(type){
   try{
     const key = type==='novedad' ? 'banner_novedades' : 'banner_ofertas';
@@ -957,14 +974,15 @@ function render(){
   const app = document.getElementById("app");
   const r = state.route;
   let html = "";
-  if(r.screen==="home") html = renderHome();
-  else if(r.screen==="catalog") html = renderCatalog(r.section);
-  else if(r.screen==="product") html = renderProductDetail(r.id);
-  else if(r.screen==="cart") html = renderCart();
-  else if(r.screen==="checkout") html = renderCheckout();
+  const needsLogin = !IS_ADMIN_APP && !state.currentClientPhone;
+  if(r.screen==="home") html = needsLogin ? renderClientWelcome() : renderHome();
+  else if(r.screen==="catalog") html = needsLogin ? renderClientWelcome() : renderCatalog(r.section);
+  else if(r.screen==="product") html = needsLogin ? renderClientWelcome() : renderProductDetail(r.id);
+  else if(r.screen==="cart") html = needsLogin ? renderClientWelcome() : renderCart();
+  else if(r.screen==="checkout") html = needsLogin ? renderClientWelcome() : renderCheckout();
   else if(r.screen==="success") html = renderSuccess(r.order);
-  else if(r.screen==="orders") html = renderOrdersLookup();
-  else if(r.screen==="account") html = renderAccount();
+  else if(r.screen==="orders") html = needsLogin ? renderClientWelcome() : renderOrdersLookup();
+  else if(r.screen==="account") html = needsLogin ? renderClientWelcome() : renderAccount();
   else if(r.screen==="admin") html = renderAdmin();
   else if(r.screen==="voucher-view") html = renderVoucherView(r.voucherId);
   else if(r.screen==="price-list-view") html = renderPriceListView(r.productIds, r.priceMode);
@@ -990,6 +1008,48 @@ function renderBottomNav(){
         ${t.badge?`<span style="position:absolute; top:-2px; right:2px; background:var(--gold); color:var(--navy); font-size:9px; font-weight:700; border-radius:10px; padding:1px 5px;">${t.badge}</span>`:''}
         <span>${t.label}</span>
       </button>`).join('')}
+  </div>`;
+}
+
+/* ---------- BIENVENIDA / LOGIN CLIENTE ---------- */
+function renderClientWelcome(){
+  const mode = state.route.accMode;
+  if(mode === "register"){
+    const phone = state.route.accPhone || "";
+    return `
+    <div class="screen" style="display:flex; flex-direction:column; align-items:center; justify-content:center; min-height:100vh; padding:32px 24px; text-align:center; background:radial-gradient(circle at 50% 10%, rgba(197,160,40,0.18), transparent 70%);">
+      <img src="${LOGO_DATA_URL}" style="width:90px; border-radius:20px; margin-bottom:18px;">
+      <h2 style="color:var(--white); font-size:20px; margin-bottom:6px;">Creá tu cuenta</h2>
+      <p style="color:rgba(255,255,255,0.5); font-size:13px; margin-bottom:24px;">Solo la primera vez. Después ingresás directo.</p>
+      <div style="width:100%; max-width:320px; display:flex; flex-direction:column; gap:10px;">
+        <div class="form-group" style="margin:0;"><label>Nombre completo *</label><input id="reg-name" placeholder="Ej: María González" autocomplete="name"></div>
+        <div class="form-group" style="margin:0;"><label>Teléfono *</label>
+          <div style="display:flex; gap:8px;">
+            <div style="padding:13px 14px; border-radius:12px; background:var(--glass); border:1px solid var(--glass-bd); color:var(--cream); font-weight:700;">+54</div>
+            <input id="reg-phone" value="${phone.replace('+54','')}" placeholder="11 1234 5678" style="flex:1;" type="tel" autocomplete="tel">
+          </div>
+        </div>
+        <div class="form-group" style="margin:0;"><label>DNI (opcional)</label><input id="reg-doc" placeholder="Ej: 30 123 456" type="tel" autocomplete="off"></div>
+        <div class="form-group" style="margin:0;"><label>Ciudad (opcional)</label><input id="reg-city" placeholder="Ej: Rosario" autocomplete="address-level2"></div>
+        <button class="btn-primary" style="margin-top:6px;" onclick="completeRegistration()">Crear cuenta y entrar</button>
+        <button class="btn-secondary" style="font-size:12.5px;" onclick="state.route.accMode=null; render()">Volver</button>
+      </div>
+    </div>`;
+  }
+  return `
+  <div class="screen" style="display:flex; flex-direction:column; align-items:center; justify-content:center; min-height:100vh; padding:32px 24px; text-align:center; background:radial-gradient(circle at 50% 10%, rgba(197,160,40,0.18), transparent 70%);">
+    <img src="${LOGO_DATA_URL}" style="width:110px; border-radius:24px; margin-bottom:20px; box-shadow:0 8px 32px rgba(197,160,40,0.25);">
+    <h1 style="color:var(--white); font-size:26px; font-weight:800; margin-bottom:6px;">Sabores Royal</h1>
+    <p style="color:var(--gold2); font-size:12px; letter-spacing:1.5px; text-transform:uppercase; margin-bottom:32px;">Maipú 734 · Rosario</p>
+    <div style="width:100%; max-width:300px; display:flex; flex-direction:column; gap:12px;">
+      <p style="color:rgba(255,255,255,0.6); font-size:13.5px;">Ingresá tu número para continuar</p>
+      <div style="display:flex; gap:8px;">
+        <div style="padding:13px 14px; border-radius:12px; background:var(--glass); border:1px solid var(--glass-bd); color:var(--cream); font-weight:700; flex:none;">+54</div>
+        <input id="acc-phone" placeholder="11 1234 5678" style="flex:1;" type="tel" inputmode="numeric" autocomplete="tel" onkeydown="if(event.key==='Enter') loginAccount()">
+      </div>
+      <button class="btn-primary" onclick="loginAccount()">Ingresar</button>
+      <p style="font-size:11.5px; color:rgba(255,255,255,0.35); margin-top:4px;">Si es la primera vez te pedimos un par de datos para crear tu cuenta.</p>
+    </div>
   </div>`;
 }
 
@@ -1448,38 +1508,57 @@ function renderAccount(){
     </div>
   </div>`;
 }
-function loginAccount(){
-  const rawPhone = document.getElementById("acc-phone").value.trim();
-  if(!rawPhone){ toast("Ingresá un teléfono", "err"); return; }
-  const phone = normalizePhone(rawPhone);
+async function loginAccount(){
+  const rawPhone = (document.getElementById("acc-phone")||{}).value||"";
+  if(!rawPhone.trim()){ toast("Ingresá un teléfono", "err"); return; }
+  const phone = normalizePhone(rawPhone.trim());
   if(state.clients[phone]){
     state.currentClientPhone = phone;
     saveState(); render();
-  }else{
-    state.route.accMode = "register";
-    state.route.accPhone = phone;
-    render();
+    return;
   }
+  // Buscar en Supabase
+  try{
+    const found = await supaFetch('/clients?phone=eq.'+encodeURIComponent(phone)+'&select=full_name,phone,address&limit=1','GET');
+    if(found && found.length>0){
+      const c = found[0];
+      state.clients[phone] = { phone, name:c.full_name, address:c.address||"", doc:"", city:"", province:"", points:0, orders:[] };
+      state.currentClientPhone = phone;
+      saveState(); render();
+      toast("¡Bienvenido de vuelta, "+c.full_name+"!", "ok");
+      return;
+    }
+  }catch(e){ console.warn("lookup cliente:", e); }
+  state.route.accMode = "register";
+  state.route.accPhone = phone;
+  render();
 }
 function normalizePhone(raw){
   const digits = raw.replace(/\D/g,'');
   if(digits.startsWith("54")) return "+"+digits;
   return "+54"+digits;
 }
-function completeRegistration(){
+async function completeRegistration(){
   const name = document.getElementById("reg-name").value.trim();
   const rawPhone = document.getElementById("reg-phone").value.trim();
-  const doc = document.getElementById("reg-doc").value.trim();
-  const address = document.getElementById("reg-address").value.trim();
-  const city = document.getElementById("reg-city").value.trim();
-  const province = document.getElementById("reg-province").value;
+  const doc = (document.getElementById("reg-doc")||{}).value||"";
+  const city = (document.getElementById("reg-city")||{}).value||"";
   if(!name || !rawPhone){ toast("Completá al menos nombre y teléfono", "err"); return; }
   const phone = normalizePhone(rawPhone);
-  state.clients[phone] = { phone, name, doc, address, city, province, points:0, orders:[] };
+  state.clients[phone] = { phone, name, doc:doc.trim(), city:city.trim(), address:"", province:"", points:0, orders:[] };
   state.currentClientPhone = phone;
   state.route.accMode = null;
   saveState(); render();
-  toast("¡Cuenta creada!", "ok");
+  toast("¡Bienvenido, "+name+"! 👑", "ok");
+  // Guardar en Supabase para que aparezca en el admin
+  try{
+    const existing = await supaFetch('/clients?phone=eq.'+encodeURIComponent(phone)+'&select=id&limit=1','GET');
+    if(existing && existing.length>0){
+      await supaFetch('/clients?phone=eq.'+encodeURIComponent(phone),'PATCH',{full_name:name, address:city});
+    }else{
+      await supaFetch('/clients','POST',{full_name:name, phone, address:city});
+    }
+  }catch(e){ console.warn("Registro en Supabase:", e); }
 }
 function openEditProfileModal(){
   const client = state.clients[state.currentClientPhone];
@@ -3687,12 +3766,13 @@ if(IS_ADMIN_APP){
 render();
 apiSyncProducts();
 apiSyncContent();
+if(IS_ADMIN_APP) apiSyncClients();
 
 document.addEventListener('visibilitychange', ()=>{
-  if(document.visibilityState === 'visible'){ apiSyncProducts(); apiSyncContent(); }
+  if(document.visibilityState === 'visible'){ apiSyncProducts(); apiSyncContent(); if(IS_ADMIN_APP) apiSyncClients(); }
 });
-window.addEventListener('focus', ()=>{ apiSyncProducts(); apiSyncContent(); });
-setInterval(()=>{ apiSyncProducts(); apiSyncContent(); }, 30000);
+window.addEventListener('focus', ()=>{ apiSyncProducts(); apiSyncContent(); if(IS_ADMIN_APP) apiSyncClients(); });
+setInterval(()=>{ apiSyncProducts(); apiSyncContent(); if(IS_ADMIN_APP) apiSyncClients(); }, 30000);
 
 if('serviceWorker' in navigator){
   navigator.serviceWorker.register('sw.js');
