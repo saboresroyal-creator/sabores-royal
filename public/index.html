@@ -1020,7 +1020,7 @@ function renderProductDetail(id){
         <p style="font-size:11.5px; color:rgba(255,255,255,0.4); margin-bottom:6px;">Mínimo: ${p.minGrams||50}g</p>
       </div>
       <div class="sticky-cta">
-        <button class="btn-primary" onclick="addToCartByWeight('${p.id}', ${grams}); nav('catalog',{section:'${p.section}'})"><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" style="flex-shrink:0"><circle cx="9" cy="20" r="1.4"/><circle cx="18" cy="20" r="1.4"/><path d="M3 4h2l2.4 12.2a2 2 0 0 0 2 1.8h7.2a2 2 0 0 0 2-1.6L21 8H6"/></svg> Agregar al carrito — ${money(lineTotal)}</button>
+        <button class="btn-primary" onclick="addToCartByWeight('${p.id}', ${grams}); nav('catalog',{section:'${p.section}'})"><svg width="28" height="28" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" style="flex-shrink:0"><circle cx="9" cy="20" r="1.4"/><circle cx="18" cy="20" r="1.4"/><path d="M3 4h2l2.4 12.2a2 2 0 0 0 2 1.8h7.2a2 2 0 0 0 2-1.6L21 8H6"/></svg> Agregar al carrito — ${money(lineTotal)}</button>
       </div>
     </div>`;
   }
@@ -1044,7 +1044,7 @@ function renderProductDetail(id){
       </div>
     </div>
     <div class="sticky-cta">
-      <button class="btn-primary" onclick="addToCart('${p.id}', ${qty}); nav('catalog',{section:'${p.section}'})"><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" style="flex-shrink:0"><circle cx="9" cy="20" r="1.4"/><circle cx="18" cy="20" r="1.4"/><path d="M3 4h2l2.4 12.2a2 2 0 0 0 2 1.8h7.2a2 2 0 0 0 2-1.6L21 8H6"/></svg> Agregar al carrito — ${money(effectivePrice(p)*qty)}</button>
+      <button class="btn-primary" onclick="addToCart('${p.id}', ${qty}); nav('catalog',{section:'${p.section}'})"><svg width="28" height="28" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" style="flex-shrink:0"><circle cx="9" cy="20" r="1.4"/><circle cx="18" cy="20" r="1.4"/><path d="M3 4h2l2.4 12.2a2 2 0 0 0 2 1.8h7.2a2 2 0 0 0 2-1.6L21 8H6"/></svg> Agregar al carrito — ${money(effectivePrice(p)*qty)}</button>
     </div>
   </div>`;
 }
