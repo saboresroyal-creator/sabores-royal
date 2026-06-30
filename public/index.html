@@ -498,6 +498,8 @@ let state = {
   banners: [],
   novedades: [],
   ofertas: [],
+  bannerNovedades: null,
+  bannerOfertas: null,
   adminBannerSub: 'banners',
 };
 
@@ -601,17 +603,23 @@ async function uploadProductPhoto(base64, productId){
 
 async function apiSyncContent(){
   try{
-    const data = await supaFetch('/app_settings?setting_key=in.(novedades,ofertas)&select=setting_key,setting_value', 'GET');
+    const data = await supaFetch('/app_settings?setting_key=in.(novedades,ofertas,banner_novedades,banner_ofertas)&select=setting_key,setting_value', 'GET');
     if(!data || data.length===0) return;
     let changed = false;
     data.forEach(row=>{
       try{
-        const parsed = JSON.parse(row.setting_value)||[];
+        const parsed = JSON.parse(row.setting_value);
         if(row.setting_key==='novedades' && JSON.stringify(parsed)!==JSON.stringify(state.novedades)){
-          state.novedades = parsed; changed = true;
+          state.novedades = parsed||[]; changed = true;
         }
         if(row.setting_key==='ofertas' && JSON.stringify(parsed)!==JSON.stringify(state.ofertas)){
-          state.ofertas = parsed; changed = true;
+          state.ofertas = parsed||[]; changed = true;
+        }
+        if(row.setting_key==='banner_novedades' && JSON.stringify(parsed)!==JSON.stringify(state.bannerNovedades)){
+          state.bannerNovedades = parsed; changed = true;
+        }
+        if(row.setting_key==='banner_ofertas' && JSON.stringify(parsed)!==JSON.stringify(state.bannerOfertas)){
+          state.bannerOfertas = parsed; changed = true;
         }
       }catch(e){}
     });
@@ -630,6 +638,20 @@ async function apiSaveContent(key){
       await supaFetch('/app_settings', 'POST', {setting_key: key, setting_value: val});
     }
   }catch(e){ console.warn('Error guardando contenido:', e); toast('Error guardando: '+e.message, 'err'); }
+}
+
+async function apiSaveSectionBanner(type){
+  try{
+    const key = type==='novedad' ? 'banner_novedades' : 'banner_ofertas';
+    const obj = type==='novedad' ? state.bannerNovedades : state.bannerOfertas;
+    const val = JSON.stringify(obj);
+    const existing = await supaFetch('/app_settings?setting_key=eq.'+key+'&select=id', 'GET');
+    if(existing && existing.length>0){
+      await supaFetch('/app_settings?setting_key=eq.'+key, 'PATCH', {setting_value: val});
+    }else{
+      await supaFetch('/app_settings', 'POST', {setting_key: key, setting_value: val});
+    }
+  }catch(e){ console.warn('Error guardando banner sección:', e); toast('Error guardando: '+e.message,'err'); }
 }
 
 async function apiSaveProduct(product){
@@ -959,6 +981,15 @@ function renderHome(){
         `).join('')}
       </div>
     ` : ''}
+    ${(state.bannerNovedades && state.bannerNovedades.active) ? `
+      <div style="margin:0 16px 14px; border-radius:16px; overflow:hidden; position:relative; aspect-ratio:16/7; background:${state.bannerNovedades.image?'#000':'linear-gradient(120deg,#1a3a6e,#0f1c45)'};">
+        ${state.bannerNovedades.image?`<img src="${state.bannerNovedades.image}" style="width:100%; height:100%; object-fit:cover; position:absolute; inset:0;">`:''}
+        <div style="position:absolute; inset:0; background:linear-gradient(180deg,rgba(0,0,0,0.05),rgba(0,0,0,0.62)); display:flex; flex-direction:column; justify-content:flex-end; padding:16px;">
+          ${state.bannerNovedades.title?`<h3 style="color:#fff; font-size:17px; font-weight:700; margin-bottom:3px;">${state.bannerNovedades.title}</h3>`:''}
+          ${state.bannerNovedades.subtitle?`<p style="color:rgba(255,255,255,0.85); font-size:12.5px;">${state.bannerNovedades.subtitle}</p>`:''}
+        </div>
+      </div>
+    ` : ''}
     ${state.novedades && state.novedades.length>0 ? `
       <div class="home-sec-header"><span class="home-sec-label">Novedades</span></div>
       <div class="content-strip">
@@ -971,6 +1002,15 @@ function renderHome(){
             </div>
           </div>
         `).join('')}
+      </div>
+    ` : ''}
+    ${(state.bannerOfertas && state.bannerOfertas.active) ? `
+      <div style="margin:0 16px 14px; border-radius:16px; overflow:hidden; position:relative; aspect-ratio:16/7; background:${state.bannerOfertas.image?'#000':'linear-gradient(120deg,var(--gold2),var(--gold))'};">
+        ${state.bannerOfertas.image?`<img src="${state.bannerOfertas.image}" style="width:100%; height:100%; object-fit:cover; position:absolute; inset:0;">`:''}
+        <div style="position:absolute; inset:0; background:linear-gradient(180deg,rgba(0,0,0,0.05),rgba(0,0,0,0.62)); display:flex; flex-direction:column; justify-content:flex-end; padding:16px;">
+          ${state.bannerOfertas.title?`<h3 style="color:#fff; font-size:17px; font-weight:700; margin-bottom:3px;">${state.bannerOfertas.title}</h3>`:''}
+          ${state.bannerOfertas.subtitle?`<p style="color:rgba(255,255,255,0.85); font-size:12.5px;">${state.bannerOfertas.subtitle}</p>`:''}
+        </div>
       </div>
     ` : ''}
     ${state.ofertas && state.ofertas.length>0 ? `
@@ -2938,9 +2978,23 @@ function renderBannersList(){
   `).join('');
 }
 function renderNovedadesList(){
+  const bn = state.bannerNovedades;
+  const bannerCard = `
+    <div style="margin:12px 16px 6px; border-radius:14px; background:var(--glass); border:1px solid var(--glass-bd); overflow:hidden;">
+      <div style="padding:10px 14px 6px; font-size:11px; font-weight:700; letter-spacing:.06em; opacity:.55; text-transform:uppercase;">Banner de la sección</div>
+      <div style="display:flex; align-items:center; gap:12px; padding:4px 14px 12px;">
+        ${bn && bn.image ? `<img src="${bn.image}" style="width:72px; height:42px; border-radius:8px; object-fit:cover; flex-shrink:0;">` : `<div style="width:72px; height:42px; border-radius:8px; background:linear-gradient(120deg,#1a3a6e,#0f1c45); flex-shrink:0; display:flex; align-items:center; justify-content:center; font-size:18px;">🆕</div>`}
+        <div style="flex:1; min-width:0;">
+          <div style="font-weight:600; font-size:13px;">${bn && bn.title ? bn.title : 'Sin banner configurado'}</div>
+          <div style="font-size:11.5px; opacity:.65; margin-top:2px;">${bn ? (bn.active ? '✓ Visible en el inicio' : '✗ Oculto') : 'Tocá editar para configurarlo'}</div>
+        </div>
+        <button class="icon-btn" onclick="openSectionBannerModal('novedad')">${ic('edit')}</button>
+      </div>
+    </div>
+  `;
   if(!state.novedades || state.novedades.length===0)
-    return `<div class="empty-state">${ic('sparkle')}<p>No hay novedades publicadas. Tocá + para agregar.</p></div>`;
-  return state.novedades.map((n,idx)=>`
+    return bannerCard + `<div class="empty-state">${ic('sparkle')}<p>No hay novedades publicadas. Tocá + para agregar.</p></div>`;
+  return bannerCard + state.novedades.map((n,idx)=>`
     <div class="prod-row">
       ${n.photo?`<img src="${n.photo}" style="width:52px; height:52px; border-radius:10px; object-fit:cover; flex-shrink:0;">`:`<div style="width:52px; height:52px; border-radius:10px; background:var(--glass); flex-shrink:0; display:flex; align-items:center; justify-content:center;">${ic('sparkle')}</div>`}
       <div class="prod-row-body">
@@ -2955,9 +3009,23 @@ function renderNovedadesList(){
   `).join('');
 }
 function renderOfertasList(){
+  const bo = state.bannerOfertas;
+  const bannerCard = `
+    <div style="margin:12px 16px 6px; border-radius:14px; background:var(--glass); border:1px solid var(--glass-bd); overflow:hidden;">
+      <div style="padding:10px 14px 6px; font-size:11px; font-weight:700; letter-spacing:.06em; opacity:.55; text-transform:uppercase;">Banner de la sección</div>
+      <div style="display:flex; align-items:center; gap:12px; padding:4px 14px 12px;">
+        ${bo && bo.image ? `<img src="${bo.image}" style="width:72px; height:42px; border-radius:8px; object-fit:cover; flex-shrink:0;">` : `<div style="width:72px; height:42px; border-radius:8px; background:linear-gradient(120deg,var(--gold2),var(--gold)); flex-shrink:0; display:flex; align-items:center; justify-content:center; font-size:18px;">🏷️</div>`}
+        <div style="flex:1; min-width:0;">
+          <div style="font-weight:600; font-size:13px;">${bo && bo.title ? bo.title : 'Sin banner configurado'}</div>
+          <div style="font-size:11.5px; opacity:.65; margin-top:2px;">${bo ? (bo.active ? '✓ Visible en el inicio' : '✗ Oculto') : 'Tocá editar para configurarlo'}</div>
+        </div>
+        <button class="icon-btn" onclick="openSectionBannerModal('oferta')">${ic('edit')}</button>
+      </div>
+    </div>
+  `;
   if(!state.ofertas || state.ofertas.length===0)
-    return `<div class="empty-state">${ic('sparkle')}<p>No hay ofertas publicadas. Tocá + para agregar.</p></div>`;
-  return state.ofertas.map((o,idx)=>`
+    return bannerCard + `<div class="empty-state">${ic('sparkle')}<p>No hay ofertas publicadas. Tocá + para agregar.</p></div>`;
+  return bannerCard + state.ofertas.map((o,idx)=>`
     <div class="prod-row">
       ${o.photo?`<img src="${o.photo}" style="width:52px; height:52px; border-radius:10px; object-fit:cover; flex-shrink:0;">`:`<div style="width:52px; height:52px; border-radius:10px; background:var(--gold); flex-shrink:0;"></div>`}
       <div class="prod-row-body">
@@ -3136,6 +3204,97 @@ function deleteContentItem(type, idx){
   arr.splice(idx, 1);
   saveState(); render();
   apiSaveContent(type==='novedad'?'novedades':'ofertas');
+}
+
+/* ---------- ADMIN: BANNER DE SECCIÓN (novedades / ofertas) ---------- */
+let sectionBannerDraft = { image:"", title:"", subtitle:"", active:true };
+let sectionBannerType = 'novedad';
+
+function openSectionBannerModal(type){
+  sectionBannerType = type;
+  const existing = type==='novedad' ? state.bannerNovedades : state.bannerOfertas;
+  sectionBannerDraft = existing ? Object.assign({}, existing) : { image:"", title:"", subtitle:"", active:true };
+  const overlay = document.createElement("div");
+  overlay.className = "modal-overlay";
+  overlay.id = "secbanner-modal-overlay";
+  overlay.innerHTML = renderSectionBannerModalHTML(type);
+  document.body.appendChild(overlay);
+}
+function renderSectionBannerModalHTML(type){
+  const label = type==='novedad' ? 'Novedades' : 'Ofertas';
+  const d = sectionBannerDraft;
+  return `
+    <div class="modal-sheet">
+      <div class="modal-handle"></div>
+      <h3 class="modal-title">Banner de ${label}</h3>
+      <div id="secbanner-photo-preview">
+        ${d.image ? `<div class="photo-preview-wrap" style="aspect-ratio:16/7;"><img src="${d.image}" style="width:100%; height:100%; object-fit:cover; border-radius:12px;"></div>` : ''}
+      </div>
+      <div class="photo-upload-row">
+        <div class="photo-upload-box" style="aspect-ratio:16/7; flex:2;">
+          ${ic('upload')}<span>Galería</span>
+          <input type="file" accept="image/*" onchange="onSectionBannerPhotoSelected(event)">
+        </div>
+        <div class="photo-upload-box" style="aspect-ratio:16/7; flex:2;">
+          ${ic('camera')}<span>Cámara</span>
+          <input type="file" accept="image/*" capture="environment" onchange="onSectionBannerPhotoSelected(event)">
+        </div>
+      </div>
+      ${d.image ? `<button class="btn-secondary" style="margin-bottom:4px; width:100%; font-size:12.5px;" onclick="removeSectionBannerPhoto()">Quitar imagen</button>` : ''}
+      <div class="form-group"><label>Título</label><input id="sb-title" value="${d.title||''}" placeholder="Ej: Temporada de verano"></div>
+      <div class="form-group"><label>Subtítulo (opcional)</label><input id="sb-subtitle" value="${d.subtitle||''}" placeholder="Ej: Productos frescos todos los días"></div>
+      <div class="form-group" style="display:flex; align-items:center; justify-content:space-between;">
+        <label style="margin:0;">Mostrar en el inicio</label>
+        <label style="display:flex; align-items:center; gap:8px; cursor:pointer;">
+          <input type="checkbox" id="sb-active" ${d.active?'checked':''} style="width:18px; height:18px; accent-color:var(--gold); cursor:pointer;" onchange="document.getElementById('sb-active-label').textContent=this.checked?'Activo':'Oculto'">
+          <span id="sb-active-label" style="font-size:12.5px; opacity:.7;">${d.active?'Activo':'Oculto'}</span>
+        </label>
+      </div>
+      <div style="display:flex; gap:10px; margin-top:6px;">
+        <button class="btn-secondary" style="flex:1;" onclick="closeSectionBannerModal()">Cancelar</button>
+        <button class="btn-primary" style="flex:1;" onclick="saveSectionBannerModal('${type}')">Guardar</button>
+      </div>
+    </div>
+  `;
+}
+function onSectionBannerPhotoSelected(event){
+  const file = event.target.files[0];
+  if(!file) return;
+  const reader = new FileReader();
+  reader.onload = (e)=>{
+    sectionBannerDraft.image = e.target.result;
+    const preview = document.getElementById("secbanner-photo-preview");
+    if(preview) preview.innerHTML = `<div class="photo-preview-wrap" style="aspect-ratio:16/7;"><img src="${sectionBannerDraft.image}" style="width:100%; height:100%; object-fit:cover; border-radius:12px;"></div>`;
+  };
+  reader.readAsDataURL(file);
+}
+function removeSectionBannerPhoto(){
+  sectionBannerDraft.image = "";
+  const overlay = document.getElementById("secbanner-modal-overlay");
+  if(overlay) overlay.innerHTML = renderSectionBannerModalHTML(sectionBannerType);
+}
+function closeSectionBannerModal(){
+  const el = document.getElementById("secbanner-modal-overlay");
+  if(el) el.remove();
+}
+async function saveSectionBannerModal(type){
+  const title = document.getElementById("sb-title").value.trim();
+  const subtitle = document.getElementById("sb-subtitle").value.trim();
+  const active = document.getElementById("sb-active").checked;
+  let image = sectionBannerDraft.image || "";
+  if(!title && !image){ toast("Agregá al menos un título o una imagen","err"); return; }
+  if(image && image.startsWith('data:')){
+    try{ image = await uploadPhoto(image, 'secbanner_'+type+'_'+Date.now()); }
+    catch(pe){ toast('Foto no se pudo subir: '+pe.message,'err'); }
+  }
+  const banner = { image, title, subtitle, active };
+  if(type==='novedad'){ state.bannerNovedades = banner; }
+  else{ state.bannerOfertas = banner; }
+  saveState();
+  closeSectionBannerModal();
+  render();
+  toast('Banner guardado','ok');
+  apiSaveSectionBanner(type);
 }
 
 /* =========================================================
