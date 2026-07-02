@@ -75,6 +75,7 @@ img{display:block; max-width:100%;}
 }
 .section-card:active{transform:scale(.97);}
 .section-card.natural{background:linear-gradient(135deg, rgba(62,143,90,0.18), rgba(255,255,255,0.04));}
+.section-card.celiaco{background:linear-gradient(135deg, rgba(46,125,79,0.28), rgba(111,207,151,0.07)); border-color:rgba(46,125,79,0.45);}
 .section-card.golosinas{background:linear-gradient(135deg, rgba(214,90,130,0.18), rgba(255,255,255,0.04));}
 .section-card.market{background:linear-gradient(135deg, rgba(60,110,200,0.18), rgba(255,255,255,0.04));}
 .section-card.featured{
@@ -451,6 +452,38 @@ function ic(name){
     download:'<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><path d="M12 4v12M7 11l5 5 5-5"/><path d="M5 19h14"/></svg>',
   };
   return I[name] || '';
+}
+
+/* ---------- CELIACO ---------- */
+function renderCeliaco(){
+  const products = state.products.filter(p=>p.sinTacc);
+  return `
+  <div class="screen">
+    <div class="topbar">
+      <button class="back" onclick="nav('home')">${ic('chevron')}</button>
+      <h2>Apto Celíaco</h2>
+    </div>
+    <div style="padding:8px 16px 12px; display:flex; align-items:center; gap:10px;">
+      <img src="/sin-tacc.png" style="width:36px; height:36px; object-fit:contain;">
+      <p style="font-size:13px; color:rgba(255,255,255,0.6); line-height:1.4;">Todos nuestros productos certificados Sin TACC, aptos para personas con celiaquía.</p>
+    </div>
+    <div class="product-grid">
+      ${products.map(p=>{
+        const price = p.sellByWeight ? (p.pricePerKg ? '$'+p.pricePerKg+'/kg' : '') : '$'+p.price;
+        return `
+        <div class="product-card" onclick="nav('product','${p.id}')">
+          <div class="pc-img">
+            ${p.photo ? `<img src="${p.photo}" alt="">` : ic('box')}
+            <img src="/sin-tacc.png" class="sintacc-badge" alt="Sin TACC">
+          </div>
+          <div class="pc-body">
+            <h4>${p.name}</h4>
+            <div class="pc-price">${price}</div>
+          </div>
+        </div>`;
+      }).join('')}
+    </div>
+  </div>`;
 }
 
 /* ---------- SECTION META ---------- */
@@ -989,6 +1022,7 @@ function render(){
   else if(r.screen==="admin") html = renderAdmin();
   else if(r.screen==="voucher-view") html = renderVoucherView(r.voucherId);
   else if(r.screen==="price-list-view") html = renderPriceListView(r.productIds, r.priceMode);
+  else if(r.screen==="celiaco") html = needsLogin ? renderClientWelcome() : renderCeliaco();
   else if(r.screen==="suggestions") html = renderSuggestions();
   else html = renderHome();
   app.innerHTML = html + (["admin","voucher-view","price-list-view"].includes(r.screen) ? "" : renderBottomNav());
@@ -1154,6 +1188,14 @@ function renderHome(){
           <div class="sc-arrow">${ic('chevron')}</div>
         </button>`;
       }).join('')}
+      ${state.products.some(p=>p.sinTacc) ? `
+        <button class="section-card celiaco" onclick="nav('celiaco')">
+          <div class="sc-icon" style="background:rgba(46,125,79,0.2); border-radius:14px; padding:6px;">
+            <img src="/sin-tacc.png" style="width:100%; height:100%; object-fit:contain;">
+          </div>
+          <div><h3>Apto Celíaco</h3><p>Productos Sin TACC certificados</p></div>
+          <div class="sc-arrow">${ic('chevron')}</div>
+        </button>` : ''}
     </div>
     <button class="wa-float-btn" onclick="window.open(waLink('¡Hola! Quiero hacer una consulta.'),'_blank')">
       ${ic('wa')} Hablar por WhatsApp
