@@ -658,7 +658,7 @@ async function uploadProductPhoto(base64, productId){
 
 async function apiSyncContent(){
   try{
-    const data = await supaFetch('/app_settings?setting_key=in.(novedades,ofertas,banner_novedades,banner_ofertas,sub_admins)&select=setting_key,setting_value', 'GET');
+    const data = await supaFetch('/app_settings?setting_key=in.(novedades,ofertas,banner_novedades,banner_ofertas)&select=setting_key,setting_value', 'GET');
     if(!data || data.length===0) return;
     let changed = false;
     data.forEach(row=>{
@@ -675,9 +675,6 @@ async function apiSyncContent(){
         }
         if(row.setting_key==='banner_ofertas' && JSON.stringify(parsed)!==JSON.stringify(state.bannerOfertas)){
           state.bannerOfertas = parsed; changed = true;
-        }
-        if(row.setting_key==='sub_admins' && JSON.stringify(parsed)!==JSON.stringify(state.subAdmins)){
-          state.subAdmins = parsed||[]; changed = true;
         }
       }catch(e){}
     });
@@ -4012,6 +4009,12 @@ render();
 apiSyncProducts();
 apiSyncContent();
 if(IS_ADMIN_APP) apiSyncClients();
+(async ()=>{
+  try{
+    const r = await supaFetch('/app_settings?setting_key=eq.sub_admins&select=setting_value','GET');
+    if(r && r[0]) state.subAdmins = JSON.parse(r[0].setting_value)||[];
+  }catch(e){}
+})();
 
 document.addEventListener('visibilitychange', ()=>{
   if(document.visibilityState === 'visible'){ apiSyncProducts(); apiSyncContent(); if(IS_ADMIN_APP) apiSyncClients(); }
