@@ -534,6 +534,7 @@ let state = {
   adminAuthed: false,
   adminIsSuperAdmin: false,
   adminLoggedName: "",
+  adminLoggedPerms: [],
   subAdmins: [],
   adminTab: "pedidos",
   config:{storeName:"Sabores Royal", address:"Maipú 734, Rosario", waNumber:WA_NUMBER},
@@ -1742,19 +1743,22 @@ function renderAdmin(){
       </div>
     </div>`;
   }
-  const tab = state.adminTab || "pedidos";
   const unreadCount = state.suggestions.filter(s=>!s.read).length;
-  const tabs = [
-    {key:"pedidos", label:"Pedidos"},
-    {key:"productos", label:"Productos"},
-    {key:"categorias", label:"Categorías"},
-    {key:"clientes", label:"Clientes"},
+  const ALL_TABS = [
+    {key:"pedidos",      label:"Pedidos"},
+    {key:"productos",    label:"Productos"},
+    {key:"categorias",   label:"Categorías"},
+    {key:"clientes",     label:"Clientes"},
     {key:"comprobantes", label:"Comprobantes"},
     {key:"listaprecios", label:"Listas de Precios"},
-    {key:"banners", label:"Novedades/Ofertas"},
-    {key:"sugerencias", label:"Sugerencias"+(unreadCount>0?` (${unreadCount})`:'')},
-    {key:"config", label:"Configuración"},
+    {key:"banners",      label:"Novedades/Ofertas"},
+    {key:"sugerencias",  label:"Sugerencias"+(unreadCount>0?` (${unreadCount})`:'')},
+    {key:"config",       label:"Configuración"},
   ];
+  const tabs = state.adminIsSuperAdmin
+    ? ALL_TABS
+    : ALL_TABS.filter(t => t.key !== 'config' && (state.adminLoggedPerms||[]).includes(t.key));
+  const tab = tabs.find(t=>t.key===state.adminTab) ? state.adminTab : (tabs[0]?.key||"pedidos");
   return `
   <div class="screen">
     <div class="topbar">
@@ -1787,12 +1791,12 @@ function renderAdmin(){
 function tryAdminLogin(){
   const val = document.getElementById("admin-pass-input").value;
   if(val===ADMIN_PASS){
-    state.adminAuthed = true; state.adminIsSuperAdmin = true; state.adminLoggedName = "Admin General";
+    state.adminAuthed = true; state.adminIsSuperAdmin = true; state.adminLoggedName = "Admin General"; state.adminLoggedPerms = [];
     render();
   } else {
     const sub = (state.subAdmins||[]).find(a=>a.password===val);
     if(sub){
-      state.adminAuthed = true; state.adminIsSuperAdmin = false; state.adminLoggedName = sub.name;
+      state.adminAuthed = true; state.adminIsSuperAdmin = false; state.adminLoggedName = sub.name; state.adminLoggedPerms = sub.perms||[];
       render();
     } else {
       toast("Contraseña incorrecta", "err");
@@ -1803,10 +1807,20 @@ function adminLogout(){ state.adminAuthed=false; state.adminIsSuperAdmin=false; 
 function setAdminTab(tab){ state.adminTab = tab; render(); }
 
 /* ---------- ADMIN: GESTIÓN DE SUB-ADMINS ---------- */
-let subAdminDraft = { name:"", password:"" };
+const PERM_OPTIONS = [
+  {key:"pedidos",      label:"Ver y gestionar pedidos"},
+  {key:"productos",    label:"Ver y editar productos"},
+  {key:"categorias",   label:"Ver y editar categorías"},
+  {key:"clientes",     label:"Ver clientes"},
+  {key:"comprobantes", label:"Ver y crear comprobantes"},
+  {key:"listaprecios", label:"Generar listas de precios"},
+  {key:"banners",      label:"Editar novedades y ofertas"},
+  {key:"sugerencias",  label:"Ver sugerencias"},
+];
+let subAdminDraft = { name:"", password:"", perms:[] };
 function openSubAdminModal(idx){
   const a = idx!==null && idx!==undefined ? state.subAdmins[idx] : null;
-  subAdminDraft = a ? Object.assign({}, a) : { name:"", password:"" };
+  subAdminDraft = a ? Object.assign({}, a, {perms:[...(a.perms||[])]}) : { name:"", password:"", perms:[] };
   const overlay = document.createElement("div");
   overlay.className = "modal-overlay";
   overlay.id = "subadmin-modal-overlay";
@@ -1816,6 +1830,14 @@ function openSubAdminModal(idx){
       <h3 class="modal-title">${idx!==null&&idx!==undefined?'Editar administrador':'Nuevo administrador'}</h3>
       <div class="form-group"><label>Nombre</label><input id="sa-name" value="${subAdminDraft.name}" placeholder="Ej: María"></div>
       <div class="form-group"><label>Contraseña</label><input id="sa-pass" type="password" value="${subAdminDraft.password}" placeholder="Contraseña para ingresar al admin" autocomplete="new-password"></div>
+      <div style="margin:0 0 14px;">
+        <label style="font-size:13px; font-weight:600; color:rgba(255,255,255,0.7); display:block; margin-bottom:8px;">Permisos</label>
+        ${PERM_OPTIONS.map(p=>`
+          <div class="settings-row" style="margin-bottom:6px; padding:10px 14px; border-radius:10px; background:var(--glass); border:1px solid var(--glass-bd);">
+            <span style="font-size:13px;">${p.label}</span>
+            <button type="button" class="toggle ${subAdminDraft.perms.includes(p.key)?'on':''}" id="sa-perm-${p.key}" onclick="this.classList.toggle('on')"></button>
+          </div>`).join('')}
+      </div>
       <div style="display:flex; gap:10px; margin-top:6px;">
         <button class="btn-secondary" style="flex:1;" onclick="closeSubAdminModal()">Cancelar</button>
         <button class="btn-primary" style="flex:1;" onclick="saveSubAdmin(${idx})">Guardar</button>
@@ -1830,7 +1852,8 @@ function saveSubAdmin(idx){
   if(!name){ toast("Ingresá un nombre","err"); return; }
   if(!password || password.length<4){ toast("La contraseña debe tener al menos 4 caracteres","err"); return; }
   if(password===ADMIN_PASS){ toast("Esa contraseña está reservada","err"); return; }
-  const item = { name, password };
+  const perms = PERM_OPTIONS.map(p=>p.key).filter(k=>document.getElementById(`sa-perm-${k}`)?.classList.contains('on'));
+  const item = { name, password, perms };
   if(idx!==null && idx!==undefined && state.subAdmins[idx]){ state.subAdmins[idx] = item; }
   else{ state.subAdmins.push(item); }
   saveState(); closeSubAdminModal(); render();
