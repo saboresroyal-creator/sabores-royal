@@ -1,4 +1,4 @@
-const CACHE = 'sabores-royal-v5';
+const CACHE = 'sabores-royal-v6';
 
 self.addEventListener('install', e => {
   self.skipWaiting();
