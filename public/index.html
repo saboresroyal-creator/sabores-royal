@@ -1728,7 +1728,7 @@ function renderAdmin(){
     </div>
     <div style="flex:1; padding-bottom:30px;">
       ${tab==="pedidos" ? renderAdminPedidos() : ""}
-      ${tab==="productos" ? renderAdminProductos() : ""}
+      ${tab==="productos" ? `<div id="admin-productos-list">${renderAdminProductos()}</div>` : ""}
       ${tab==="categorias" ? renderAdminCategorias() : ""}
       ${tab==="clientes" ? renderAdminClientes() : ""}
       ${tab==="comprobantes" ? renderAdminComprobantes() : ""}
@@ -1847,10 +1847,23 @@ function notifyOrderWA(orderId){
 
 /* ---------- ADMIN: PRODUCTOS ---------- */
 function renderAdminProductos(){
-  if(state.products.length===0){
-    return `<div class="empty-state">${ic('box')}<p>No hay productos cargados.</p></div>`;
+  const q = (state.adminProductQ||'').toLowerCase().trim();
+  const productos = q
+    ? state.products.filter(p=>p.name.toLowerCase().includes(q))
+    : state.products;
+  const searchBar = `
+    <div style="padding:10px 16px 4px; position:sticky; top:0; z-index:10; background:var(--navy2);">
+      <div style="display:flex; align-items:center; gap:8px; background:var(--glass); border:1px solid var(--glass-bd); border-radius:12px; padding:0 12px;">
+        ${ic('search')}
+        <input type="search" placeholder="Buscar producto…" value="${state.adminProductQ||''}"
+          oninput="state.adminProductQ=this.value; renderAdminProductosInPlace()"
+          style="flex:1; background:none; border:none; outline:none; color:var(--white); font-size:14px; padding:10px 0;">
+      </div>
+    </div>`;
+  if(productos.length===0){
+    return searchBar + `<div class="empty-state">${ic('box')}<p>${q?`Sin resultados para "${q}"`:'No hay productos cargados.'}</p></div>`;
   }
-  return state.products.map(p=>`
+  return searchBar + productos.map(p=>`
     <div class="prod-row-v2">
       <div class="prod-row-v2-top">
         <img src="${p.photo||''}" onerror="this.style.opacity=0">
@@ -1883,6 +1896,10 @@ function renderAdminProductos(){
       </div>
     </div>
   `).join('');
+}
+function renderAdminProductosInPlace(){
+  const el = document.getElementById('admin-productos-list');
+  if(el) el.innerHTML = renderAdminProductos();
 }
 function updateProductPriceInline(productId, field, value){
   const p = state.products.find(pr=>pr.id===productId);
