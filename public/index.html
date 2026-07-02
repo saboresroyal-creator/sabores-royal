@@ -148,6 +148,9 @@ img{display:block; max-width:100%;}
 .pc-img{aspect-ratio:1; background:rgba(255,255,255,0.05); display:flex; align-items:center; justify-content:center; position:relative;}
 .pc-img img{width:100%; height:100%; object-fit:cover;}
 .pc-img svg{width:34px; height:34px; opacity:.25;}
+.sintacc-badge{position:absolute; bottom:6px; right:6px; background:#2e7d4f; color:#fff;
+  font-size:8.5px; font-weight:800; letter-spacing:.4px; padding:3px 7px; border-radius:8px;
+  text-transform:uppercase; box-shadow:0 2px 6px rgba(0,0,0,0.3);}
 .pc-stock-low{position:absolute; top:6px; left:6px; background:var(--warn); color:var(--navy);
   font-size:9px; font-weight:700; padding:2px 7px; border-radius:10px;}
 .pc-body{padding:10px 11px 12px;}
@@ -594,6 +597,7 @@ async function apiSyncProducts(){
       pricePerKg: p.price_per_kg ? Number(p.price_per_kg) : null,
       wholesalePricePerKg: p.wholesale_price_per_kg ? Number(p.wholesale_price_per_kg) : null,
       minGrams: p.min_grams||null,
+      sinTacc: p.sin_tacc||false,
     };});
     const localOnly = state.products.filter(p=>!p._apiId && !_pendingSaves.has(p.id));
     const newProducts = [...apiMapped, ...localOnly];
@@ -730,6 +734,7 @@ async function apiSaveProduct(product){
       price_per_kg: product.pricePerKg||null,
       wholesale_price_per_kg: product.wholesalePricePerKg||null,
       min_grams: product.minGrams||null,
+      sin_tacc: product.sinTacc||false,
     };
     if(product._apiId){
       await supaFetch('/products?id=eq.' + product._apiId, 'PATCH', body);
@@ -1033,7 +1038,11 @@ function renderClientWelcome(){
           </div>
         </div>
         <div style="${fieldStyle}"><span style="${labelStyle}">Email (opcional)</span><input id="reg-email" placeholder="tucorreo@mail.com" type="email" autocomplete="email" style="${inputStyle}"></div>
-        <div style="${fieldStyle}"><span style="${labelStyle}">Dirección (opcional)</span><input id="reg-address" placeholder="Ej: San Martín 450, Rosario" autocomplete="street-address" style="${inputStyle}"></div>
+        <div style="${fieldStyle}"><span style="${labelStyle}">Dirección (opcional)</span><input id="reg-address" placeholder="Ej: San Martín 450" autocomplete="street-address" style="${inputStyle}"></div>
+        <div style="display:flex; gap:10px;">
+          <div style="${fieldStyle}"><span style="${labelStyle}">Piso</span><input id="reg-floor" placeholder="Ej: 3" style="${inputStyle}"></div>
+          <div style="${fieldStyle}"><span style="${labelStyle}">Depto</span><input id="reg-apt" placeholder="Ej: B" style="${inputStyle}"></div>
+        </div>
         <div style="${fieldStyle}"><span style="${labelStyle}">Edad (opcional)</span><input id="reg-age" placeholder="Ej: 32" type="number" min="1" max="120" style="${inputStyle}"></div>
         <div style="${fieldStyle}"><span style="${labelStyle}">DNI (opcional)</span><input id="reg-doc" placeholder="Ej: 30 123 456" type="tel" autocomplete="off" style="${inputStyle}"></div>
         <div style="${fieldStyle}"><span style="${labelStyle}">Ciudad (opcional)</span><input id="reg-city" placeholder="Ej: Rosario" autocomplete="address-level2" style="${inputStyle}"></div>
@@ -1175,14 +1184,18 @@ function renderCatalog(section){
 function renderCatalogResults(section){
   const q = (state.route.q||"").toLowerCase();
   const activeCat = state.route.cat || null;
+  const sinTaccOnly = !!state.route.sinTaccOnly;
   const cats = Object.keys(state.categories[section]||{});
   let products = state.products.filter(p=>p.section===section);
   if(activeCat) products = products.filter(p=>p.cat===activeCat);
+  if(sinTaccOnly) products = products.filter(p=>p.sinTacc);
   if(q) products = products.filter(p=>p.name.toLowerCase().includes(q));
+  const hasSinTacc = state.products.some(p=>p.section===section && p.sinTacc);
   return `
     <div class="chip-row">
-      <button class="chip ${!activeCat?'active':''}" onclick="setCatalogCat(null)">Todas</button>
+      <button class="chip ${!activeCat && !sinTaccOnly?'active':''}" onclick="setCatalogCat(null)">Todas</button>
       ${cats.map(c=>`<button class="chip ${activeCat===c?'active':''}" onclick="setCatalogCat('${c}')">${c}</button>`).join('')}
+      ${hasSinTacc ? `<button class="chip ${sinTaccOnly?'active':''}" onclick="toggleSinTaccFilter()" style="${sinTaccOnly?'':'background:rgba(46,125,79,0.15); border-color:rgba(46,125,79,0.5); color:#6fcf97;'}">🌾 Sin TACC</button>` : ''}
     </div>
     ${products.length===0 ? `
       <div class="empty-state">${ic('box')}<p>No encontramos productos${q?` para "${q}"`:''}.</p></div>
@@ -1193,6 +1206,7 @@ function renderCatalogResults(section){
             <div class="pc-img">
               ${(!p.sellByWeight && p.stock<=5 && p.stock>0) ? `<span class="pc-stock-low">¡Últimas ${p.stock}!</span>`:''}
               ${p.photo ? `<img src="${p.photo}" alt="">` : ic('box')}
+              ${p.sinTacc ? `<span class="sintacc-badge">Sin TACC</span>` : ''}
             </div>
             <div class="pc-body">
               <h4>${p.name}</h4>
@@ -1216,7 +1230,8 @@ function onSearchInput(val){
   const resultsEl = document.getElementById("catalog-results");
   if(resultsEl) resultsEl.innerHTML = renderCatalogResults(section);
 }
-function setCatalogCat(cat){ state.route.cat = cat; render(); }
+function setCatalogCat(cat){ state.route.cat = cat; state.route.sinTaccOnly = false; render(); }
+function toggleSinTaccFilter(){ state.route.sinTaccOnly = !state.route.sinTaccOnly; state.route.cat = null; render(); }
 
 /* ---------- PRODUCT DETAIL ---------- */
 function renderProductDetail(id){
@@ -1553,7 +1568,10 @@ async function completeRegistration(){
   const name = document.getElementById("reg-name").value.trim();
   const rawPhone = document.getElementById("reg-phone").value.trim();
   const email = (document.getElementById("reg-email")||{}).value?.trim()||"";
-  const address = (document.getElementById("reg-address")||{}).value?.trim()||"";
+  const addressBase = (document.getElementById("reg-address")||{}).value?.trim()||"";
+  const floor = (document.getElementById("reg-floor")||{}).value?.trim()||"";
+  const apt = (document.getElementById("reg-apt")||{}).value?.trim()||"";
+  const address = [addressBase, floor?`Piso ${floor}`:'', apt?`Depto ${apt}`:''].filter(Boolean).join(', ');
   const age = (document.getElementById("reg-age")||{}).value?.trim()||"";
   const doc = (document.getElementById("reg-doc")||{}).value?.trim()||"";
   const city = (document.getElementById("reg-city")||{}).value?.trim()||"";
@@ -1585,7 +1603,7 @@ function openEditProfileModal(){
       <h3 class="modal-title">Editar mis datos</h3>
       <div class="form-group"><label>Nombre y apellido</label><input id="ep-name" value="${client.name||''}"></div>
       <div class="form-group"><label>Email</label><input id="ep-email" type="email" value="${client.email||''}" placeholder="tucorreo@mail.com"></div>
-      <div class="form-group"><label>Dirección</label><input id="ep-address" value="${client.address||''}" placeholder="Calle, número, barrio"></div>
+      <div class="form-group"><label>Dirección</label><input id="ep-address" value="${client.address||''}" placeholder="Calle, número, barrio, piso, depto"></div>
       <div class="form-group"><label>Edad</label><input id="ep-age" type="number" value="${client.age||''}" placeholder="Ej: 32"></div>
       <div class="form-group"><label>DNI</label><input id="ep-doc" value="${client.doc||''}"></div>
       <div class="form-group"><label>Ciudad</label><input id="ep-city" value="${client.city||''}"></div>
@@ -1663,7 +1681,7 @@ function bindDynamic(){
 /* =========================================================
    ADMIN PANEL
    ========================================================= */
-let adminPhotoDraft = { original:"", current:"", filter:"none", bgRemoved:false, bgRemovedImage:"", background:"none", sinTacc:false };
+let adminPhotoDraft = { original:"", current:"", filter:"none", bgRemoved:false, bgRemovedImage:"", background:"none", sinTacc:false, brightness:100, contrast:100, saturation:100, rotation:0 };
 let aiProcessing = false;
 
 function openAdmin(){ nav("admin"); }
@@ -1888,7 +1906,7 @@ function deleteProduct(id){
 /* ---------- PRODUCT MODAL (create/edit) ---------- */
 function openProductModal(id){
   const p = id ? state.products.find(pr=>pr.id===id) : null;
-  adminPhotoDraft = { original: p?p.photo:"", current: p?p.photo:"", filter:"none", bgRemoved:false, bgRemovedImage:"", background:"none", sinTacc:false };
+  adminPhotoDraft = { original: p?p.photo:"", current: p?p.photo:"", filter:"none", bgRemoved:false, bgRemovedImage:"", background:"none", sinTacc:p?p.sinTacc||false:false, brightness:100, contrast:100, saturation:100, rotation:0 };
   const overlay = document.createElement("div");
   overlay.className = "modal-overlay";
   overlay.id = "product-modal-overlay";
@@ -1938,6 +1956,14 @@ function openProductModal(id){
 
       <div class="form-group"><label>Stock</label><input id="pm-stock" type="number" value="${p?p.stock:''}" placeholder="0"></div>
       <div class="form-group"><label>Descripción</label><textarea id="pm-desc" placeholder="Descripción breve">${p?p.desc:''}</textarea></div>
+
+      <div class="settings-row" style="margin:0 16px 14px; border-radius:12px; background:rgba(46,125,79,0.12); border:1.5px solid rgba(46,125,79,0.4);">
+        <div style="display:flex; align-items:center; gap:8px;">
+          <span style="background:#2e7d4f; color:#fff; font-size:9px; font-weight:800; padding:2px 8px; border-radius:8px; letter-spacing:.4px;">SIN TACC</span>
+          <span style="font-size:13.5px;">Apto para celíacos</span>
+        </div>
+        <button type="button" class="toggle ${p&&p.sinTacc?'on':''}" id="pm-sintacc-toggle" onclick="this.classList.toggle('on')"></button>
+      </div>
 
       <div style="padding:6px 0 0; display:flex; gap:10px;">
         <button class="btn-secondary" onclick="closeProductModal()" style="flex:1;">Cancelar</button>
@@ -1989,6 +2015,7 @@ function saveProductModal(id){
   const stock = Number(document.getElementById("pm-stock").value)||0;
   const desc = document.getElementById("pm-desc").value.trim();
   const sellByWeight = document.getElementById("pm-sellbyweight-toggle").classList.contains("on");
+  const sinTacc = document.getElementById("pm-sintacc-toggle").classList.contains("on");
   const pricePerKg = sellByWeight ? (Number(document.getElementById("pm-price-per-kg").value)||0) : null;
   const wholesalePerKgRaw = sellByWeight ? document.getElementById("pm-wholesale-price-per-kg").value.trim() : "";
   const wholesalePricePerKg = wholesalePerKgRaw ? Number(wholesalePerKgRaw) : null;
@@ -1998,12 +2025,12 @@ function saveProductModal(id){
   let savedProduct;
   if(id){
     const p = state.products.find(pr=>pr.id===id);
-    Object.assign(p, {name, section, cat, sub, price, wholesalePrice, stock, desc, sellByWeight, pricePerKg, wholesalePricePerKg, minGrams, photo:adminPhotoDraft.current||p.photo});
+    Object.assign(p, {name, section, cat, sub, price, wholesalePrice, stock, desc, sellByWeight, pricePerKg, wholesalePricePerKg, minGrams, sinTacc, photo:adminPhotoDraft.current||p.photo});
     savedProduct = p;
   }else{
     savedProduct = {
       id: "p"+Date.now(), section, cat, sub, name, price, wholesalePrice, stock, desc,
-      sellByWeight, pricePerKg, wholesalePricePerKg, minGrams,
+      sellByWeight, pricePerKg, wholesalePricePerKg, minGrams, sinTacc,
       photo: adminPhotoDraft.current||""
     };
     state.products.push(savedProduct);
@@ -2028,6 +2055,10 @@ function onPhotoSelected(event){
     adminPhotoDraft.bgRemovedImage = "";
     adminPhotoDraft.background = "none";
     adminPhotoDraft.sinTacc = false;
+    adminPhotoDraft.brightness = 100;
+    adminPhotoDraft.contrast = 100;
+    adminPhotoDraft.saturation = 100;
+    adminPhotoDraft.rotation = 0;
     document.getElementById("photo-preview-container").innerHTML = renderPhotoPreview();
   };
   reader.readAsDataURL(file);
@@ -2111,12 +2142,35 @@ function paintBackground(ctx, key, w, h){
 function renderPhotoPreview(){
   const d = adminPhotoDraft;
   const filterCss = PHOTO_FILTERS.find(f=>f.key===d.filter)?.css || '';
+  const adjCss = `brightness(${d.brightness||100}%) contrast(${d.contrast||100}%) saturate(${d.saturation||100}%)`;
+  const fullCss = [filterCss, adjCss].filter(Boolean).join(' ');
+  const rotStyle = d.rotation ? `transform:rotate(${d.rotation}deg); transform-origin:center;` : '';
   return `
     <div class="photo-preview-wrap" style="${d.bgRemoved && d.background==='none' ? 'background-image:repeating-conic-gradient(#3a3a3a 0% 25%, #2a2a2a 0% 50%) 0 0/16px 16px;' : ''}">
-      <img id="photo-preview-img" src="${d.current}" style="filter:${filterCss}">
+      <img id="photo-preview-img" src="${d.current}" style="filter:${fullCss}; ${rotStyle}">
     </div>
 
-    <label style="display:block; font-size:12px; color:rgba(255,255,255,0.55); margin:0 16px 8px; font-weight:600;">Filtro</label>
+    <div style="display:flex; justify-content:center; gap:10px; margin:8px 16px;">
+      <button class="btn-secondary" style="flex:1; font-size:12px; padding:8px;" onclick="rotatePhoto(-90)">↺ Rotar izq.</button>
+      <button class="btn-secondary" style="flex:1; font-size:12px; padding:8px;" onclick="rotatePhoto(90)">↻ Rotar der.</button>
+    </div>
+
+    <div style="padding:0 16px 10px;">
+      <div style="margin-bottom:8px;">
+        <label style="font-size:11px; color:rgba(255,255,255,0.5); font-weight:600; display:flex; justify-content:space-between;"><span>Brillo</span><span id="lbl-br">${d.brightness||100}%</span></label>
+        <input type="range" min="50" max="200" value="${d.brightness||100}" style="width:100%; accent-color:var(--gold);" oninput="adjPhoto('brightness',this.value)">
+      </div>
+      <div style="margin-bottom:8px;">
+        <label style="font-size:11px; color:rgba(255,255,255,0.5); font-weight:600; display:flex; justify-content:space-between;"><span>Contraste</span><span id="lbl-ct">${d.contrast||100}%</span></label>
+        <input type="range" min="50" max="200" value="${d.contrast||100}" style="width:100%; accent-color:var(--gold);" oninput="adjPhoto('contrast',this.value)">
+      </div>
+      <div>
+        <label style="font-size:11px; color:rgba(255,255,255,0.5); font-weight:600; display:flex; justify-content:space-between;"><span>Saturación</span><span id="lbl-sat">${d.saturation||100}%</span></label>
+        <input type="range" min="0" max="200" value="${d.saturation||100}" style="width:100%; accent-color:var(--gold);" oninput="adjPhoto('saturation',this.value)">
+      </div>
+    </div>
+
+    <label style="display:block; font-size:12px; color:rgba(255,255,255,0.55); margin:0 16px 8px; font-weight:600;">Filtros</label>
     <div class="filter-row">
       ${PHOTO_FILTERS.map(f=>`
         <div class="filter-thumb ${d.filter===f.key?'active':''}" onclick="applyPhotoFilter('${f.key}')">
@@ -2140,12 +2194,15 @@ function renderPhotoPreview(){
           </div>
         `).join('')}
       </div>
-
-      <div class="settings-row" style="margin:14px 16px 0; border-radius:12px; background:var(--glass); border:1px solid var(--glass-bd);">
-        <span>Agregar sello "Sin TACC"</span>
-        <button class="toggle ${d.sinTacc?'on':''}" onclick="togglePhotoSinTacc()"></button>
-      </div>
     ` : ''}
+
+    <div class="settings-row" style="margin:14px 16px 0; border-radius:12px; background:rgba(46,125,79,0.12); border:1.5px solid rgba(46,125,79,0.4);">
+      <div style="display:flex; align-items:center; gap:8px;">
+        <span style="background:#2e7d4f; color:#fff; font-size:9px; font-weight:800; padding:2px 8px; border-radius:8px;">SIN TACC</span>
+        <span style="font-size:13px;">Sello en la foto</span>
+      </div>
+      <button class="toggle ${d.sinTacc?'on':''}" onclick="togglePhotoSinTacc()"></button>
+    </div>
   `;
 }
 
@@ -2188,14 +2245,26 @@ function recomposePhotoDraft(){
   const baseSrc = d.bgRemoved ? d.bgRemovedImage : d.original;
   const img = new Image();
   img.onload = ()=>{
+    const rot = (d.rotation||0) % 360;
+    const swap = rot===90 || rot===270;
+    const w = swap ? img.height : img.width;
+    const h = swap ? img.width : img.height;
     const canvas = document.createElement("canvas");
-    canvas.width = img.width; canvas.height = img.height;
+    canvas.width = w; canvas.height = h;
     const ctx = canvas.getContext("2d");
-    if(d.bgRemoved){ paintBackground(ctx, d.background, canvas.width, canvas.height); }
-    ctx.filter = PHOTO_FILTERS.find(f=>f.key===d.filter)?.css || "none";
-    ctx.drawImage(img, 0, 0);
+    if(d.bgRemoved){ paintBackground(ctx, d.background, w, h); }
+    const adjCss = `brightness(${d.brightness||100}%) contrast(${d.contrast||100}%) saturate(${d.saturation||100}%)`;
+    const filterStr = [PHOTO_FILTERS.find(f=>f.key===d.filter)?.css||'', adjCss].filter(Boolean).join(' ');
+    ctx.filter = filterStr || "none";
+    if(rot){
+      ctx.translate(w/2, h/2);
+      ctx.rotate(rot * Math.PI/180);
+      ctx.drawImage(img, -img.width/2, -img.height/2);
+    } else {
+      ctx.drawImage(img, 0, 0);
+    }
     ctx.filter = "none";
-    if(d.bgRemoved && d.sinTacc){ paintSinTaccSeal(ctx, canvas.width, canvas.height); }
+    if(d.sinTacc){ paintSinTaccSeal(ctx, w, h); }
     d.current = canvas.toDataURL("image/png");
     const container = document.getElementById("photo-preview-container");
     if(container){
@@ -2212,6 +2281,23 @@ function applyPhotoFilter(key){
 function applyPhotoBackground(key){
   adminPhotoDraft.background = key;
   recomposePhotoDraft();
+}
+function rotatePhoto(deg){
+  adminPhotoDraft.rotation = ((adminPhotoDraft.rotation||0) + deg + 360) % 360;
+  const img = document.getElementById("photo-preview-img");
+  if(img) img.style.transform = adminPhotoDraft.rotation ? `rotate(${adminPhotoDraft.rotation}deg)` : '';
+}
+function adjPhoto(prop, val){
+  adminPhotoDraft[prop] = Number(val);
+  const lblMap = {brightness:'lbl-br', contrast:'lbl-ct', saturation:'lbl-sat'};
+  const lbl = document.getElementById(lblMap[prop]);
+  if(lbl) lbl.textContent = val+'%';
+  const img = document.getElementById("photo-preview-img");
+  if(img){
+    const d = adminPhotoDraft;
+    const filterCss = PHOTO_FILTERS.find(f=>f.key===d.filter)?.css||'';
+    img.style.filter = [filterCss, `brightness(${d.brightness}%) contrast(${d.contrast}%) saturate(${d.saturation}%)`].filter(Boolean).join(' ');
+  }
 }
 function togglePhotoSinTacc(){
   adminPhotoDraft.sinTacc = !adminPhotoDraft.sinTacc;
