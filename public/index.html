@@ -146,9 +146,11 @@ img{display:block; max-width:100%;}
 .product-grid{display:grid; grid-template-columns:1fr 1fr; gap:12px; padding:4px 16px 18px;}
 .product-card{border-radius:16px; overflow:hidden; background:var(--glass); border:1px solid var(--glass-bd);}
 .pc-img{aspect-ratio:1; background:rgba(255,255,255,0.05); display:flex; align-items:center; justify-content:center; position:relative;}
-.pc-img img:not(.sintacc-badge){width:100%; height:100%; object-fit:cover;}
+.pc-img img{width:100%; height:100%; object-fit:cover;}
 .pc-img svg{width:34px; height:34px; opacity:.25;}
-.sintacc-badge{position:absolute; bottom:6px; right:6px; width:44px; height:44px; object-fit:contain; filter:drop-shadow(0 2px 5px rgba(0,0,0,0.6)); pointer-events:none;}
+.sintacc-badge{position:absolute; bottom:6px; right:6px; background:#2e7d4f; color:#fff;
+  font-size:8.5px; font-weight:800; letter-spacing:.4px; padding:3px 7px; border-radius:8px;
+  text-transform:uppercase; box-shadow:0 2px 6px rgba(0,0,0,0.3);}
 .pc-stock-low{position:absolute; top:6px; left:6px; background:var(--warn); color:var(--navy);
   font-size:9px; font-weight:700; padding:2px 7px; border-radius:10px;}
 .pc-body{padding:10px 11px 12px;}
@@ -1204,7 +1206,7 @@ function renderCatalogResults(section){
             <div class="pc-img">
               ${(!p.sellByWeight && p.stock<=5 && p.stock>0) ? `<span class="pc-stock-low">¡Últimas ${p.stock}!</span>`:''}
               ${p.photo ? `<img src="${p.photo}" alt="">` : ic('box')}
-              ${p.sinTacc ? `<img src="/sin-tacc.png" class="sintacc-badge" alt="Sin TACC">` : ''}
+              ${p.sinTacc ? `<span class="sintacc-badge">Sin TACC</span>` : ''}
             </div>
             <div class="pc-body">
               <h4>${p.name}</h4>
