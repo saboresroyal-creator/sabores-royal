@@ -2137,22 +2137,82 @@ const PHOTO_FILTERS = [
 /* Backgrounds are drawn procedurally on canvas — no external images needed,
    so this works fully offline once the page itself has loaded. */
 const PHOTO_BACKGROUNDS = [
-  {key:"none", label:"Transparente"},
-  {key:"white", label:"Blanco"},
-  {key:"cream", label:"Crema"},
-  {key:"lightgray", label:"Gris claro"},
-  {key:"navy", label:"Navy marca"},
-  {key:"gold", label:"Dorado marca"},
-  {key:"wood", label:"Madera"},
-  {key:"marble", label:"Mármol"},
-  {key:"studio", label:"Estudio"},
+  {key:"none",       label:"Transparente"},
+  {key:"studio",     label:"Estudio"},
+  {key:"white",      label:"Blanco"},
+  {key:"black",      label:"Negro"},
+  {key:"cream",      label:"Crema"},
+  {key:"linen",      label:"Lino"},
+  {key:"slate",      label:"Pizarra"},
+  {key:"lightgray",  label:"Gris"},
+  {key:"green-dark", label:"Verde"},
+  {key:"navy",       label:"Navy"},
+  {key:"gold",       label:"Dorado"},
+  {key:"bokeh",      label:"Bokeh"},
+  {key:"wood",       label:"Madera"},
+  {key:"marble",     label:"Mármol"},
+  {key:"kraft",      label:"Kraft"},
+  {key:"denim",      label:"Denim"},
 ];
 
 function paintBackground(ctx, key, w, h){
-  if(key==="none") return; // leave transparent
+  if(key==="none") return;
   if(key==="white"){ ctx.fillStyle="#ffffff"; ctx.fillRect(0,0,w,h); return; }
+  if(key==="black"){
+    const g=ctx.createRadialGradient(w/2,h*0.35,0,w/2,h/2,w*0.8);
+    g.addColorStop(0,"#1a1a1a"); g.addColorStop(1,"#000000");
+    ctx.fillStyle=g; ctx.fillRect(0,0,w,h); return;
+  }
   if(key==="cream"){ ctx.fillStyle="#f8f5ec"; ctx.fillRect(0,0,w,h); return; }
+  if(key==="linen"){
+    ctx.fillStyle="#f2ede3"; ctx.fillRect(0,0,w,h);
+    ctx.globalAlpha=0.06;
+    for(let i=0;i<h;i+=3){ ctx.fillStyle=i%6===0?"#b8a98a":"#d4c9b0"; ctx.fillRect(0,i,w,1.5); }
+    for(let i=0;i<w;i+=3){ ctx.fillStyle=i%6===0?"#b8a98a":"#d4c9b0"; ctx.fillRect(i,0,1.5,h); }
+    ctx.globalAlpha=1; return;
+  }
+  if(key==="slate"){
+    const g=ctx.createLinearGradient(0,0,w,h);
+    g.addColorStop(0,"#2c3440"); g.addColorStop(1,"#1a2030");
+    ctx.fillStyle=g; ctx.fillRect(0,0,w,h); return;
+  }
   if(key==="lightgray"){ ctx.fillStyle="#e9e9ec"; ctx.fillRect(0,0,w,h); return; }
+  if(key==="green-dark"){
+    const g=ctx.createLinearGradient(0,0,w,h);
+    g.addColorStop(0,"#1a3d2b"); g.addColorStop(1,"#0d2218");
+    ctx.fillStyle=g; ctx.fillRect(0,0,w,h); return;
+  }
+  if(key==="bokeh"){
+    const g=ctx.createRadialGradient(w*0.35,h*0.35,0,w/2,h/2,w*0.85);
+    g.addColorStop(0,"#e8f4fd"); g.addColorStop(0.4,"#b8d8f5"); g.addColorStop(1,"#7ab3e0");
+    ctx.fillStyle=g; ctx.fillRect(0,0,w,h);
+    ctx.globalAlpha=0.18;
+    [[w*0.2,h*0.2,w*0.14],[w*0.75,h*0.3,w*0.1],[w*0.5,h*0.7,w*0.18],[w*0.85,h*0.75,w*0.08]].forEach(([cx,cy,r])=>{
+      const c=ctx.createRadialGradient(cx,cy,0,cx,cy,r);
+      c.addColorStop(0,"rgba(255,255,255,0.9)"); c.addColorStop(1,"rgba(255,255,255,0)");
+      ctx.fillStyle=c; ctx.beginPath(); ctx.arc(cx,cy,r,0,Math.PI*2); ctx.fill();
+    });
+    ctx.globalAlpha=1; return;
+  }
+  if(key==="kraft"){
+    const g=ctx.createLinearGradient(0,0,w,h);
+    g.addColorStop(0,"#c4945a"); g.addColorStop(1,"#a67840");
+    ctx.fillStyle=g; ctx.fillRect(0,0,w,h);
+    ctx.globalAlpha=0.08;
+    for(let i=0;i<h;i+=2){ ctx.fillStyle=i%4===0?"#7a5020":"#e8b870"; ctx.fillRect(0,i,w,1); }
+    ctx.globalAlpha=1; return;
+  }
+  if(key==="denim"){
+    const g=ctx.createLinearGradient(0,0,w,h);
+    g.addColorStop(0,"#2d4a7a"); g.addColorStop(1,"#1a3060");
+    ctx.fillStyle=g; ctx.fillRect(0,0,w,h);
+    ctx.globalAlpha=0.07;
+    for(let i=-h;i<w+h;i+=6){
+      ctx.strokeStyle="#6a90c8"; ctx.lineWidth=2;
+      ctx.beginPath(); ctx.moveTo(i,0); ctx.lineTo(i+h,h); ctx.stroke();
+    }
+    ctx.globalAlpha=1; return;
+  }
   if(key==="navy"){
     const g = ctx.createLinearGradient(0,0,w,h);
     g.addColorStop(0,"#1a2a5e"); g.addColorStop(1,"#0f1c45");
