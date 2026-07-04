@@ -696,15 +696,13 @@ async function apiSaveContent(key){
 }
 
 async function apiSaveSubAdmins(){
-  try{
-    const val = JSON.stringify(state.subAdmins);
-    const existing = await supaFetch('/app_settings?setting_key=eq.sub_admins&select=id', 'GET');
-    if(existing && existing.length>0){
-      await supaFetch('/app_settings?setting_key=eq.sub_admins', 'PATCH', {setting_value: val});
-    }else{
-      await supaFetch('/app_settings', 'POST', {setting_key:'sub_admins', setting_value: val});
-    }
-  }catch(e){ console.warn('Error guardando admins:', e); toast('Error: '+e.message,'err'); }
+  const val = JSON.stringify(state.subAdmins);
+  const existing = await supaFetch('/app_settings?setting_key=eq.sub_admins&select=id', 'GET');
+  if(existing && existing.length>0){
+    await supaFetch('/app_settings?setting_key=eq.sub_admins', 'PATCH', {setting_value: val});
+  }else{
+    await supaFetch('/app_settings', 'POST', {setting_key:'sub_admins', setting_value: val});
+  }
 }
 
 async function apiSyncClients(){
@@ -1771,7 +1769,17 @@ function renderAdmin(){
     </div>
     <div style="flex:1; padding-bottom:30px;">
       ${tab==="pedidos" ? renderAdminPedidos() : ""}
-      ${tab==="productos" ? `<div id="admin-productos-list">${renderAdminProductos()}</div>` : ""}
+      ${tab==="productos" ? `
+        <div style="padding:10px 16px 4px; position:sticky; top:0; z-index:10; background:var(--navy2);">
+          <div style="display:flex; align-items:center; gap:8px; background:var(--glass); border:1px solid var(--glass-bd); border-radius:12px; padding:0 12px;">
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" style="width:17px;height:17px;opacity:.5;flex-shrink:0;"><circle cx="11" cy="11" r="7"/><path d="M21 21l-4.3-4.3"/></svg>
+            <input type="search" placeholder="Buscar producto…" value="${state.adminProductQ||''}"
+              oninput="state.adminProductQ=this.value; renderAdminProductosInPlace()"
+              style="flex:1; background:none; border:none; outline:none; color:var(--white); font-size:14px; padding:10px 0;">
+          </div>
+        </div>
+        <div id="admin-productos-list">${renderAdminProductos()}</div>
+      ` : ""}
       ${tab==="categorias" ? renderAdminCategorias() : ""}
       ${tab==="clientes" ? renderAdminClientes() : ""}
       ${tab==="comprobantes" ? renderAdminComprobantes() : ""}
@@ -1843,19 +1851,24 @@ function openSubAdminModal(idx){
   document.body.appendChild(overlay);
 }
 function closeSubAdminModal(){ const el=document.getElementById("subadmin-modal-overlay"); if(el) el.remove(); }
-function saveSubAdmin(idx){
+async function saveSubAdmin(idx){
   const name = document.getElementById("sa-name").value.trim();
-  const password = document.getElementById("sa-pass").value;
+  const pass = document.getElementById("sa-pass").value;
   if(!name){ toast("Ingresá un nombre","err"); return; }
-  if(!password || password.length<4){ toast("La contraseña debe tener al menos 4 caracteres","err"); return; }
-  if(password===ADMIN_PASS){ toast("Esa contraseña está reservada","err"); return; }
+  if(!pass || pass.length<4){ toast("La contraseña debe tener al menos 4 caracteres","err"); return; }
+  if(pass===ADMIN_PASS){ toast("Esa contraseña está reservada","err"); return; }
   const perms = PERM_OPTIONS.map(p=>p.key).filter(k=>document.getElementById(`sa-perm-${k}`)?.classList.contains('on'));
-  const item = { name, password, perms };
-  if(idx!==null && idx!==undefined && state.subAdmins[idx]){ state.subAdmins[idx] = item; }
+  const item = { name, password: pass, perms };
+  if(idx!==null && idx!==undefined && idx>=0 && state.subAdmins[idx]){ state.subAdmins[idx] = item; }
   else{ state.subAdmins.push(item); }
   saveState(); closeSubAdminModal(); render();
-  toast("Administrador guardado","ok");
-  apiSaveSubAdmins();
+  try{
+    await apiSaveSubAdmins();
+    toast("Administrador guardado","ok");
+  }catch(e){
+    toast("Error al guardar en servidor: "+e.message,"err");
+    console.error("saveSubAdmin error:", e);
+  }
 }
 function deleteSubAdmin(idx){
   if(!confirm("¿Eliminar este administrador?")) return;
@@ -1913,19 +1926,10 @@ function renderAdminProductos(){
   const productos = q
     ? state.products.filter(p=>p.name.toLowerCase().includes(q))
     : state.products;
-  const searchBar = `
-    <div style="padding:10px 16px 4px; position:sticky; top:0; z-index:10; background:var(--navy2);">
-      <div style="display:flex; align-items:center; gap:8px; background:var(--glass); border:1px solid var(--glass-bd); border-radius:12px; padding:0 12px;">
-        ${ic('search')}
-        <input type="search" placeholder="Buscar producto…" value="${state.adminProductQ||''}"
-          oninput="state.adminProductQ=this.value; renderAdminProductosInPlace()"
-          style="flex:1; background:none; border:none; outline:none; color:var(--white); font-size:14px; padding:10px 0;">
-      </div>
-    </div>`;
   if(productos.length===0){
-    return searchBar + `<div class="empty-state">${ic('box')}<p>${q?`Sin resultados para "${q}"`:'No hay productos cargados.'}</p></div>`;
+    return `<div class="empty-state">${ic('box')}<p>${q?`Sin resultados para "${q}"`:'No hay productos cargados.'}</p></div>`;
   }
-  return searchBar + productos.map(p=>`
+  return productos.map(p=>`
     <div class="prod-row-v2">
       <div class="prod-row-v2-top">
         <img src="${p.photo||''}" onerror="this.style.opacity=0">
@@ -1971,6 +1975,7 @@ function updateProductPriceInline(productId, field, value){
   else if(field==="pricePerKg"){ p.pricePerKg = Math.max(0, Number(value)||0); }
   else if(field==="wholesalePricePerKg"){ p.wholesalePricePerKg = value.trim()==="" ? null : Math.max(0, Number(value)||0); }
   saveState();
+  apiSaveProduct(p);
   toast("Precio actualizado", "ok");
 }
 function deleteProduct(id){
@@ -2491,7 +2496,7 @@ function renderAdminCategorias(){
           </div>
         </div>
       `).join('')}
-      <button class="btn-secondary" style="margin:6px 0 18px;" onclick="addCategory('${section}')">${ic('plus')} Nueva categoría en ${SECTION_META[section].label}</button>
+      <button class="btn-secondary" style="margin:6px 0 18px; width:auto; padding:9px 16px; font-size:12.5px;" onclick="addCategory('${section}')">${ic('plus')} Nueva categoría</button>
     </div>`;
   }).join('');
 }
