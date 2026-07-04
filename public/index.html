@@ -75,19 +75,21 @@ img{display:block; max-width:100%;}
   transition:transform .15s ease;
 }
 .section-card:active{transform:scale(.97);}
-.section-card.natural,.section-card.golosinas,.section-card.market,.section-card.celiaco,.section-card.featured{
-  background:var(--glass); border-color:var(--glass-bd); box-shadow:none;
-}
+.section-card.natural  {background:linear-gradient(135deg,rgba(20,60,35,0.75),rgba(20,60,35,0.35)); border-color:rgba(40,120,70,0.4);}
+.section-card.golosinas{background:linear-gradient(135deg,rgba(70,15,50,0.75),rgba(70,15,50,0.35)); border-color:rgba(130,40,100,0.4);}
+.section-card.market   {background:linear-gradient(135deg,rgba(14,35,90,0.75),rgba(14,35,90,0.35)); border-color:rgba(40,80,180,0.4);}
+.section-card.celiaco  {background:linear-gradient(135deg,rgba(20,60,35,0.75),rgba(20,60,35,0.35)); border-color:rgba(40,120,70,0.4);}
+.section-card.featured {background:var(--glass); border-color:var(--glass-bd); box-shadow:none;}
 .sc-badge{display:none;}
 .sc-icon{
   width:52px; height:52px; flex:none; border-radius:14px;
   display:flex; align-items:center; justify-content:center;
 }
-.section-card.natural   .sc-icon{background:rgba(28,80,48,0.9);}
-.section-card.golosinas .sc-icon{background:rgba(70,20,80,0.9);}
-.section-card.market    .sc-icon{background:rgba(18,45,110,0.9);}
-.section-card.celiaco   .sc-icon{background:rgba(28,80,48,0.9);}
-.sc-icon svg{width:26px; height:26px; color:#fff;}
+.section-card.natural   .sc-icon{background:rgba(14,48,26,0.95);}
+.section-card.golosinas .sc-icon{background:rgba(55,10,40,0.95);}
+.section-card.market    .sc-icon{background:rgba(10,26,72,0.95);}
+.section-card.celiaco   .sc-icon{background:rgba(14,48,26,0.95);}
+.sc-icon svg{width:26px; height:26px; color:var(--gold2);}
 .section-card h3{font-size:17px; color:var(--white); margin-bottom:3px; font-weight:700;}
 .section-card p{font-size:13px; color:rgba(255,255,255,0.52);}
 .sc-arrow{margin-left:auto; opacity:.35; flex-shrink:0;}
