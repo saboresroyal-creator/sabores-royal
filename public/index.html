@@ -924,7 +924,7 @@ function effectivePrice(product){
 function genOrderId(){
   return "SR" + Date.now().toString().slice(-6);
 }
-function placeOrder(customer){
+function placeOrder(customer, clientDiscountPct=0){
   const items = state.cart.map(c=>{
     const p = state.products.find(pr=>pr.id===c.id);
     if(c.grams){
@@ -932,12 +932,17 @@ function placeOrder(customer){
     }
     return {id:c.id, name:p?p.name:"Producto", price:p?effectivePrice(p):0, qty:c.qty, lineTotal:cartItemLineTotal(c)};
   });
+  const base = cartTotal();
+  const discPct = Number(clientDiscountPct)||0;
+  const discAmount = discPct > 0 ? Math.round(base * discPct / 100) : 0;
   const order = {
     id: genOrderId(),
     date: new Date().toISOString(),
     customer,
     items,
-    total: cartTotal(),
+    clientDiscountPct: discPct||undefined,
+    clientDiscountAmount: discAmount||undefined,
+    total: base - discAmount,
     status: "Pendiente",
   };
   state.orders.unshift(order);
@@ -985,6 +990,9 @@ function buildOrderWAMessage(order){
     const label = it.grams ? `${it.grams}g de` : `${it.qty}x`;
     msg += `• ${label} ${it.name} — ${money(it.lineTotal!=null?it.lineTotal:it.price*it.qty)}\n`;
   });
+  if(order.clientDiscountAmount > 0){
+    msg += `\nDescuento especial (${order.clientDiscountPct}%): -${money(order.clientDiscountAmount)}`;
+  }
   msg += `\nTotal: ${money(order.total)}`;
   if(order.customer.address) msg += `\nDirección: ${order.customer.address}`;
   msg += `\nNombre: ${order.customer.name}`;
@@ -1184,14 +1192,13 @@ function renderHome(){
           <div class="sc-arrow">${ic('chevron')}</div>
         </button>`;
       }).join('')}
-      ${state.products.some(p=>p.sinTacc) ? `
-        <button class="section-card celiaco" onclick="nav('celiaco')">
-          <div class="sc-icon" style="background:rgba(46,125,79,0.2); border-radius:14px; padding:6px;">
-            <img src="/sin-tacc.png" style="width:100%; height:100%; object-fit:contain;">
-          </div>
-          <div><h3>Apto Celíaco</h3><p>Productos Sin TACC certificados</p></div>
-          <div class="sc-arrow">${ic('chevron')}</div>
-        </button>` : ''}
+      <button class="section-card celiaco" onclick="nav('celiaco')">
+        <div class="sc-icon" style="background:rgba(46,125,79,0.2); border-radius:14px; padding:6px;">
+          <img src="/sin-tacc.png" style="width:100%; height:100%; object-fit:contain;">
+        </div>
+        <div><h3>Apto Celíaco</h3><p>Productos Sin TACC certificados</p></div>
+        <div class="sc-arrow">${ic('chevron')}</div>
+      </button>
     </div>
     <button class="wa-float-btn" onclick="window.open(waLink('¡Hola! Quiero hacer una consulta.'),'_blank')">
       ${ic('wa')} Hablar por WhatsApp
@@ -1419,6 +1426,10 @@ function renderCart(){
 function renderCheckout(){
   const saved = state.currentClientPhone ? state.clients[state.currentClientPhone] : null;
   const savedPhoneDigits = saved ? saved.phone.replace(/^\+?54/,'') : '';
+  const base = cartTotal();
+  const discPct = saved && saved.discountPct ? Number(saved.discountPct) : 0;
+  const discAmount = discPct > 0 ? Math.round(base * discPct / 100) : 0;
+  const finalTotal = base - discAmount;
   return `
   <div class="screen">
     <div class="topbar"><button class="back" onclick="nav('cart')">${ic('chevron')}</button><h2>Tus datos</h2></div>
@@ -1430,7 +1441,11 @@ function renderCheckout(){
     <div class="form-group"><label>Dirección de entrega (opcional)</label><input id="ck-address" value="${saved?saved.address:''}" placeholder="Calle, número, barrio"></div>
     <div class="form-group"><label>Notas (opcional)</label><textarea id="ck-notes" placeholder="Aclaraciones sobre tu pedido"></textarea></div>
     <div class="cart-summary">
-      <div class="summary-row total"><span>Total a pagar</span><span>${money(cartTotal())}</span></div>
+      ${discPct > 0 ? `
+        <div class="summary-row"><span>Subtotal</span><span>${money(base)}</span></div>
+        <div class="summary-row" style="color:var(--ok);"><span>Descuento especial (${discPct}%)</span><span>-${money(discAmount)}</span></div>
+      ` : ''}
+      <div class="summary-row total"><span>Total a pagar</span><span>${money(finalTotal)}</span></div>
     </div>
     <div style="padding:0 16px 90px;">
       <button class="btn-primary" onclick="submitOrder()">${ic('wa')} Confirmar pedido por WhatsApp</button>
@@ -1444,7 +1459,9 @@ function submitOrder(){
   if(!name || !rawPhone){ toast("Completá nombre y teléfono", "err"); return; }
   const phone = normalizePhone(rawPhone);
   state.currentClientPhone = phone;
-  const order = placeOrder({name, phone, address});
+  const clientForDiscount = state.clients[phone];
+  const discPct = clientForDiscount && clientForDiscount.discountPct ? Number(clientForDiscount.discountPct) : 0;
+  const order = placeOrder({name, phone, address}, discPct);
   saveState();
   apiSaveOrder(order); // sync en background con Supabase
   const msg = buildOrderWAMessage(order);
@@ -1513,7 +1530,7 @@ function renderAccount(){
           <div style="padding:13px 14px; border-radius:12px; background:var(--glass); border:1px solid var(--glass-bd); color:var(--cream); font-weight:700;">+54</div>
           <input id="reg-phone" placeholder="11 1234 5678" value="${(state.route.accPhone||'').replace(/^\+?54/,'')}" style="flex:1;">
         </div></div>
-        <div class="form-group"><label>DNI</label><input id="reg-doc" placeholder="Tu DNI"></div>
+        <div class="form-group"><label>DNI / CUIT</label><input id="reg-doc" placeholder="Ej: 12345678 o 30-71234567-8"></div>
         <div class="form-group"><label>Dirección</label><input id="reg-address" placeholder="Calle y número"></div>
         <div class="form-group"><label>Ciudad</label><input id="reg-city" placeholder="Tu ciudad"></div>
         <div class="form-group"><label>Provincia</label>
@@ -1641,7 +1658,7 @@ function openEditProfileModal(){
       <div class="form-group"><label>Email</label><input id="ep-email" type="email" value="${client.email||''}" placeholder="tucorreo@mail.com"></div>
       <div class="form-group"><label>Dirección</label><input id="ep-address" value="${client.address||''}" placeholder="Calle, número, barrio, piso, depto"></div>
       <div class="form-group"><label>Edad</label><input id="ep-age" type="number" value="${client.age||''}" placeholder="Ej: 32"></div>
-      <div class="form-group"><label>DNI</label><input id="ep-doc" value="${client.doc||''}"></div>
+      <div class="form-group"><label>DNI / CUIT</label><input id="ep-doc" value="${client.doc||''}" placeholder="Ej: 12345678 o 30-71234567-8"></div>
       <div class="form-group"><label>Ciudad</label><input id="ep-city" value="${client.city||''}"></div>
       <div class="form-group"><label>Provincia</label>
         <select id="ep-province">
@@ -2104,6 +2121,10 @@ function saveProductModal(id){
   const minGrams = sellByWeight ? (Number(document.getElementById("pm-min-grams").value)|| 50) : null;
   if(!name){ toast("Ingresá un nombre", "err"); return; }
   if(sellByWeight && !pricePerKg){ toast("Ingresá el precio por kilo", "err"); return; }
+  if(!id){
+    const dup = state.products.find(pr=>pr.name.toLowerCase().trim()===name.toLowerCase().trim());
+    if(dup && !confirm(`Ya existe un producto llamado "${dup.name}" en ${SECTION_META[dup.section]?.label||dup.section}. ¿Guardarlo igual?`)) return;
+  }
   let savedProduct;
   if(id){
     const p = state.products.find(pr=>pr.id===id);
@@ -2535,9 +2556,11 @@ function renderAdminClientes(){
       <div class="client-rank">${i+1}</div>
       <div class="client-row-body">
         <h4>${c.name} ${c.wholesale?`<span class="tier-badge" style="background:rgba(60,150,220,0.25); color:#6db8e8;">Mayorista</span>`:''}</h4>
-        <p>${c.phone}${c.doc?` · DNI ${c.doc}`:''} · <span class="tier-badge tier-${tier.key}" style="margin-left:4px;">${tier.label}</span></p>
+        <p>${c.phone}${c.doc?` · DNI/CUIT ${c.doc}`:''} · <span class="tier-badge tier-${tier.key}" style="margin-left:4px;">${tier.label}</span>${c.discountPct?` · <span style="color:var(--gold2); font-weight:600;">${c.discountPct}% desc.</span>`:''}
+        </p>
       </div>
       <div class="client-pts" style="display:flex; align-items:center; gap:5px;">${c.points} <img src="${CROWN_DATA_URL}" style="width:15px; height:15px; object-fit:contain;"></div>
+      ${state.adminIsSuperAdmin ? `<button class="icon-btn" style="flex:none; margin-left:8px; ${c.discountPct?'color:var(--gold2); border-color:var(--gold2);':''}" onclick="editClientDiscount('${c.phone}')" title="Descuento especial">%</button>` : ''}
       <button class="icon-btn" style="flex:none; margin-left:8px; ${c.wholesale?'color:#6db8e8; border-color:#6db8e8;':''}" onclick="toggleClientWholesale('${c.phone}')" title="Marcar/desmarcar mayorista">${ic('package')}</button>
       <button class="icon-btn" style="flex:none; margin-left:8px;" onclick="confirmDeleteClient('${c.phone}')">${ic('trash')}</button>
     </div>`;
@@ -2560,6 +2583,19 @@ function confirmDeleteClient(phone){
   saveState();
   render();
   toast("Cliente eliminado", "ok");
+}
+function editClientDiscount(phone){
+  if(!state.adminIsSuperAdmin){ toast("Solo el admin general puede editar descuentos", "err"); return; }
+  const c = state.clients[phone];
+  if(!c) return;
+  const current = c.discountPct || 0;
+  const input = prompt(`Descuento especial para ${c.name} (%)\nDejá 0 para sin descuento especial.`, current);
+  if(input === null) return;
+  const pct = Math.min(100, Math.max(0, Number(input)||0));
+  c.discountPct = pct || undefined;
+  saveState();
+  render();
+  toast(pct > 0 ? `${c.name}: ${pct}% de descuento especial` : `${c.name}: sin descuento especial`, "ok");
 }
 
 /* ---------- ADMIN: CONFIG ---------- */
