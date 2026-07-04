@@ -1082,7 +1082,10 @@ function renderBottomNav(){
     ${tabs.map(t=>`
       <button class="${r===t.key?'active':''}" onclick="nav('${t.key}'${t.section?`,{section:'${t.section}'}`:''})" style="position:relative;">
         ${ic(t.icon)}
-        ${t.badge?`<span style="position:absolute; top:-2px; right:2px; background:var(--gold); color:var(--navy); font-size:9px; font-weight:700; border-radius:10px; padding:1px 5px;">${t.badge}</span>`:''}
+        ${t.key==='chat'
+          ? `<span id="chat-nav-badge" style="position:absolute;top:-2px;right:2px;background:var(--gold);color:var(--navy);font-size:9px;font-weight:700;border-radius:10px;padding:1px 5px;display:${t.badge?'':'none'};">${t.badge||0}</span>`
+          : t.badge?`<span style="position:absolute;top:-2px;right:2px;background:var(--gold);color:var(--navy);font-size:9px;font-weight:700;border-radius:10px;padding:1px 5px;">${t.badge}</span>`:''
+        }
         <span>${t.label}</span>
       </button>`).join('')}
   </div>`;
@@ -1967,7 +1970,14 @@ async function syncClientChat(){
     } else {
       const unreadChanged = newUnread !== state.chatUnread;
       state.chatUnread = newUnread;
-      if(changed || unreadChanged) render();
+      if(changed || unreadChanged){
+        // Actualiza solo el badge del bottom nav, sin destruir formularios activos
+        const badge = document.getElementById('chat-nav-badge');
+        if(badge){
+          badge.textContent = newUnread;
+          badge.style.display = newUnread > 0 ? '' : 'none';
+        }
+      }
     }
   }catch(e){ console.warn('Chat sync:', e); }
 }
