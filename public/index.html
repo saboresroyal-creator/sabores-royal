@@ -1980,6 +1980,12 @@ function deleteSubAdmin(idx){
 let _chatPollTimer = null;
 let _chatPendingFile = null;
 
+function updateAppBadge(count){
+  if(!('setAppBadge' in navigator)) return;
+  if(count > 0) navigator.setAppBadge(count).catch(()=>{});
+  else navigator.clearAppBadge().catch(()=>{});
+}
+
 async function syncClientChat(){
   const phone = state.currentClientPhone;
   if(!phone) return;
@@ -1991,6 +1997,7 @@ async function syncClientChat(){
     const newUnread = msgs.filter(m=>m.sender==='admin'&&!m.read).length;
     if(state.route.screen==='chat'){
       state.chatUnread = 0;
+      updateAppBadge(0);
       supaFetch(`/chat_messages?client_phone=eq.${encodeURIComponent(phone)}&sender=eq.admin&read=eq.false`,'PATCH',{read:true}).catch(()=>{});
       if(changed){
         // Actualiza solo el contenedor de mensajes — NO recrea el input
@@ -2005,6 +2012,7 @@ async function syncClientChat(){
       const unreadChanged = newUnread !== state.chatUnread;
       state.chatUnread = newUnread;
       if(changed || unreadChanged){
+        updateAppBadge(newUnread);
         // Actualiza solo el badge del bottom nav, sin destruir formularios activos
         const badge = document.getElementById('chat-nav-badge');
         if(badge){
@@ -2026,6 +2034,8 @@ async function syncAdminChats(){
     const unread = {};
     msgs.forEach(m=>{ if(m.sender==='client'&&!m.read) unread[m.client_phone]=(unread[m.client_phone]||0)+1; });
     state.adminChatUnread = unread;
+    const totalUnread = Object.values(unread).reduce((s,n)=>s+n,0);
+    updateAppBadge(totalUnread);
     if(state.adminChatPhone && state.adminTab==='chats'){
       if(changed){
         // Actualiza solo los mensajes — NO destruye el input de respuesta
@@ -2229,6 +2239,8 @@ function renderAdminChats(){
 function openAdminChat(phone){
   state.adminChatPhone = phone;
   if(state.adminChatUnread) state.adminChatUnread[phone]=0;
+  const totalUnread = Object.values(state.adminChatUnread||{}).reduce((s,n)=>s+n,0);
+  updateAppBadge(totalUnread);
   render();
   supaFetch(`/chat_messages?client_phone=eq.${encodeURIComponent(phone)}&sender=eq.client&read=eq.false`,'PATCH',{read:true}).catch(()=>{});
   setTimeout(()=>{ const c=document.getElementById('admin-chat-msgs'); if(c) c.scrollTop=c.scrollHeight; },100);
