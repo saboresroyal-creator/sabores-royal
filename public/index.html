@@ -1952,6 +1952,10 @@ function renderAdminPedidos(){
           : `<button class="btn-outline-gold" style="padding:9px; font-size:12px;" onclick="openOrderVoucherPicker('${o.id}')">${ic('receipt')} Generar comprobante</button>`
         }
       </div>
+      <div class="oc-actions" style="margin-top:8px; gap:8px;">
+        <button style="flex:1; padding:9px; font-size:12px; background:var(--glass); border:1px solid var(--glass-bd); border-radius:10px; color:var(--white); cursor:pointer;" onclick="printOrder('${o.id}')">🖨️ Imprimir / PDF</button>
+        <button style="flex:1; padding:9px; font-size:12px; background:var(--glass); border:1px solid var(--glass-bd); border-radius:10px; color:var(--white); cursor:pointer;" onclick="shareOrder('${o.id}')">📤 Compartir</button>
+      </div>
     </div>
   `;}).join('');
 }
@@ -1967,6 +1971,118 @@ function notifyOrderWA(orderId){
   if(!order) return;
   const msg = buildStatusWAMessage(order);
   window.open(waLink.call(null, msg).replace(WA_NUMBER, order.customer.phone.replace(/\D/g,'')), "_blank");
+}
+
+function printOrder(orderId){
+  const o = state.orders.find(ord=>ord.id===orderId);
+  if(!o) return;
+  const win = window.open("", "_blank");
+  if(!win){ toast("El navegador bloqueó la ventana emergente. Permití los pop-ups.", "err"); return; }
+  const fecha = new Date(o.date||o._savedAt||'').toLocaleDateString('es-AR',{day:'2-digit',month:'2-digit',year:'numeric',hour:'2-digit',minute:'2-digit'});
+  const baseTotal = o.clientDiscountAmount ? (o.total + o.clientDiscountAmount) : o.total;
+  win.document.write(`<!DOCTYPE html><html lang="es"><head><meta charset="UTF-8">
+  <title>Pedido ${o.id} — Sabores Royal</title>
+  <style>
+    *{margin:0;padding:0;box-sizing:border-box;}
+    body{font-family:Arial,sans-serif;color:#1a1a1a;padding:32px 36px;font-size:13px;max-width:700px;margin:0 auto;}
+    .head{display:flex;justify-content:space-between;align-items:flex-start;border-bottom:2.5px solid #c5a028;padding-bottom:16px;margin-bottom:18px;}
+    .brand h1{font-size:22px;font-weight:800;color:#1a1a1a;margin-bottom:3px;}
+    .brand p{font-size:11.5px;color:#666;line-height:1.7;}
+    .order-box{text-align:right;}
+    .order-box .num{font-size:22px;font-weight:800;color:#c5a028;}
+    .order-box .dt{font-size:11px;color:#999;margin-top:3px;}
+    .badge{display:inline-block;margin-top:6px;padding:3px 12px;border-radius:20px;font-size:10px;font-weight:800;text-transform:uppercase;letter-spacing:.5px;}
+    .badge-pendiente{background:#fffde7;color:#b8860b;}
+    .badge-listo{background:#e8f5e9;color:#2e7d32;}
+    .badge-entregado{background:#e3f2fd;color:#1565c0;}
+    .section{margin-bottom:18px;}
+    .section h3{font-size:9.5px;text-transform:uppercase;letter-spacing:.8px;color:#999;margin-bottom:8px;border-bottom:1px solid #eee;padding-bottom:4px;}
+    .client p{font-size:13px;line-height:1.8;}
+    table{width:100%;border-collapse:collapse;margin-bottom:6px;}
+    th{text-align:left;font-size:10px;text-transform:uppercase;color:#aaa;border-bottom:1px solid #ddd;padding:6px 6px;}
+    td{font-size:13px;padding:8px 6px;border-bottom:1px solid #f2f2f2;}
+    td.right{text-align:right;}
+    .totals{margin-left:auto;width:55%;margin-top:10px;}
+    .trow{display:flex;justify-content:space-between;padding:4px 6px;font-size:13px;}
+    .trow.disc{color:#2e7d32;}
+    .trow.final{font-weight:800;font-size:16px;border-top:2px solid #1a1a1a;margin-top:6px;padding-top:10px;}
+    .footer{margin-top:28px;padding-top:12px;border-top:1px dashed #ccc;font-size:10.5px;color:#aaa;text-align:center;line-height:1.8;}
+    @media print{body{padding:18px 22px;}}
+  </style>
+  </head><body>
+  <div class="head">
+    <div class="brand">
+      <h1>${state.config.storeName||'Sabores Royal'}</h1>
+      <p>${state.config.address||''}<br>
+      ${state.fiscal.aliasTransferencia ? `Alias: <b>${state.fiscal.aliasTransferencia}</b>` : ''}</p>
+    </div>
+    <div class="order-box">
+      <div class="num">#${o.id}</div>
+      <div class="dt">${fecha}</div>
+      <span class="badge badge-${(o.status||'pendiente').toLowerCase()}">${o.status||'Pendiente'}</span>
+    </div>
+  </div>
+  <div class="section">
+    <h3>Cliente</h3>
+    <div class="client">
+      <p><b>${o.customer?.name||'—'}</b></p>
+      ${o.customer?.phone ? `<p>Tel: ${o.customer.phone}</p>` : ''}
+      ${o.customer?.address ? `<p>Entrega: ${o.customer.address}</p>` : ''}
+    </div>
+  </div>
+  <div class="section">
+    <h3>Detalle del pedido</h3>
+    <table>
+      <tr><th>Producto</th><th>Cant.</th><th style="text-align:right;">Precio unit.</th><th style="text-align:right;">Subtotal</th></tr>
+      ${(o.items||[]).map(it=>`
+        <tr>
+          <td>${it.name||'Producto'}</td>
+          <td>${it.grams ? it.grams+'g' : (it.qty||1)+'u.'}</td>
+          <td class="right">${it.price ? '$'+Number(it.price).toLocaleString('es-AR') : '—'}</td>
+          <td class="right"><b>$${Number(it.lineTotal!=null?it.lineTotal:(it.price||0)*(it.qty||1)).toLocaleString('es-AR')}</b></td>
+        </tr>
+      `).join('')}
+    </table>
+    <div class="totals">
+      ${o.clientDiscountPct ? `
+        <div class="trow"><span>Subtotal</span><span>$${Number(baseTotal).toLocaleString('es-AR')}</span></div>
+        <div class="trow disc"><span>Descuento especial (${o.clientDiscountPct}%)</span><span>-$${Number(o.clientDiscountAmount||0).toLocaleString('es-AR')}</span></div>
+      ` : ''}
+      <div class="trow final"><span>Total</span><span>$${Number(o.total||0).toLocaleString('es-AR')}</span></div>
+    </div>
+  </div>
+  <div class="footer">
+    ${state.config.storeName||'Sabores Royal'} · ${state.config.address||''}<br>
+    ${state.fiscal.aliasTransferencia ? 'Alias de transferencia: '+state.fiscal.aliasTransferencia : ''}
+  </div>
+  </body></html>`);
+  win.document.close();
+  setTimeout(()=>{ win.print(); }, 350);
+}
+
+function shareOrder(orderId){
+  const o = state.orders.find(ord=>ord.id===orderId);
+  if(!o) return;
+  const fecha = new Date(o.date||o._savedAt||'').toLocaleDateString('es-AR');
+  let txt = `📦 *Pedido #${o.id}* — Sabores Royal\n`;
+  txt += `📅 ${fecha} · ${o.status||'Pendiente'}\n`;
+  txt += `👤 ${o.customer?.name||'—'}`;
+  if(o.customer?.phone) txt += ` · ${o.customer.phone}`;
+  if(o.customer?.address) txt += `\n📍 ${o.customer.address}`;
+  txt += `\n\n`;
+  (o.items||[]).forEach(it=>{
+    const cant = it.grams ? `${it.grams}g de` : `${it.qty||1}x`;
+    txt += `• ${cant} ${it.name||'Producto'}\n`;
+  });
+  if(o.clientDiscountPct) txt += `\n🎁 Descuento (${o.clientDiscountPct}%): -$${Number(o.clientDiscountAmount||0).toLocaleString('es-AR')}`;
+  txt += `\n💰 *Total: $${Number(o.total||0).toLocaleString('es-AR')}*`;
+  if(navigator.share){
+    navigator.share({ title: `Pedido #${o.id} — Sabores Royal`, text: txt }).catch(()=>{});
+  } else {
+    navigator.clipboard?.writeText(txt)
+      .then(()=>toast("Texto copiado al portapapeles","ok"))
+      .catch(()=>toast("Copiá el texto manualmente","err"));
+  }
 }
 
 /* ---------- ADMIN: PRODUCTOS ---------- */
