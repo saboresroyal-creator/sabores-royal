@@ -631,8 +631,8 @@ async function apiSyncProducts(){
       minGrams: p.min_grams||null,
       sinTacc: p.sin_tacc||false,
     };});
-    const localOnly = state.products.filter(p=>!p._apiId && !_pendingSaves.has(p.id));
-    const newProducts = [...apiMapped, ...localOnly];
+    const pendingOnly = state.products.filter(p=>_pendingSaves.has(p.id));
+    const newProducts = [...apiMapped, ...pendingOnly];
     const changed = JSON.stringify(newProducts) !== JSON.stringify(state.products);
     state.products = newProducts;
     saveState();
@@ -1757,15 +1757,16 @@ function renderAdmin(){
   }
   const unreadCount = state.suggestions.filter(s=>!s.read).length;
   const ALL_TABS = [
-    {key:"pedidos",      label:"Pedidos"},
-    {key:"productos",    label:"Productos"},
-    {key:"categorias",   label:"Categorías"},
-    {key:"clientes",     label:"Clientes"},
-    {key:"comprobantes", label:"Comprobantes"},
-    {key:"listaprecios", label:"Listas de Precios"},
-    {key:"banners",      label:"Novedades/Ofertas"},
-    {key:"sugerencias",  label:"Sugerencias"+(unreadCount>0?` (${unreadCount})`:'')},
-    {key:"config",       label:"Configuración"},
+    {key:"pedidos",       label:"Pedidos"},
+    {key:"productos",     label:"Productos"},
+    {key:"categorias",    label:"Categorías"},
+    {key:"clientes",      label:"Clientes"},
+    {key:"estadisticas",  label:"Estadísticas"},
+    {key:"comprobantes",  label:"Comprobantes"},
+    {key:"listaprecios",  label:"Listas de Precios"},
+    {key:"banners",       label:"Novedades/Ofertas"},
+    {key:"sugerencias",   label:"Sugerencias"+(unreadCount>0?` (${unreadCount})`:'')},
+    {key:"config",        label:"Configuración"},
   ];
   const tabs = state.adminIsSuperAdmin
     ? ALL_TABS
@@ -1799,6 +1800,7 @@ function renderAdmin(){
       ` : ""}
       ${tab==="categorias" ? renderAdminCategorias() : ""}
       ${tab==="clientes" ? renderAdminClientes() : ""}
+      ${tab==="estadisticas" ? renderAdminEstadisticas() : ""}
       ${tab==="comprobantes" ? renderAdminComprobantes() : ""}
       ${tab==="listaprecios" ? renderAdminListaPrecios() : ""}
       ${tab==="banners" ? renderAdminBanners() : ""}
@@ -1830,14 +1832,15 @@ function setAdminTab(tab){ state.adminTab = tab; render(); }
 
 /* ---------- ADMIN: GESTIÓN DE SUB-ADMINS ---------- */
 const PERM_OPTIONS = [
-  {key:"pedidos",      label:"Ver y gestionar pedidos"},
-  {key:"productos",    label:"Ver y editar productos"},
-  {key:"categorias",   label:"Ver y editar categorías"},
-  {key:"clientes",     label:"Ver clientes"},
-  {key:"comprobantes", label:"Ver y crear comprobantes"},
-  {key:"listaprecios", label:"Generar listas de precios"},
-  {key:"banners",      label:"Editar novedades y ofertas"},
-  {key:"sugerencias",  label:"Ver sugerencias"},
+  {key:"pedidos",       label:"Ver y gestionar pedidos"},
+  {key:"productos",     label:"Ver y editar productos"},
+  {key:"categorias",    label:"Ver y editar categorías"},
+  {key:"clientes",      label:"Ver clientes"},
+  {key:"estadisticas",  label:"Ver estadísticas"},
+  {key:"comprobantes",  label:"Ver y crear comprobantes"},
+  {key:"listaprecios",  label:"Generar listas de precios"},
+  {key:"banners",       label:"Editar novedades y ofertas"},
+  {key:"sugerencias",   label:"Ver sugerencias"},
 ];
 let subAdminDraft = { name:"", password:"", perms:[] };
 function openSubAdminModal(idx){
@@ -2596,6 +2599,105 @@ function editClientDiscount(phone){
   saveState();
   render();
   toast(pct > 0 ? `${c.name}: ${pct}% de descuento especial` : `${c.name}: sin descuento especial`, "ok");
+}
+
+/* ---------- ADMIN: ESTADÍSTICAS ---------- */
+function renderAdminEstadisticas(){
+  const orders = state.orders || [];
+  const now = new Date();
+  const mesActual = now.getMonth();
+  const anioActual = now.getFullYear();
+
+  // Revenue: contar solo pedidos entregados o todos (incluir pendiente/listo para mostrar lo facturado)
+  const totalVentas = orders.reduce((s,o)=>s+(o.total||0), 0);
+  const ventasMes = orders.filter(o=>{
+    const d = new Date(o.date);
+    return d.getMonth()===mesActual && d.getFullYear()===anioActual;
+  }).reduce((s,o)=>s+(o.total||0), 0);
+  const pedidosMes = orders.filter(o=>{
+    const d = new Date(o.date);
+    return d.getMonth()===mesActual && d.getFullYear()===anioActual;
+  }).length;
+
+  // Estado de pedidos
+  const porEstado = {};
+  orders.forEach(o=>{ porEstado[o.status] = (porEstado[o.status]||0)+1; });
+
+  // Ranking clientes por gasto total
+  const clienteGasto = {};
+  orders.forEach(o=>{
+    const phone = o.customer?.phone || "?";
+    const name = o.customer?.name || phone;
+    if(!clienteGasto[phone]) clienteGasto[phone] = {name, phone, total:0, pedidos:0};
+    clienteGasto[phone].total += (o.total||0);
+    clienteGasto[phone].pedidos++;
+  });
+  const topClientes = Object.values(clienteGasto).sort((a,b)=>b.total-a.total).slice(0,10);
+
+  // Ranking productos más vendidos
+  const prodVentas = {};
+  orders.forEach(o=>{
+    (o.items||[]).forEach(it=>{
+      const key = it.name||it.id;
+      if(!prodVentas[key]) prodVentas[key] = {name:key, unidades:0, ingresos:0};
+      prodVentas[key].unidades += it.grams ? 1 : (it.qty||1);
+      prodVentas[key].ingresos += (it.lineTotal||0);
+    });
+  });
+  const topProductos = Object.values(prodVentas).sort((a,b)=>b.unidades-a.unidades).slice(0,10);
+
+  const statBox = (label, value, sub='') => `
+    <div style="flex:1; min-width:140px; background:var(--glass); border:1px solid var(--glass-bd); border-radius:14px; padding:14px 16px;">
+      <div style="font-size:11px; color:rgba(255,255,255,0.5); margin-bottom:4px; text-transform:uppercase; letter-spacing:.5px;">${label}</div>
+      <div style="font-size:22px; font-weight:700; color:var(--gold2);">${value}</div>
+      ${sub ? `<div style="font-size:11px; color:rgba(255,255,255,0.4); margin-top:2px;">${sub}</div>` : ''}
+    </div>`;
+
+  return `
+    <div style="padding:14px 16px;">
+      <h3 style="color:var(--gold2); font-size:14px; margin-bottom:10px;">Resumen general</h3>
+      <div style="display:flex; flex-wrap:wrap; gap:10px; margin-bottom:18px;">
+        ${statBox('Total facturado', money(totalVentas), orders.length+' pedidos en total')}
+        ${statBox('Este mes', money(ventasMes), pedidosMes+' pedidos')}
+      </div>
+
+      <h3 style="color:var(--gold2); font-size:14px; margin-bottom:10px;">Estado de pedidos</h3>
+      <div style="display:flex; flex-wrap:wrap; gap:10px; margin-bottom:18px;">
+        ${Object.entries(porEstado).map(([st,cnt])=>`
+          <div style="background:var(--glass); border:1px solid var(--glass-bd); border-radius:12px; padding:10px 14px; display:flex; align-items:center; gap:8px;">
+            <span class="status-pill status-${st.toLowerCase()}">${st}</span>
+            <span style="font-weight:700; font-size:16px;">${cnt}</span>
+          </div>`).join('')}
+        ${Object.keys(porEstado).length===0 ? '<p style="font-size:13px; color:rgba(255,255,255,0.4);">Sin pedidos todavía.</p>' : ''}
+      </div>
+
+      <h3 style="color:var(--gold2); font-size:14px; margin-bottom:10px;">Top clientes por gasto</h3>
+      ${topClientes.length===0 ? `<p style="font-size:13px; color:rgba(255,255,255,0.4); margin-bottom:18px;">Sin datos todavía.</p>` :
+        topClientes.map((c,i)=>`
+          <div style="display:flex; align-items:center; gap:10px; padding:10px 0; border-bottom:1px solid var(--glass-bd);">
+            <div style="width:24px; text-align:center; font-weight:700; font-size:13px; color:var(--gold2); opacity:.7;">${i+1}</div>
+            <div style="flex:1;">
+              <div style="font-weight:600; font-size:13.5px;">${c.name}</div>
+              <div style="font-size:11.5px; color:rgba(255,255,255,0.45);">${c.pedidos} pedido${c.pedidos!==1?'s':''}</div>
+            </div>
+            <div style="font-weight:700; color:var(--gold2); font-size:14px;">${money(c.total)}</div>
+          </div>`).join('')
+      }
+
+      <h3 style="color:var(--gold2); font-size:14px; margin:18px 0 10px;">Top productos más vendidos</h3>
+      ${topProductos.length===0 ? `<p style="font-size:13px; color:rgba(255,255,255,0.4);">Sin datos todavía.</p>` :
+        topProductos.map((p,i)=>`
+          <div style="display:flex; align-items:center; gap:10px; padding:10px 0; border-bottom:1px solid var(--glass-bd);">
+            <div style="width:24px; text-align:center; font-weight:700; font-size:13px; color:var(--gold2); opacity:.7;">${i+1}</div>
+            <div style="flex:1;">
+              <div style="font-weight:600; font-size:13.5px;">${p.name}</div>
+              <div style="font-size:11.5px; color:rgba(255,255,255,0.45);">${p.unidades} unidad${p.unidades!==1?'es':''} vendida${p.unidades!==1?'s':''}</div>
+            </div>
+            <div style="font-weight:700; color:var(--gold2); font-size:14px;">${money(p.ingresos)}</div>
+          </div>`).join('')
+      }
+    </div>
+  `;
 }
 
 /* ---------- ADMIN: CONFIG ---------- */
