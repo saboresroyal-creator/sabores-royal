@@ -1149,6 +1149,70 @@ function renderHome(){
       <p>Maipú 734 · Rosario</p>
       ${(()=>{ const cl = state.currentClientPhone ? state.clients[state.currentClientPhone] : null; return cl && cl.wholesale ? `<div class="wholesale-badge">⭐ Cliente Mayorista</div>` : ''; })()}
     </div>
+    ${state.banners && state.banners.length>0 ? `
+      <div style="display:flex; gap:12px; overflow-x:auto; padding:0 16px 16px; scroll-snap-type:x mandatory;">
+        ${state.banners.map(b=>`
+          <div onclick="${b.section?`openSection('${b.section}')`:''}" style="flex:none; width:88%; scroll-snap-align:start; border-radius:16px; overflow:hidden; position:relative; background:${b.image?'#000':'linear-gradient(120deg, var(--gold2), var(--gold))'}; ${b.section?'cursor:pointer;':''}">
+            ${b.image?`<img src="${b.image}" style="width:100%;display:block;">`:``}
+            <div style="position:${b.image?'absolute':'relative'}; bottom:0; left:0; right:0; background:${b.image?'linear-gradient(transparent,rgba(0,0,0,0.6))':'none'}; padding:14px; ${b.image?'':'min-height:80px; display:flex; flex-direction:column; justify-content:flex-end;'}">
+              <h3 style="color:${b.image?'#fff':'var(--navy)'}; font-size:16px; margin-bottom:2px;">${b.title||''}</h3>
+              ${b.subtitle?`<p style="color:${b.image?'rgba(255,255,255,0.85)':'rgba(15,28,69,0.8)'}; font-size:12px;">${b.subtitle}</p>`:''}
+            </div>
+          </div>
+        `).join('')}
+      </div>
+    ` : ''}
+    ${(state.bannerNovedades && state.bannerNovedades.active) ? `
+      <div style="margin:0 16px 14px; border-radius:16px; overflow:hidden; position:relative; background:${state.bannerNovedades.image?'#000':'linear-gradient(120deg,#1a3a6e,#0f1c45)'};">
+        ${state.bannerNovedades.image?`<img src="${state.bannerNovedades.image}" style="width:100%;display:block;">`:''}
+        <div style="position:${state.bannerNovedades.image?'absolute':'relative'}; bottom:0; left:0; right:0; background:${state.bannerNovedades.image?'linear-gradient(transparent,rgba(0,0,0,0.65))':'none'}; padding:16px; ${state.bannerNovedades.image?'':'min-height:80px;display:flex;flex-direction:column;justify-content:flex-end;'}">
+          ${state.bannerNovedades.title?`<h3 style="color:#fff; font-size:17px; font-weight:700; margin-bottom:3px;">${state.bannerNovedades.title}</h3>`:''}
+          ${state.bannerNovedades.subtitle?`<p style="color:rgba(255,255,255,0.85); font-size:12.5px;">${state.bannerNovedades.subtitle}</p>`:''}
+        </div>
+      </div>
+    ` : ''}
+    ${state.novedades && state.novedades.length>0 ? `
+      <div class="home-sec-header"><span class="home-sec-label">Novedades</span></div>
+      <div class="content-strip">
+        ${state.novedades.map(n=>`
+          <div class="nov-card">
+            ${n.photo?`<img src="${n.photo}" alt="">`:''}
+            <div class="nov-card-body">
+              <div class="nov-card-title">${n.title||''}</div>
+              ${n.body?`<div class="nov-card-text">${n.body}</div>`:''}
+            </div>
+          </div>
+        `).join('')}
+      </div>
+    ` : ''}
+    ${(state.bannerOfertas && state.bannerOfertas.active) ? `
+      <div style="margin:0 16px 14px; border-radius:16px; overflow:hidden; position:relative; background:${state.bannerOfertas.image?'#000':'linear-gradient(120deg,var(--gold2),var(--gold))'};">
+        ${state.bannerOfertas.image?`<img src="${state.bannerOfertas.image}" style="width:100%;display:block;">`:''}
+        <div style="position:${state.bannerOfertas.image?'absolute':'relative'}; bottom:0; left:0; right:0; background:${state.bannerOfertas.image?'linear-gradient(transparent,rgba(0,0,0,0.65))':'none'}; padding:16px; ${state.bannerOfertas.image?'':'min-height:80px;display:flex;flex-direction:column;justify-content:flex-end;'}">
+          ${state.bannerOfertas.title?`<h3 style="color:#fff; font-size:17px; font-weight:700; margin-bottom:3px;">${state.bannerOfertas.title}</h3>`:''}
+          ${state.bannerOfertas.subtitle?`<p style="color:rgba(255,255,255,0.85); font-size:12.5px;">${state.bannerOfertas.subtitle}</p>`:''}
+        </div>
+      </div>
+    ` : ''}
+    ${state.ofertas && state.ofertas.length>0 ? `
+      <div class="home-sec-header"><span class="home-sec-label">Ofertas especiales</span></div>
+      <div class="content-strip">
+        ${state.ofertas.map(o=>`
+          <div class="ofer-card">
+            ${o.photo?`<img src="${o.photo}" alt="">`:`<div class="ofer-card-noimg">${ic('tag')}</div>`}
+            ${o.badge?`<div class="ofer-badge">${o.badge}</div>`:''}
+            <div class="ofer-card-body">
+              <div class="ofer-card-title">${o.title||''}</div>
+              ${o.body?`<div class="ofer-card-text">${o.body}</div>`:''}
+            </div>
+          </div>
+        `).join('')}
+      </div>
+    ` : ''}
+    <div class="offers-banner">
+      <div class="ob-icon"><img src="${CROWN_DATA_URL}" style="width:100%; height:100%; object-fit:contain;"></div>
+      <div><b>Puntos Royal</b> — sumás 1 corona por cada $100 en compras, canjealos por premios</div>
+    </div>
     <div class="section-cards">
       ${Object.keys(SECTION_META).map(key=>{
         const m = SECTION_META[key];
@@ -1165,70 +1229,6 @@ function renderHome(){
         <div style="flex:1;"><h3>Apto Celíaco</h3><p>Productos Sin TACC certificados</p></div>
         <div class="sc-arrow">${ic('chevron')}</div>
       </button>
-    </div>
-    ${state.banners && state.banners.length>0 ? `
-      <div style="display:flex; gap:12px; overflow-x:auto; padding:0 16px 16px; scroll-snap-type:x mandatory;">
-        ${state.banners.map(b=>`
-          <div onclick="${b.section?`openSection('${b.section}')`:''}" style="flex:none; width:88%; scroll-snap-align:start; border-radius:16px; overflow:hidden; position:relative; height:160px; background:${b.image?'#000':'linear-gradient(120deg, var(--gold2), var(--gold))'}; ${b.section?'cursor:pointer;':''}">
-            ${b.image?`<img src="${b.image}" style="position:absolute;inset:0;width:100%;height:100%;object-fit:cover;object-position:center;">`:''}
-            <div style="position:absolute; inset:0; background:${b.image?'linear-gradient(180deg, rgba(0,0,0,0.05), rgba(0,0,0,0.55))':'none'}; display:flex; flex-direction:column; justify-content:flex-end; padding:14px;">
-              <h3 style="color:${b.image?'#fff':'var(--navy)'}; font-size:16px; margin-bottom:2px;">${b.title||''}</h3>
-              ${b.subtitle?`<p style="color:${b.image?'rgba(255,255,255,0.85)':'rgba(15,28,69,0.8)'}; font-size:12px;">${b.subtitle}</p>`:''}
-            </div>
-          </div>
-        `).join('')}
-      </div>
-    ` : ''}
-    ${(state.bannerNovedades && state.bannerNovedades.active) ? `
-      <div style="margin:0 16px 14px; border-radius:16px; overflow:hidden; position:relative; height:160px; background:${state.bannerNovedades.image?'#000':'linear-gradient(120deg,#1a3a6e,#0f1c45)'};">
-        ${state.bannerNovedades.image?`<img src="${state.bannerNovedades.image}" style="position:absolute;inset:0;width:100%;height:100%;object-fit:cover;object-position:center;">`:''}
-        <div style="position:absolute; inset:0; background:linear-gradient(180deg,rgba(0,0,0,0.05),rgba(0,0,0,0.62)); display:flex; flex-direction:column; justify-content:flex-end; padding:16px;">
-          ${state.bannerNovedades.title?`<h3 style="color:#fff; font-size:17px; font-weight:700; margin-bottom:3px;">${state.bannerNovedades.title}</h3>`:''}
-          ${state.bannerNovedades.subtitle?`<p style="color:rgba(255,255,255,0.85); font-size:12.5px;">${state.bannerNovedades.subtitle}</p>`:''}
-        </div>
-      </div>
-    ` : ''}
-    ${state.novedades && state.novedades.length>0 ? `
-      <div class="home-sec-header"><span class="home-sec-label">Novedades</span></div>
-      <div class="content-strip">
-        ${state.novedades.map(n=>`
-          <div class="nov-card">
-            ${n.photo?`<img src="${n.photo}" alt="" style="object-fit:cover;object-position:center;">`:''}
-            <div class="nov-card-body">
-              <div class="nov-card-title">${n.title||''}</div>
-              ${n.body?`<div class="nov-card-text">${n.body}</div>`:''}
-            </div>
-          </div>
-        `).join('')}
-      </div>
-    ` : ''}
-    ${(state.bannerOfertas && state.bannerOfertas.active) ? `
-      <div style="margin:0 16px 14px; border-radius:16px; overflow:hidden; position:relative; height:160px; background:${state.bannerOfertas.image?'#000':'linear-gradient(120deg,var(--gold2),var(--gold))'};">
-        ${state.bannerOfertas.image?`<img src="${state.bannerOfertas.image}" style="position:absolute;inset:0;width:100%;height:100%;object-fit:cover;object-position:center;">`:''}
-        <div style="position:absolute; inset:0; background:linear-gradient(180deg,rgba(0,0,0,0.05),rgba(0,0,0,0.62)); display:flex; flex-direction:column; justify-content:flex-end; padding:16px;">
-          ${state.bannerOfertas.title?`<h3 style="color:#fff; font-size:17px; font-weight:700; margin-bottom:3px;">${state.bannerOfertas.title}</h3>`:''}
-          ${state.bannerOfertas.subtitle?`<p style="color:rgba(255,255,255,0.85); font-size:12.5px;">${state.bannerOfertas.subtitle}</p>`:''}
-        </div>
-      </div>
-    ` : ''}
-    ${state.ofertas && state.ofertas.length>0 ? `
-      <div class="home-sec-header"><span class="home-sec-label">Ofertas especiales</span></div>
-      <div class="content-strip">
-        ${state.ofertas.map(o=>`
-          <div class="ofer-card">
-            ${o.photo?`<img src="${o.photo}" alt="" style="object-fit:cover;object-position:center;">`:`<div class="ofer-card-noimg">${ic('tag')}</div>`}
-            ${o.badge?`<div class="ofer-badge">${o.badge}</div>`:''}
-            <div class="ofer-card-body">
-              <div class="ofer-card-title">${o.title||''}</div>
-              ${o.body?`<div class="ofer-card-text">${o.body}</div>`:''}
-            </div>
-          </div>
-        `).join('')}
-      </div>
-    ` : ''}
-    <div class="offers-banner">
-      <div class="ob-icon"><img src="${CROWN_DATA_URL}" style="width:100%; height:100%; object-fit:contain;"></div>
-      <div><b>Puntos Royal</b> — sumás 1 corona por cada $100 en compras, canjealos por premios</div>
     </div>
     <button class="wa-float-btn" onclick="window.open(waLink('¡Hola! Quiero hacer una consulta.'),'_blank')">
       ${ic('wa')} Hablar por WhatsApp
