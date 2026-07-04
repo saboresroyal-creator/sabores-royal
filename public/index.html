@@ -658,7 +658,7 @@ async function uploadProductPhoto(base64, productId){
 
 async function apiSyncContent(){
   try{
-    const data = await supaFetch('/app_settings?setting_key=in.(novedades,ofertas,banner_novedades,banner_ofertas)&select=setting_key,setting_value', 'GET');
+    const data = await supaFetch('/app_settings?setting_key=in.(novedades,ofertas,banner_novedades,banner_ofertas,client_discounts)&select=setting_key,setting_value', 'GET');
     if(!data || data.length===0) return;
     let changed = false;
     data.forEach(row=>{
@@ -675,6 +675,14 @@ async function apiSyncContent(){
         }
         if(row.setting_key==='banner_ofertas' && JSON.stringify(parsed)!==JSON.stringify(state.bannerOfertas)){
           state.bannerOfertas = parsed; changed = true;
+        }
+        if(row.setting_key==='client_discounts'){
+          const discounts = parsed || {};
+          Object.entries(discounts).forEach(([phone, pct])=>{
+            if(!state.clients[phone]) state.clients[phone] = {phone, name:'', address:'', doc:'', points:0, orders:[]};
+            state.clients[phone].discountPct = pct;
+          });
+          changed = true;
         }
       }catch(e){}
     });
@@ -794,29 +802,76 @@ async function apiDeleteProduct(product){
 
 async function apiSaveOrder(order){
   try{
-    const phone = order.phone;
+    const phone = order.customer?.phone;  // FIX: era order.phone (undefined)
     if(!phone) return;
+    const name = order.customer?.name || '';
+    const address = order.customer?.address || '';
     let clientId;
     const existing = await supaFetch('/clients?select=id&phone=eq.' + encodeURIComponent(phone) + '&limit=1', 'GET');
     if(existing && existing.length>0){
       clientId = existing[0].id;
     }else{
       const newClient = await supaFetch('/clients?select=id', 'POST', {
-        full_name: order.name, phone, address: order.address||""
+        full_name: name, phone, address
       });
-      clientId = newClient[0].id;
+      clientId = newClient?.[0]?.id;
     }
+    if(!clientId) return;
     const newOrder = await supaFetch('/orders?select=id', 'POST', {
-      client_id: clientId, total: order.total, status:'Pendiente', payment_method: order.payment_method||'Efectivo'
+      client_id: clientId,
+      total: order.total,
+      status: 'Pendiente',
+      payment_method: order.payment_method || 'Efectivo',
+      notes: [
+        order.clientDiscountPct ? `Descuento especial ${order.clientDiscountPct}%` : '',
+        order.customer?.address || '',
+      ].filter(Boolean).join(' | ') || null,
     });
-    const orderId = newOrder[0].id;
-    const items = order.items
-      .map(it=>({ order_id: orderId, product_id: Number(it._apiId||it.productId)||null, quantity: it.qty, unit_price: it.price }))
+    const orderId = newOrder?.[0]?.id;
+    if(!orderId) return;
+    const items = (order.items||[])
+      .map(it=>({ order_id: orderId, product_id: Number(it._apiId||it.productId||it.id)||null, quantity: it.qty||1, unit_price: it.price||0 }))
       .filter(it=>it.product_id);
     if(items.length>0){
       await supaFetch('/order_items', 'POST', items);
     }
   }catch(e){ console.warn("Error guardando pedido:", e); }
+}
+
+async function apiSyncOrders(){
+  if(!IS_ADMIN_APP) return;
+  try{
+    const data = await supaFetch('/orders?select=id,total,status,payment_method,notes,created_at,clients(full_name,phone,address),order_items(quantity,unit_price)&order=created_at.desc&limit=300', 'GET');
+    if(!data || data.length===0) return;
+    const apiOrders = data.map(o=>{
+      const num = String(o.id||'').slice(-6);
+      return {
+        _supaId: o.id,
+        id: num ? 'SR'+num : 'SR?',
+        date: o.created_at,
+        customer: {
+          name: o.clients?.full_name || '?',
+          phone: o.clients?.phone || '',
+          address: o.clients?.address || '',
+        },
+        items: (o.order_items||[]).map(it=>({
+          name: 'Producto',
+          qty: it.quantity||1,
+          price: it.unit_price||0,
+          lineTotal: (it.quantity||1)*(it.unit_price||0),
+        })),
+        total: Number(o.total)||0,
+        status: o.status || 'Pendiente',
+        notes: o.notes||'',
+      };
+    });
+    // Merge: supabase orders por _supaId; preservar pedidos locales sin _supaId
+    const localOnly = (state.orders||[]).filter(o=>!o._supaId);
+    const merged = [...apiOrders, ...localOnly];
+    merged.sort((a,b)=>new Date(b.date)-new Date(a.date));
+    const changed = JSON.stringify(merged) !== JSON.stringify(state.orders);
+    if(changed){ state.orders = merged; saveState(); if(IS_ADMIN_APP) render(); }
+  }catch(e){ console.warn('Sync orders:', e); }
 }
 </script>
 <script>
@@ -2598,7 +2653,21 @@ function editClientDiscount(phone){
   c.discountPct = pct || undefined;
   saveState();
   render();
+  apiSaveClientDiscounts();
   toast(pct > 0 ? `${c.name}: ${pct}% de descuento especial` : `${c.name}: sin descuento especial`, "ok");
+}
+async function apiSaveClientDiscounts(){
+  const discounts = {};
+  Object.values(state.clients).forEach(c=>{ if(c.discountPct) discounts[c.phone] = Number(c.discountPct); });
+  const val = JSON.stringify(discounts);
+  try{
+    const existing = await supaFetch('/app_settings?setting_key=eq.client_discounts&select=id', 'GET');
+    if(existing && existing.length>0){
+      await supaFetch('/app_settings?setting_key=eq.client_discounts', 'PATCH', {setting_value: val});
+    }else{
+      await supaFetch('/app_settings', 'POST', {setting_key:'client_discounts', setting_value: val});
+    }
+  }catch(e){ console.warn('Error guardando descuentos:', e); }
 }
 
 /* ---------- ADMIN: ESTADÍSTICAS ---------- */
@@ -4151,7 +4220,7 @@ if(IS_ADMIN_APP){
 render();
 apiSyncProducts();
 apiSyncContent();
-if(IS_ADMIN_APP) apiSyncClients();
+if(IS_ADMIN_APP){ apiSyncClients(); apiSyncOrders(); }
 (async ()=>{
   try{
     const r = await supaFetch('/app_settings?setting_key=eq.sub_admins&select=setting_value','GET');
@@ -4160,10 +4229,10 @@ if(IS_ADMIN_APP) apiSyncClients();
 })();
 
 document.addEventListener('visibilitychange', ()=>{
-  if(document.visibilityState === 'visible'){ apiSyncProducts(); apiSyncContent(); if(IS_ADMIN_APP) apiSyncClients(); }
+  if(document.visibilityState === 'visible'){ apiSyncProducts(); apiSyncContent(); if(IS_ADMIN_APP){ apiSyncClients(); apiSyncOrders(); } }
 });
-window.addEventListener('focus', ()=>{ apiSyncProducts(); apiSyncContent(); if(IS_ADMIN_APP) apiSyncClients(); });
-setInterval(()=>{ apiSyncProducts(); apiSyncContent(); if(IS_ADMIN_APP) apiSyncClients(); }, 30000);
+window.addEventListener('focus', ()=>{ apiSyncProducts(); apiSyncContent(); if(IS_ADMIN_APP){ apiSyncClients(); apiSyncOrders(); } });
+setInterval(()=>{ apiSyncProducts(); apiSyncContent(); if(IS_ADMIN_APP){ apiSyncClients(); apiSyncOrders(); } }, 30000);
 
 if('serviceWorker' in navigator){
   navigator.serviceWorker.register('sw.js');
