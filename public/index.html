@@ -801,77 +801,51 @@ async function apiDeleteProduct(product){
 }
 
 async function apiSaveOrder(order){
+  // Guarda en app_settings (key: orders_list) — evita depender del schema de orders
   try{
-    const phone = order.customer?.phone;  // FIX: era order.phone (undefined)
-    if(!phone) return;
-    const name = order.customer?.name || '';
-    const address = order.customer?.address || '';
-    let clientId;
-    const existing = await supaFetch('/clients?select=id&phone=eq.' + encodeURIComponent(phone) + '&limit=1', 'GET');
-    if(existing && existing.length>0){
-      clientId = existing[0].id;
+    const row = await supaFetch('/app_settings?setting_key=eq.orders_list&select=setting_value', 'GET');
+    let list = [];
+    if(row && row[0]){ try{ list = JSON.parse(row[0].setting_value)||[]; }catch(e){} }
+    list.unshift({...order, _savedAt: new Date().toISOString()});
+    if(list.length > 500) list = list.slice(0, 500);
+    const val = JSON.stringify(list);
+    if(row && row[0]){
+      await supaFetch('/app_settings?setting_key=eq.orders_list', 'PATCH', {setting_value: val});
     }else{
-      const newClient = await supaFetch('/clients?select=id', 'POST', {
-        full_name: name, phone, address
-      });
-      clientId = newClient?.[0]?.id;
+      await supaFetch('/app_settings', 'POST', {setting_key:'orders_list', setting_value: val});
     }
-    if(!clientId) return;
-    const newOrder = await supaFetch('/orders?select=id', 'POST', {
-      client_id: clientId,
-      total: order.total,
-      status: 'Pendiente',
-      payment_method: order.payment_method || 'Efectivo',
-      notes: [
-        order.clientDiscountPct ? `Descuento especial ${order.clientDiscountPct}%` : '',
-        order.customer?.address || '',
-      ].filter(Boolean).join(' | ') || null,
-    });
-    const orderId = newOrder?.[0]?.id;
-    if(!orderId) return;
-    const items = (order.items||[])
-      .map(it=>({ order_id: orderId, product_id: Number(it._apiId||it.productId||it.id)||null, quantity: it.qty||1, unit_price: it.price||0 }))
-      .filter(it=>it.product_id);
-    if(items.length>0){
-      await supaFetch('/order_items', 'POST', items);
-    }
-  }catch(e){ console.warn("Error guardando pedido:", e); }
+  }catch(e){
+    console.warn("Error guardando pedido en servidor:", e);
+    toast("⚠️ Pedido enviado por WhatsApp pero no llegó al servidor: " + e.message, "err");
+  }
 }
 
 async function apiSyncOrders(){
   if(!IS_ADMIN_APP) return;
   try{
-    const data = await supaFetch('/orders?select=id,total,status,payment_method,notes,created_at,clients(full_name,phone,address),order_items(quantity,unit_price)&order=created_at.desc&limit=300', 'GET');
-    if(!data || data.length===0) return;
-    const apiOrders = data.map(o=>{
-      const num = String(o.id||'').slice(-6);
-      return {
-        _supaId: o.id,
-        id: num ? 'SR'+num : 'SR?',
-        date: o.created_at,
-        customer: {
-          name: o.clients?.full_name || '?',
-          phone: o.clients?.phone || '',
-          address: o.clients?.address || '',
-        },
-        items: (o.order_items||[]).map(it=>({
-          name: 'Producto',
-          qty: it.quantity||1,
-          price: it.unit_price||0,
-          lineTotal: (it.quantity||1)*(it.unit_price||0),
-        })),
-        total: Number(o.total)||0,
-        status: o.status || 'Pendiente',
-        notes: o.notes||'',
-      };
-    });
-    // Merge: supabase orders por _supaId; preservar pedidos locales sin _supaId
-    const localOnly = (state.orders||[]).filter(o=>!o._supaId);
-    const merged = [...apiOrders, ...localOnly];
-    merged.sort((a,b)=>new Date(b.date)-new Date(a.date));
-    const changed = JSON.stringify(merged) !== JSON.stringify(state.orders);
-    if(changed){ state.orders = merged; saveState(); if(IS_ADMIN_APP) render(); }
+    const row = await supaFetch('/app_settings?setting_key=eq.orders_list&select=setting_value', 'GET');
+    if(!row || !row[0]) return;
+    const list = JSON.parse(row[0].setting_value)||[];
+    if(JSON.stringify(list) !== JSON.stringify(state.orders)){
+      state.orders = list;
+      saveState();
+      render();
+    }
   }catch(e){ console.warn('Sync orders:', e); }
+}
+
+async function apiPushOrdersToSupabase(){
+  // Escribe el state.orders actual a Supabase (para que el admin vea cambios de estado)
+  if(!IS_ADMIN_APP) return;
+  try{
+    const val = JSON.stringify(state.orders);
+    const row = await supaFetch('/app_settings?setting_key=eq.orders_list&select=setting_value', 'GET');
+    if(row && row[0]){
+      await supaFetch('/app_settings?setting_key=eq.orders_list', 'PATCH', {setting_value: val});
+    }else{
+      await supaFetch('/app_settings', 'POST', {setting_key:'orders_list', setting_value: val});
+    }
+  }catch(e){ console.warn('Error push orders:', e); }
 }
 </script>
 <script>
@@ -1986,7 +1960,7 @@ function advanceOrderStatus(orderId){
   if(!order) return;
   const flow = ["Pendiente","Listo","Entregado"];
   const idx = flow.indexOf(order.status);
-  if(idx < flow.length-1){ order.status = flow[idx+1]; saveState(); render(); }
+  if(idx < flow.length-1){ order.status = flow[idx+1]; saveState(); render(); apiPushOrdersToSupabase(); }
 }
 function notifyOrderWA(orderId){
   const order = state.orders.find(o=>o.id===orderId);
