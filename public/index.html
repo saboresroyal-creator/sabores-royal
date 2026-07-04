@@ -1948,15 +1948,26 @@ async function syncClientChat(){
   try{
     const data = await supaFetch(`/chat_messages?client_phone=eq.${encodeURIComponent(phone)}&order=created_at.asc&limit=150`, 'GET');
     const msgs = data || [];
+    const changed = JSON.stringify(msgs) !== JSON.stringify(state.chatMessages);
     state.chatMessages = msgs;
-    state.chatUnread = msgs.filter(m=>m.sender==='admin'&&!m.read).length;
+    const newUnread = msgs.filter(m=>m.sender==='admin'&&!m.read).length;
     if(state.route.screen==='chat'){
       state.chatUnread = 0;
-      supaFetch(`/chat_messages?client_phone=eq.${encodeURIComponent(phone)}&sender=eq.admin&read=eq.false`, 'PATCH', {read:true}).catch(()=>{});
-      const c = document.getElementById('chat-msgs');
-      if(c) c.scrollTop = c.scrollHeight;
+      supaFetch(`/chat_messages?client_phone=eq.${encodeURIComponent(phone)}&sender=eq.admin&read=eq.false`,'PATCH',{read:true}).catch(()=>{});
+      if(changed){
+        // Actualiza solo el contenedor de mensajes — NO recrea el input
+        const container = document.getElementById('chat-msgs');
+        if(container){
+          const wasAtBottom = container.scrollHeight - container.scrollTop - container.clientHeight < 80;
+          container.innerHTML = buildChatBubbles(msgs);
+          if(wasAtBottom) container.scrollTop = container.scrollHeight;
+        }
+      }
+    } else {
+      const unreadChanged = newUnread !== state.chatUnread;
+      state.chatUnread = newUnread;
+      if(changed || unreadChanged) render();
     }
-    render();
   }catch(e){ console.warn('Chat sync:', e); }
 }
 
@@ -1965,17 +1976,23 @@ async function syncAdminChats(){
   try{
     const data = await supaFetch('/chat_messages?order=created_at.desc&limit=600', 'GET');
     const msgs = data || [];
+    const changed = JSON.stringify(msgs) !== JSON.stringify(state.chatMessages);
     state.chatMessages = msgs;
     const unread = {};
     msgs.forEach(m=>{ if(m.sender==='client'&&!m.read) unread[m.client_phone]=(unread[m.client_phone]||0)+1; });
     state.adminChatUnread = unread;
-    if(state.adminChatPhone){
-      const c = document.getElementById('admin-chat-msgs');
-      const wasAtBottom = c && (c.scrollHeight - c.scrollTop - c.clientHeight < 60);
-      render();
-      const c2 = document.getElementById('admin-chat-msgs');
-      if(c2 && wasAtBottom) c2.scrollTop = c2.scrollHeight;
-    } else {
+    if(state.adminChatPhone && state.adminTab==='chats'){
+      if(changed){
+        // Actualiza solo los mensajes — NO destruye el input de respuesta
+        const container = document.getElementById('admin-chat-msgs');
+        if(container){
+          const wasAtBottom = container.scrollHeight - container.scrollTop - container.clientHeight < 80;
+          const chatMsgs = msgs.filter(m=>m.client_phone===state.adminChatPhone).sort((a,b)=>new Date(a.created_at)-new Date(b.created_at));
+          container.innerHTML = buildChatBubbles(chatMsgs, true);
+          if(wasAtBottom) container.scrollTop = container.scrollHeight;
+        }
+      }
+    } else if(changed){
       render();
     }
   }catch(e){ console.warn('Admin chat sync:', e); }
@@ -1983,6 +2000,26 @@ async function syncAdminChats(){
 
 async function chatSend(phone, clientName, sender, message){
   return supaFetch('/chat_messages', 'POST', {client_phone:phone, client_name:clientName||'Cliente', sender, message});
+}
+
+function buildChatBubbles(msgs, isAdmin=false){
+  if(!msgs || msgs.length===0) return `
+    <div style="flex:1;display:flex;flex-direction:column;align-items:center;justify-content:center;opacity:.45;padding:50px 24px;text-align:center;gap:10px;">
+      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" style="width:40px;height:40px;"><path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z"/></svg>
+      <p style="font-size:13px;">Sin mensajes aún.</p>
+    </div>`;
+  return msgs.map(m=>{
+    const mine = isAdmin ? m.sender==='admin' : m.sender==='client';
+    const time = new Date(m.created_at).toLocaleTimeString('es-AR',{hour:'2-digit',minute:'2-digit'});
+    return `
+      <div style="display:flex;flex-direction:${mine?'row-reverse':'row'};align-items:flex-end;gap:8px;margin-bottom:2px;">
+        ${!mine&&!isAdmin?`<div style="width:30px;height:30px;border-radius:50%;background:var(--gold);display:flex;align-items:center;justify-content:center;font-size:10px;font-weight:800;color:var(--navy);flex-shrink:0;">SR</div>`:''}
+        <div style="max-width:78%;padding:10px 14px;border-radius:${mine?'18px 18px 4px 18px':'18px 18px 18px 4px'};background:${mine?'var(--gold)':'var(--glass)'};border:${mine?'none':'1px solid var(--glass-bd)'};color:${mine?'var(--navy)':'var(--white)'};">
+          <p style="font-size:14px;line-height:1.45;word-break:break-word;">${m.message}</p>
+          <p style="font-size:10px;opacity:.55;margin-top:4px;text-align:right;">${time}</p>
+        </div>
+      </div>`;
+  }).join('');
 }
 
 function startChatPoll(){
@@ -2008,23 +2045,7 @@ function renderChat(){
       <div style="width:36px;"></div>
     </div>
     <div id="chat-msgs" style="flex:1; overflow-y:auto; padding:12px 14px 10px; display:flex; flex-direction:column; gap:10px; -webkit-overflow-scrolling:touch;">
-      ${msgs.length===0 ? `
-        <div style="flex:1; display:flex; flex-direction:column; align-items:center; justify-content:center; opacity:.45; padding:50px 24px; text-align:center; gap:10px;">
-          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" style="width:40px;height:40px;"><path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z"/></svg>
-          <p style="font-size:13px;">Mandanos un mensaje, te respondemos pronto.</p>
-        </div>
-      ` : msgs.map(m=>{
-        const isMe = m.sender==='client';
-        const time = new Date(m.created_at).toLocaleTimeString('es-AR',{hour:'2-digit',minute:'2-digit'});
-        return `
-          <div style="display:flex; flex-direction:${isMe?'row-reverse':'row'}; align-items:flex-end; gap:8px;">
-            ${!isMe?`<div style="width:30px;height:30px;border-radius:50%;background:var(--gold);display:flex;align-items:center;justify-content:center;font-size:10px;font-weight:800;color:var(--navy);flex-shrink:0;">SR</div>`:''}
-            <div style="max-width:78%; padding:10px 14px; border-radius:${isMe?'18px 18px 4px 18px':'18px 18px 18px 4px'}; background:${isMe?'var(--gold)':'var(--glass)'}; border:${isMe?'none':'1px solid var(--glass-bd)'}; color:${isMe?'var(--navy)':'var(--white)'};">
-              <p style="font-size:14px; line-height:1.45; word-break:break-word;">${m.message}</p>
-              <p style="font-size:10px; opacity:.55; margin-top:4px; text-align:right;">${time}</p>
-            </div>
-          </div>`;
-      }).join('')}
+      ${buildChatBubbles(msgs)}
     </div>
     <div style="padding:10px 12px 22px; display:flex; gap:8px; background:rgba(10,16,40,0.95); border-top:1px solid var(--glass-bd);">
       <input id="chat-input" placeholder="Escribí tu mensaje…"
@@ -2104,18 +2125,7 @@ function renderAdminChatDetail(phone){
       </div>
     </div>
     <div id="admin-chat-msgs" style="flex:1;overflow-y:auto;padding:12px 14px 10px;display:flex;flex-direction:column;gap:10px;-webkit-overflow-scrolling:touch;">
-      ${msgs.length===0?`<div style="text-align:center;opacity:.4;padding:40px;font-size:13px;">Sin mensajes aún.</div>`
-        :msgs.map(m=>{
-          const isAdmin=m.sender==='admin';
-          const time=new Date(m.created_at).toLocaleTimeString('es-AR',{hour:'2-digit',minute:'2-digit'});
-          return `
-            <div style="display:flex;flex-direction:${isAdmin?'row-reverse':'row'};align-items:flex-end;gap:8px;">
-              <div style="max-width:78%;padding:10px 14px;border-radius:${isAdmin?'18px 18px 4px 18px':'18px 18px 18px 4px'};background:${isAdmin?'var(--gold)':'var(--glass)'};border:${isAdmin?'none':'1px solid var(--glass-bd)'};color:${isAdmin?'var(--navy)':'var(--white)'};">
-                <p style="font-size:14px;line-height:1.45;word-break:break-word;">${m.message}</p>
-                <p style="font-size:10px;opacity:.55;margin-top:4px;text-align:right;">${time}</p>
-              </div>
-            </div>`;
-        }).join('')}
+      ${buildChatBubbles(msgs, true)}
     </div>
     <div style="padding:10px 12px 14px;display:flex;gap:8px;border-top:1px solid var(--glass-bd);flex-shrink:0;">
       <input id="admin-chat-input" placeholder="Responder a ${name}…"
