@@ -470,20 +470,17 @@ function renderCeliaco(){
       <p style="font-size:13px; color:rgba(255,255,255,0.6); line-height:1.4;">Todos nuestros productos certificados Sin TACC, aptos para personas con celiaquía.</p>
     </div>
     <div class="product-grid">
-      ${products.map(p=>{
-        const price = p.sellByWeight ? (p.pricePerKg ? '$'+p.pricePerKg+'/kg' : '') : '$'+p.price;
-        return `
-        <div class="product-card" onclick="nav('product','${p.id}')">
+      ${products.map(p=>`
+        <div class="product-card" onclick="openProduct('${p.id}')">
           <div class="pc-img">
             ${p.photo ? `<img src="${p.photo}" alt="">` : ic('box')}
             <img src="/sin-tacc.png" class="sintacc-badge" alt="Sin TACC">
           </div>
           <div class="pc-body">
             <h4>${p.name}</h4>
-            <div class="pc-price">${price}</div>
+            <div class="pc-price">${p.sellByWeight ? pcWeightPriceHtml(p) : pcPriceHtml(p)}</div>
           </div>
-        </div>`;
-      }).join('')}
+        </div>`).join('')}
     </div>
   </div>`;
 }
@@ -1293,10 +1290,10 @@ function renderCatalogResults(section){
             <div class="pc-body">
               <h4>${p.name}</h4>
               ${p.sellByWeight ? `
-                <div class="pc-price">${money(effectivePriceForWeight(p))} / kg${effectivePriceForWeight(p)!==p.pricePerKg?'<span style="font-size:9px; color:#6db8e8; font-weight:700; margin-left:5px;">MAYORISTA</span>':''}</div>
+                <div class="pc-price">${pcWeightPriceHtml(p)}</div>
                 <button class="pc-add" onclick="event.stopPropagation(); openProduct('${p.id}')">Elegir cantidad</button>
               ` : `
-                <div class="pc-price">${money(effectivePrice(p))}${effectivePrice(p)!==p.price?'<span style="font-size:9px; color:#6db8e8; font-weight:700; margin-left:5px;">MAYORISTA</span>':''}</div>
+                <div class="pc-price">${pcPriceHtml(p)}</div>
                 <button class="pc-add" onclick="event.stopPropagation(); addToCart('${p.id}',1)">Agregar</button>
               `}
             </div>
@@ -1332,7 +1329,7 @@ function renderProductDetail(id){
       <div class="pd-img">${p.photo?`<img src="${p.photo}">`:ic('box')}</div>
       <div class="pd-body">
         <h2>${p.name}</h2>
-        <div class="pd-price">${money(pricePerKgEff)} / kg${pricePerKgEff!==p.pricePerKg?'<span style="font-size:11px; color:#6db8e8; font-weight:700; margin-left:6px;">PRECIO MAYORISTA</span>':''}</div>
+        <div class="pd-price">${pdWeightPriceHtml(p, pricePerKgEff)}</div>
         <p class="pd-desc">${p.desc||''}</p>
         <label style="display:block; font-size:12px; color:rgba(255,255,255,0.55); margin-bottom:8px; font-weight:600;">Cantidad (gramos)</label>
         <div class="qty-row">
@@ -1347,7 +1344,7 @@ function renderProductDetail(id){
         <p style="font-size:11.5px; color:rgba(255,255,255,0.4); margin-bottom:6px;">Mínimo: ${p.minGrams||50}g</p>
       </div>
       <div class="sticky-cta">
-        <button class="btn-primary" onclick="addToCartByWeight('${p.id}', ${grams}); nav('catalog',{section:'${p.section}'})"><svg width="28" height="28" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" style="flex-shrink:0"><circle cx="9" cy="20" r="1.4"/><circle cx="18" cy="20" r="1.4"/><path d="M3 4h2l2.4 12.2a2 2 0 0 0 2 1.8h7.2a2 2 0 0 0 2-1.6L21 8H6"/></svg> Agregar al carrito — ${money(lineTotal)}</button>
+        <button class="btn-primary" onclick="addToCartByWeight('${p.id}', ${grams}); nav('catalog',{section:'${p.section}'})"><svg width="28" height="28" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" style="flex-shrink:0"><circle cx="9" cy="20" r="1.4"/><circle cx="18" cy="20" r="1.4"/><path d="M3 4h2l2.4 12.2a2 2 0 0 0 2 1.8h7.2a2 2 0 0 0 2-1.6L21 8H6"/></svg> Agregar al carrito — ${money(applyClientDiscount(lineTotal))}</button>
       </div>
     </div>`;
   }
@@ -1361,7 +1358,7 @@ function renderProductDetail(id){
     <div class="pd-img">${p.photo?`<img src="${p.photo}">`:ic('box')}</div>
     <div class="pd-body">
       <h2>${p.name}</h2>
-      <div class="pd-price">${money(effectivePrice(p))}${effectivePrice(p)!==p.price?'<span style="font-size:11px; color:#6db8e8; font-weight:700; margin-left:6px;">PRECIO MAYORISTA</span>':''}</div>
+      <div class="pd-price">${pdPriceHtml(p)}</div>
       <p class="pd-desc">${p.desc||''}</p>
       <div class="qty-row">
         <button class="qty-btn" onclick="changeDetailQty(-1)">−</button>
@@ -1371,7 +1368,7 @@ function renderProductDetail(id){
       </div>
     </div>
     <div class="sticky-cta">
-      <button class="btn-primary" onclick="addToCart('${p.id}', ${qty}); nav('catalog',{section:'${p.section}'})"><svg width="28" height="28" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" style="flex-shrink:0"><circle cx="9" cy="20" r="1.4"/><circle cx="18" cy="20" r="1.4"/><path d="M3 4h2l2.4 12.2a2 2 0 0 0 2 1.8h7.2a2 2 0 0 0 2-1.6L21 8H6"/></svg> Agregar al carrito — ${money(effectivePrice(p)*qty)}</button>
+      <button class="btn-primary" onclick="addToCart('${p.id}', ${qty}); nav('catalog',{section:'${p.section}'})"><svg width="28" height="28" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" style="flex-shrink:0"><circle cx="9" cy="20" r="1.4"/><circle cx="18" cy="20" r="1.4"/><path d="M3 4h2l2.4 12.2a2 2 0 0 0 2 1.8h7.2a2 2 0 0 0 2-1.6L21 8H6"/></svg> Agregar al carrito — ${money(applyClientDiscount(effectivePrice(p)*qty))}</button>
     </div>
   </div>`;
 }
@@ -1400,6 +1397,43 @@ function effectivePriceForWeight(product){
     return product.wholesalePricePerKg;
   }
   return product.pricePerKg;
+}
+
+function clientDiscountPct(){
+  if(IS_ADMIN_APP) return 0;
+  const c = state.currentClientPhone ? state.clients[state.currentClientPhone] : null;
+  return (c && c.discountPct) ? Number(c.discountPct) : 0;
+}
+function applyClientDiscount(price){
+  const pct = clientDiscountPct();
+  return pct > 0 ? Math.round(price * (1 - pct/100)) : price;
+}
+function discBadge(pct, sm=false){
+  if(!pct) return '';
+  return `<span style="background:#e74c3c;color:#fff;border-radius:4px;padding:${sm?'1px 4px':'2px 6px'};font-size:${sm?'8px':'10px'};font-weight:800;margin-left:4px;vertical-align:middle;">-${pct}%</span>`;
+}
+function pcPriceHtml(p){
+  const base = effectivePrice(p);
+  const pct = clientDiscountPct();
+  if(pct > 0) return `<span style="text-decoration:line-through;opacity:.4;font-size:10px;">${money(base)}</span> ${money(Math.round(base*(1-pct/100)))}${discBadge(pct,true)}`;
+  return money(base)+(base!==p.price?'<span style="font-size:9px;color:#6db8e8;font-weight:700;margin-left:5px;">MAYORISTA</span>':'');
+}
+function pcWeightPriceHtml(p){
+  const base = effectivePriceForWeight(p);
+  const pct = clientDiscountPct();
+  if(pct > 0) return `<span style="text-decoration:line-through;opacity:.4;font-size:10px;">${money(base)}</span> ${money(Math.round(base*(1-pct/100)))}/kg${discBadge(pct,true)}`;
+  return money(base)+'/kg'+(base!==p.pricePerKg?'<span style="font-size:9px;color:#6db8e8;font-weight:700;margin-left:5px;">MAYORISTA</span>':'');
+}
+function pdPriceHtml(p){
+  const base = effectivePrice(p);
+  const pct = clientDiscountPct();
+  if(pct > 0) return `<span style="text-decoration:line-through;opacity:.4;font-size:14px;">${money(base)}</span> ${money(Math.round(base*(1-pct/100)))}${discBadge(pct)}`;
+  return money(base)+(base!==p.price?'<span style="font-size:11px;color:#6db8e8;font-weight:700;margin-left:6px;">PRECIO MAYORISTA</span>':'');
+}
+function pdWeightPriceHtml(p, pricePerKgEff){
+  const pct = clientDiscountPct();
+  if(pct > 0) return `<span style="text-decoration:line-through;opacity:.4;font-size:14px;">${money(pricePerKgEff)}</span> ${money(Math.round(pricePerKgEff*(1-pct/100)))}/kg${discBadge(pct)}`;
+  return money(pricePerKgEff)+'/kg'+(pricePerKgEff!==p.pricePerKg?'<span style="font-size:11px;color:#6db8e8;font-weight:700;margin-left:6px;">PRECIO MAYORISTA</span>':'');
 }
 
 /* ---------- CART ---------- */
