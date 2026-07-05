@@ -1216,7 +1216,7 @@ function renderHome(){
     <div class="section-cards">
       ${Object.keys(SECTION_META).map(key=>{
         const m = SECTION_META[key];
-        const imgIcon = key==='natural' ? '<img src="/icon-tienda.png" style="width:110%;height:110%;object-fit:contain;mix-blend-mode:luminosity;filter:brightness(1.1);">' : ic(m.icon);
+        const imgIcon = key==='natural' ? '<img src="/icon-tienda.png" style="width:110%;height:110%;object-fit:contain;mix-blend-mode:screen;filter:brightness(1.15) saturate(1.2);">' : ic(m.icon);
         return `<button class="section-card ${m.cls}" onclick="openSection('${key}')">
           <div class="sc-icon">${imgIcon}</div>
           <div style="flex:1;"><h3>${m.label}</h3><p>${m.sub}</p></div>
