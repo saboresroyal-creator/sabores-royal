@@ -85,12 +85,12 @@ img{display:block; max-width:100%;}
   width:62px; height:62px; flex:none; border-radius:50%;
   display:flex; align-items:center; justify-content:center; overflow:hidden;
 }
-.section-card.natural   .sc-icon{background:transparent;}
-.section-card.golosinas .sc-icon{background:rgba(55,10,40,0.95);}
-.section-card.market    .sc-icon{background:rgba(10,26,72,0.95);}
-.section-card.celiaco   .sc-icon{background:rgba(14,48,26,0.95);}
+.section-card.natural   .sc-icon{background:rgba(20,60,35,0.9);}
+.section-card.golosinas .sc-icon{background:rgba(55,10,40,0.9);}
+.section-card.market    .sc-icon{background:rgba(10,26,72,0.9);}
+.section-card.celiaco   .sc-icon{background:rgba(14,48,26,0.9);}
 .sc-icon svg{width:30px; height:30px; color:var(--gold);}
-.sc-icon img{width:100%; height:100%; object-fit:contain;}
+.sc-icon img{width:78%; height:78%; object-fit:contain;}
 .section-card h3{font-size:17px; color:var(--white); margin-bottom:3px; font-weight:700;}
 .section-card p{font-size:13px; color:rgba(255,255,255,0.52);}
 .sc-arrow{margin-left:auto; opacity:.35; flex-shrink:0;}
@@ -1217,7 +1217,7 @@ function renderHome(){
       ${Object.keys(SECTION_META).map(key=>{
         const m = SECTION_META[key];
         const imgIcons = {natural:'/icon-tienda.png', golosinas:'/icon-golo.png', market:'/icon-market.png'};
-        const imgIcon = imgIcons[key] ? `<img src="${imgIcons[key]}" style="width:110%;height:110%;object-fit:contain;mix-blend-mode:screen;filter:brightness(1.15) saturate(1.2);">` : ic(m.icon);
+        const imgIcon = imgIcons[key] ? `<img src="${imgIcons[key]}">` : ic(m.icon);
         return `<button class="section-card ${m.cls}" onclick="openSection('${key}')">
           <div class="sc-icon">${imgIcon}</div>
           <div style="flex:1;"><h3>${m.label}</h3><p>${m.sub}</p></div>
