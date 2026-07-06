@@ -1214,24 +1214,27 @@ function renderHome(){
       <div><b>Puntos Royal</b> — sumás 1 corona por cada $100 en compras, canjealos por premios</div>
     </div>
     <div class="section-cards">
-      ${Object.keys(SECTION_META).map(key=>{
-        const m = SECTION_META[key];
+      ${(()=>{
         const imgIcons = {natural:'/icon-tienda.png', golosinas:'/icon-golo.png', market:'/icon-market.png'};
-        const scIconContent = imgIcons[key] ? '' : ic(m.icon);
-        const scIconStyle = imgIcons[key] ? ` style="clip-path:circle(50% at 50% 50%);background:url('${imgIcons[key]}') center/130% no-repeat;"` : '';
-        return `<button class="section-card ${m.cls}" onclick="openSection('${key}')">
-          <div class="sc-icon"${scIconStyle}>${scIconContent}</div>
-          <div style="flex:1;"><h3>${m.label}</h3><p>${m.sub}</p></div>
+        const scCard = key => {
+          const m = SECTION_META[key];
+          const scIconContent = imgIcons[key] ? '' : ic(m.icon);
+          const scIconStyle = imgIcons[key] ? ` style="clip-path:circle(50% at 50% 50%);background:url('${imgIcons[key]}') center/130% no-repeat;"` : '';
+          return `<button class="section-card ${m.cls}" onclick="openSection('${key}')">
+            <div class="sc-icon"${scIconStyle}>${scIconContent}</div>
+            <div style="flex:1;"><h3>${m.label}</h3><p>${m.sub}</p></div>
+            <div class="sc-arrow">${ic('chevron')}</div>
+          </button>`;
+        };
+        const celiacoCard = `<button class="section-card celiaco" onclick="nav('celiaco')">
+          <div class="sc-icon" style="padding:10px;">
+            <img src="/sin-tacc.png" style="width:100%; height:100%; object-fit:contain;">
+          </div>
+          <div style="flex:1;"><h3>Apto Celíaco</h3><p>Productos Sin TACC certificados</p></div>
           <div class="sc-arrow">${ic('chevron')}</div>
         </button>`;
-      }).join('')}
-      <button class="section-card celiaco" onclick="nav('celiaco')">
-        <div class="sc-icon" style="padding:10px;">
-          <img src="/sin-tacc.png" style="width:100%; height:100%; object-fit:contain;">
-        </div>
-        <div style="flex:1;"><h3>Apto Celíaco</h3><p>Productos Sin TACC certificados</p></div>
-        <div class="sc-arrow">${ic('chevron')}</div>
-      </button>
+        return [scCard('natural'), celiacoCard, scCard('golosinas'), scCard('market')].join('');
+      })()}
     </div>
     <button class="wa-float-btn" onclick="window.open(waLink('¡Hola! Quiero hacer una consulta.'),'_blank')">
       ${ic('wa')} Hablar por WhatsApp
