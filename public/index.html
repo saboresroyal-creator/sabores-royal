@@ -85,7 +85,7 @@ img{display:block; max-width:100%;}
   width:62px; height:62px; flex:none; border-radius:50%;
   display:flex; align-items:center; justify-content:center; overflow:hidden;
 }
-.section-card.natural   .sc-icon{background:#000;}
+.section-card.natural   .sc-icon{background:transparent;}
 .section-card.golosinas .sc-icon{background:rgba(55,10,40,0.9);}
 .section-card.market    .sc-icon{background:rgba(10,26,72,0.9);}
 .section-card.celiaco   .sc-icon{background:rgba(14,48,26,0.9);}
@@ -1217,9 +1217,10 @@ function renderHome(){
       ${Object.keys(SECTION_META).map(key=>{
         const m = SECTION_META[key];
         const imgIcons = {natural:'/icon-tienda.png'};
-        const imgIcon = imgIcons[key] ? `<img src="${imgIcons[key]}">` : ic(m.icon);
+        const scIconContent = imgIcons[key] ? '' : ic(m.icon);
+        const scIconStyle = imgIcons[key] ? ` style="background:url('${imgIcons[key]}') center/cover no-repeat;"` : '';
         return `<button class="section-card ${m.cls}" onclick="openSection('${key}')">
-          <div class="sc-icon">${imgIcon}</div>
+          <div class="sc-icon"${scIconStyle}>${scIconContent}</div>
           <div style="flex:1;"><h3>${m.label}</h3><p>${m.sub}</p></div>
           <div class="sc-arrow">${ic('chevron')}</div>
         </button>`;
