@@ -1218,7 +1218,7 @@ function renderHome(){
         const m = SECTION_META[key];
         const imgIcons = {natural:'/icon-tienda.png'};
         const scIconContent = imgIcons[key] ? '' : ic(m.icon);
-        const scIconStyle = imgIcons[key] ? ` style="background:url('${imgIcons[key]}') center/cover no-repeat;"` : '';
+        const scIconStyle = imgIcons[key] ? ` style="clip-path:circle(50% at 50% 50%);background:url('${imgIcons[key]}') center/115% no-repeat;"` : '';
         return `<button class="section-card ${m.cls}" onclick="openSection('${key}')">
           <div class="sc-icon"${scIconStyle}>${scIconContent}</div>
           <div style="flex:1;"><h3>${m.label}</h3><p>${m.sub}</p></div>
