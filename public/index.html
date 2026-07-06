@@ -77,7 +77,7 @@ img{display:block; max-width:100%;}
 .section-card:active{transform:scale(.97);}
 .section-card.natural  {background:linear-gradient(135deg,rgba(8,38,30,0.9),rgba(8,38,30,0.5)); border-color:rgba(180,140,30,0.35);}
 .section-card.golosinas{background:linear-gradient(135deg,rgba(50,15,75,0.9),rgba(50,15,75,0.5)); border-color:rgba(180,140,30,0.35);}
-.section-card.market   {background:linear-gradient(135deg,rgba(14,35,90,0.75),rgba(14,35,90,0.35)); border-color:rgba(40,80,180,0.4);}
+.section-card.market   {background:linear-gradient(135deg,rgba(8,20,58,0.9),rgba(8,20,58,0.5)); border-color:rgba(180,140,30,0.35);}
 .section-card.celiaco  {background:linear-gradient(135deg,rgba(20,60,35,0.75),rgba(20,60,35,0.35)); border-color:rgba(40,120,70,0.4);}
 .section-card.featured {background:var(--glass); border-color:var(--glass-bd); box-shadow:none;}
 .sc-badge{display:none;}
@@ -1216,7 +1216,7 @@ function renderHome(){
     <div class="section-cards">
       ${Object.keys(SECTION_META).map(key=>{
         const m = SECTION_META[key];
-        const imgIcons = {natural:'/icon-tienda.png', golosinas:'/icon-golo.png'};
+        const imgIcons = {natural:'/icon-tienda.png', golosinas:'/icon-golo.png', market:'/icon-market.png'};
         const scIconContent = imgIcons[key] ? '' : ic(m.icon);
         const scIconStyle = imgIcons[key] ? ` style="clip-path:circle(50% at 50% 50%);background:url('${imgIcons[key]}') center/130% no-repeat;"` : '';
         return `<button class="section-card ${m.cls}" onclick="openSection('${key}')">
