@@ -636,6 +636,9 @@ async function apiSyncProducts(){
       wholesalePricePerKg: p.wholesale_price_per_kg ? Number(p.wholesale_price_per_kg) : null,
       minGrams: p.min_grams||null,
       sinTacc: p.sin_tacc||false,
+      sinAzucar: p.sin_azucar||false,
+      displayQty: p.display_qty||null,
+      displayDiscount: p.display_discount||null,
     };});
     const pendingOnly = state.products.filter(p=>_pendingSaves.has(p.id));
     const newProducts = [...apiMapped, ...pendingOnly];
@@ -776,6 +779,9 @@ async function apiSaveProduct(product){
       wholesale_price_per_kg: product.wholesalePricePerKg||null,
       min_grams: product.minGrams||null,
       sin_tacc: product.sinTacc||false,
+      sin_azucar: product.sinAzucar||false,
+      display_qty: product.displayQty||null,
+      display_discount: product.displayDiscount||null,
     };
     if(product._apiId){
       await supaFetch('/products?id=eq.' + product._apiId, 'PATCH', body);
@@ -1269,17 +1275,21 @@ function renderCatalogResults(section){
   const q = (state.route.q||"").toLowerCase();
   const activeCat = state.route.cat || null;
   const sinTaccOnly = !!state.route.sinTaccOnly;
+  const sinAzucarOnly = !!state.route.sinAzucarOnly;
   const cats = Object.keys(state.categories[section]||{});
   let products = state.products.filter(p=>p.section===section);
   if(activeCat) products = products.filter(p=>p.cat===activeCat);
   if(sinTaccOnly) products = products.filter(p=>p.sinTacc);
+  if(sinAzucarOnly) products = products.filter(p=>p.sinAzucar);
   if(q) products = products.filter(p=>p.name.toLowerCase().includes(q));
   const hasSinTacc = state.products.some(p=>p.section===section && p.sinTacc);
+  const hasSinAzucar = state.products.some(p=>p.section===section && p.sinAzucar);
   return `
     <div class="chip-row">
-      <button class="chip ${!activeCat && !sinTaccOnly?'active':''}" onclick="setCatalogCat(null)">Todas</button>
+      <button class="chip ${!activeCat && !sinTaccOnly && !sinAzucarOnly?'active':''}" onclick="setCatalogCat(null)">Todas</button>
       ${cats.map(c=>`<button class="chip ${activeCat===c?'active':''}" onclick="setCatalogCat('${c}')">${c}</button>`).join('')}
       ${hasSinTacc ? `<button class="chip ${sinTaccOnly?'active':''}" onclick="toggleSinTaccFilter()" style="${sinTaccOnly?'':'background:rgba(46,125,79,0.15); border-color:rgba(46,125,79,0.5); color:#6fcf97;'}">🌾 Sin TACC</button>` : ''}
+      ${hasSinAzucar ? `<button class="chip ${sinAzucarOnly?'active':''}" onclick="toggleSinAzucarFilter()" style="${sinAzucarOnly?'':'background:rgba(180,140,0,0.15); border-color:rgba(180,140,0,0.5); color:#f0c040;'}">🚫🍬 Sin Azúcar</button>` : ''}
     </div>
     ${products.length===0 ? `
       <div class="empty-state">${ic('box')}<p>No encontramos productos${q?` para "${q}"`:''}.</p></div>
@@ -1291,6 +1301,7 @@ function renderCatalogResults(section){
               ${(!p.sellByWeight && p.stock<=5 && p.stock>0) ? `<span class="pc-stock-low">¡Últimas ${p.stock}!</span>`:''}
               ${p.photo ? `<img src="${p.photo}" alt="">` : ic('box')}
               ${p.sinTacc ? `<img src="/sin-tacc.png" class="sintacc-badge" alt="Sin TACC">` : ''}
+              ${p.sinAzucar ? `<span style="position:absolute;top:6px;left:6px;background:#b8860b;color:#fff;font-size:8px;font-weight:800;border-radius:6px;padding:2px 5px;letter-spacing:.3px;">SIN AZÚCAR</span>` : ''}
             </div>
             <div class="pc-body">
               <h4>${p.name}</h4>
@@ -1299,6 +1310,7 @@ function renderCatalogResults(section){
                 <button class="pc-add" onclick="event.stopPropagation(); openProduct('${p.id}')">Elegir cantidad</button>
               ` : `
                 <div class="pc-price">${pcPriceHtml(p)}</div>
+                ${p.displayQty && p.displayDiscount ? `<div style="font-size:10px;color:#5dade2;margin-top:2px;">Caja x${p.displayQty}: <b>-${p.displayDiscount}%</b></div>` : ''}
                 <button class="pc-add" onclick="event.stopPropagation(); addToCart('${p.id}',1)">Agregar</button>
               `}
             </div>
@@ -1314,8 +1326,9 @@ function onSearchInput(val){
   const resultsEl = document.getElementById("catalog-results");
   if(resultsEl) resultsEl.innerHTML = renderCatalogResults(section);
 }
-function setCatalogCat(cat){ state.route.cat = cat; state.route.sinTaccOnly = false; render(); }
-function toggleSinTaccFilter(){ state.route.sinTaccOnly = !state.route.sinTaccOnly; state.route.cat = null; render(); }
+function setCatalogCat(cat){ state.route.cat = cat; state.route.sinTaccOnly = false; state.route.sinAzucarOnly = false; render(); }
+function toggleSinTaccFilter(){ state.route.sinTaccOnly = !state.route.sinTaccOnly; state.route.sinAzucarOnly = false; state.route.cat = null; render(); }
+function toggleSinAzucarFilter(){ state.route.sinAzucarOnly = !state.route.sinAzucarOnly; state.route.sinTaccOnly = false; state.route.cat = null; render(); }
 
 /* ---------- PRODUCT DETAIL ---------- */
 function renderProductDetail(id){
@@ -1364,6 +1377,8 @@ function renderProductDetail(id){
     <div class="pd-body">
       <h2>${p.name}</h2>
       <div class="pd-price">${pdPriceHtml(p)}</div>
+      ${p.displayQty && p.displayDiscount ? `<div style="background:rgba(52,152,219,0.12);border:1px solid rgba(52,152,219,0.3);border-radius:10px;padding:10px 12px;margin:8px 0;font-size:13px;"><span style="color:#5dade2;font-weight:700;">📦 Llevás ${p.displayQty} unidades</span> → <b>${money(Math.round(applyClientDiscount(effectivePrice(p))*(1-p.displayDiscount/100)))}/u</b> <span style="background:#e67e22;color:#fff;font-size:9px;font-weight:800;border-radius:6px;padding:2px 6px;">-${p.displayDiscount}%</span></div>` : ''}
+      ${p.sinAzucar ? `<span style="background:#b8860b;color:#fff;font-size:10px;font-weight:800;border-radius:8px;padding:3px 10px;display:inline-block;margin-bottom:6px;">SIN AZÚCAR · SUGAR FREE</span>` : ''}
       <p class="pd-desc">${p.desc||''}</p>
       <div class="qty-row">
         <button class="qty-btn" onclick="changeDetailQty(-1)">−</button>
@@ -2595,6 +2610,29 @@ function openProductModal(id){
         <button type="button" class="toggle ${p&&p.sinTacc?'on':''}" id="pm-sintacc-toggle" onclick="this.classList.toggle('on')"></button>
       </div>
 
+      <div class="settings-row" style="margin:0 16px 14px; border-radius:12px; background:rgba(180,140,0,0.12); border:1.5px solid rgba(180,140,0,0.4);">
+        <div style="display:flex; align-items:center; gap:8px;">
+          <span style="background:#b8860b; color:#fff; font-size:9px; font-weight:800; padding:2px 8px; border-radius:8px; letter-spacing:.4px;">SIN AZÚCAR</span>
+          <span style="font-size:13.5px;">Sugar free</span>
+        </div>
+        <button type="button" class="toggle ${p&&p.sinAzucar?'on':''}" id="pm-sinazucar-toggle" onclick="this.classList.toggle('on')"></button>
+      </div>
+
+      <div id="pm-display-group" style="margin:0 16px 14px; padding:14px; border-radius:12px; background:rgba(52,152,219,0.08); border:1.5px solid rgba(52,152,219,0.3);">
+        <div style="font-size:12px; font-weight:700; color:#5dade2; margin-bottom:10px; text-transform:uppercase; letter-spacing:.4px;">Precio por caja / display</div>
+        <div style="display:flex; gap:10px;">
+          <div class="form-group" style="flex:1; margin:0;">
+            <label>Unidades por caja</label>
+            <input id="pm-display-qty" type="number" min="2" value="${p&&p.displayQty?p.displayQty:''}" placeholder="Ej: 24">
+          </div>
+          <div class="form-group" style="flex:1; margin:0;">
+            <label>Descuento (%)</label>
+            <input id="pm-display-discount" type="number" min="1" max="99" value="${p&&p.displayDiscount?p.displayDiscount:''}" placeholder="Ej: 15">
+          </div>
+        </div>
+        <p style="font-size:11px; color:rgba(255,255,255,0.45); margin-top:8px;">Si el cliente compra esa cantidad, se aplica el descuento automáticamente.</p>
+      </div>
+
       <div style="padding:6px 0 0; display:flex; gap:10px;">
         <button class="btn-secondary" onclick="closeProductModal()" style="flex:1;">Cancelar</button>
         <button class="btn-primary" onclick="saveProductModal('${p?p.id:''}')" style="flex:1;">Guardar</button>
@@ -2646,6 +2684,9 @@ function saveProductModal(id){
   const desc = document.getElementById("pm-desc").value.trim();
   const sellByWeight = document.getElementById("pm-sellbyweight-toggle").classList.contains("on");
   const sinTacc = document.getElementById("pm-sintacc-toggle").classList.contains("on");
+  const sinAzucar = document.getElementById("pm-sinazucar-toggle").classList.contains("on");
+  const displayQty = Number(document.getElementById("pm-display-qty").value)||null;
+  const displayDiscount = Number(document.getElementById("pm-display-discount").value)||null;
   const pricePerKg = sellByWeight ? (Number(document.getElementById("pm-price-per-kg").value)||0) : null;
   const wholesalePerKgRaw = sellByWeight ? document.getElementById("pm-wholesale-price-per-kg").value.trim() : "";
   const wholesalePricePerKg = wholesalePerKgRaw ? Number(wholesalePerKgRaw) : null;
@@ -2659,12 +2700,12 @@ function saveProductModal(id){
   let savedProduct;
   if(id){
     const p = state.products.find(pr=>pr.id===id);
-    Object.assign(p, {name, section, cat, sub, price, wholesalePrice, stock, desc, sellByWeight, pricePerKg, wholesalePricePerKg, minGrams, sinTacc, photo:adminPhotoDraft.current||p.photo});
+    Object.assign(p, {name, section, cat, sub, price, wholesalePrice, stock, desc, sellByWeight, pricePerKg, wholesalePricePerKg, minGrams, sinTacc, sinAzucar, displayQty, displayDiscount, photo:adminPhotoDraft.current||p.photo});
     savedProduct = p;
   }else{
     savedProduct = {
       id: "p"+Date.now(), section, cat, sub, name, price, wholesalePrice, stock, desc,
-      sellByWeight, pricePerKg, wholesalePricePerKg, minGrams, sinTacc,
+      sellByWeight, pricePerKg, wholesalePricePerKg, minGrams, sinTacc, sinAzucar, displayQty, displayDiscount,
       photo: adminPhotoDraft.current||""
     };
     state.products.push(savedProduct);
