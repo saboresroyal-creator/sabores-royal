@@ -79,6 +79,7 @@ img{display:block; max-width:100%;}
 .section-card.golosinas{background:linear-gradient(135deg,rgba(50,15,75,0.9),rgba(50,15,75,0.5)); border-color:rgba(180,140,30,0.35);}
 .section-card.market   {background:linear-gradient(135deg,rgba(8,20,58,0.9),rgba(8,20,58,0.5)); border-color:rgba(180,140,30,0.35);}
 .section-card.celiaco  {background:linear-gradient(135deg,rgba(90,10,10,0.9),rgba(90,10,10,0.5)); border-color:rgba(180,140,30,0.35);}
+.section-card.sinazucar{background:linear-gradient(135deg,rgba(90,65,0,0.9),rgba(90,65,0,0.5)); border-color:rgba(220,170,0,0.45);}
 .section-card.featured {background:var(--glass); border-color:var(--glass-bd); box-shadow:none;}
 .sc-badge{display:none;}
 .sc-icon{
@@ -486,6 +487,7 @@ const SECTION_META = {
   natural:{label:"Tienda Natural", sub:"Frutos secos, dietética y más", icon:"leaf", cls:"natural"},
   golosinas:{label:"Golosinas", sub:"Chocolates, caramelos y chicles", icon:"candy", cls:"golosinas"},
   market:{label:"Market", sub:"Almacén y productos del día a día", icon:"cart2", cls:"market"},
+  sinazucar:{label:"Sin Azúcar", sub:"Productos sin azúcar y sugar free", icon:"leaf", cls:"sinazucar"},
 };
 
 /* ---------- DEFAULT CATEGORY TREE ---------- */
@@ -504,6 +506,11 @@ const DEFAULT_CATEGORIES = {
     "Almacén":["Conservas","Aceites","Condimentos"],
     "Bebidas":["Gaseosas","Aguas","Jugos"],
     "Limpieza":["Hogar","Cocina"],
+  },
+  sinazucar:{
+    "Golosinas Sin Azúcar":["Chocolates","Caramelos","Galletas"],
+    "Bebidas Sin Azúcar":["Aguas saborizadas","Jugos","Gaseosas"],
+    "Alimentos":["Mermeladas","Cereales","Snacks"],
   },
 };
 
@@ -1215,7 +1222,7 @@ function renderHome(){
     </div>
     <div class="section-cards">
       ${(()=>{
-        const imgIcons = {natural:'/icon-tienda.png', golosinas:'/icon-golo.png', market:'/icon-market.png'};
+        const imgIcons = {natural:'/icon-tienda.png', golosinas:'/icon-golo.png', market:'/icon-market.png', sinazucar:'/ICON-SINAZUC.PNG'};
         const scCard = key => {
           const m = SECTION_META[key];
           const scIconContent = imgIcons[key] ? '' : ic(m.icon);
@@ -1231,7 +1238,7 @@ function renderHome(){
           <div style="flex:1;"><h3>Apto Celíaco</h3><p>Productos Sin TACC certificados</p></div>
           <div class="sc-arrow">${ic('chevron')}</div>
         </button>`;
-        return [scCard('natural'), celiacoCard, scCard('golosinas'), scCard('market')].join('');
+        return [scCard('natural'), celiacoCard, scCard('golosinas'), scCard('market'), scCard('sinazucar')].join('');
       })()}
     </div>
     <button class="wa-float-btn" onclick="window.open(waLink('¡Hola! Quiero hacer una consulta.'),'_blank')">
