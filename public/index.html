@@ -132,10 +132,19 @@ img{display:block; max-width:100%;}
 .bottomnav svg{width:21px; height:21px;}
 
 /* ---------- LISTS / CATALOG ---------- */
-.search-bar{margin:14px 16px; padding:11px 14px; display:flex; align-items:center; gap:8px;
+.search-wrap{position:relative; margin:14px 16px;}
+.search-bar{padding:11px 14px; display:flex; align-items:center; gap:8px;
   border-radius:14px; background:var(--glass); border:1px solid var(--glass-bd);}
 .search-bar input{background:none; border:none; outline:none; color:var(--cream); flex:1; font-size:14px;}
 .search-bar svg{width:17px; height:17px; opacity:.5;}
+.search-suggestions{display:none; position:absolute; left:0; right:0; top:calc(100% + 5px);
+  background:#0d1840; border:1px solid var(--glass-bd); border-radius:14px; overflow:hidden;
+  z-index:100; box-shadow:0 8px 28px rgba(0,0,0,0.55);}
+.search-sug-item{padding:11px 14px; font-size:13px; color:var(--cream);
+  border-bottom:1px solid rgba(255,255,255,0.06); cursor:pointer;}
+.search-sug-item:last-child{border-bottom:none;}
+.search-sug-item:active{background:var(--glass);}
+.search-sug-cat{font-size:11px; color:rgba(255,255,255,0.4); margin-top:2px;}
 
 .chip-row{display:flex; gap:8px; padding:0 16px 12px; overflow-x:auto;}
 .chip{flex:none; padding:8px 16px; border-radius:20px; font-size:12.5px; font-weight:600;
@@ -894,9 +903,17 @@ async function apiPushOrdersToSupabase(){
 function nav(screen, params){
   if(screen==='admin' && !IS_ADMIN_APP) return;
   state.route = Object.assign({screen}, params||{});
+  history.pushState({route: state.route}, '');
   render();
   window.scrollTo(0,0);
 }
+window.addEventListener('popstate', e=>{
+  if(e.state && e.state.route){
+    state.route = e.state.route;
+    render();
+    window.scrollTo(0,0);
+  }
+});
 function openSection(key){ nav("catalog", {section:key}); }
 function openProduct(id){ nav("product", {id}); }
 
@@ -1296,9 +1313,12 @@ function renderCatalog(section){
       <h2>${meta.label}</h2>
       <img src="${LOGO_DATA_URL}" class="logo-mini" alt="">
     </div>
-    <div class="search-bar">
-      ${ic('search')}
-      <input id="search-input" placeholder="Buscar productos..." value="${state.route.q||''}" oninput="onSearchInput(this.value)">
+    <div class="search-wrap">
+      <div class="search-bar">
+        ${ic('search')}
+        <input id="search-input" placeholder="Buscar productos..." value="${state.route.q||''}" oninput="onSearchInput(this.value)" onblur="setTimeout(()=>{const s=document.getElementById('search-suggestions');if(s)s.style.display='none';},150)">
+      </div>
+      <div id="search-suggestions" class="search-suggestions"></div>
     </div>
     <div id="catalog-results">${renderCatalogResults(section)}</div>
   </div>`;
@@ -1357,6 +1377,21 @@ function onSearchInput(val){
   const section = state.route.section || "market";
   const resultsEl = document.getElementById("catalog-results");
   if(resultsEl) resultsEl.innerHTML = renderCatalogResults(section);
+  const sugEl = document.getElementById("search-suggestions");
+  if(!sugEl) return;
+  const q = val.trim().toLowerCase();
+  if(q.length < 2){ sugEl.style.display='none'; return; }
+  const re = new RegExp(q.replace(/[.*+?^${}()|[\]\\]/g,'\\$&'),'gi');
+  const matches = state.products.filter(p=>
+    p.name.toLowerCase().includes(q) || (p.cat||'').toLowerCase().includes(q)
+  ).slice(0,6);
+  if(!matches.length){ sugEl.style.display='none'; return; }
+  sugEl.innerHTML = matches.map(p=>`
+    <div class="search-sug-item" onmousedown="openProduct('${p.id}')">
+      <div>${p.name.replace(re, m=>`<b style="color:var(--gold2);">${m}</b>`)}</div>
+      <div class="search-sug-cat">${p.cat||''}</div>
+    </div>`).join('');
+  sugEl.style.display='block';
 }
 function setCatalogCat(cat){ state.route.cat = cat; state.route.sinTaccOnly = false; state.route.sinAzucarOnly = false; render(); }
 function toggleSinTaccFilter(){ state.route.sinTaccOnly = !state.route.sinTaccOnly; state.route.sinAzucarOnly = false; state.route.cat = null; render(); }
@@ -4797,6 +4832,7 @@ if(IS_ADMIN_APP){
   state.adminAuthed = false; state.adminIsSuperAdmin = false; state.adminLoggedName = "";
 }
 render();
+history.replaceState({route: state.route}, '');
 apiSyncProducts();
 apiSyncContent();
 if(IS_ADMIN_APP){ apiSyncClients(); apiSyncOrders(); syncAdminChats(); }
