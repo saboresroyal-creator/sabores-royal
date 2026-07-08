@@ -946,7 +946,8 @@ function cartItemLineTotal(item){
     return (effectivePriceForWeight(p)/1000) * item.grams;
   }
   const base = effectivePrice(p);
-  if(p.displayQty && p.displayDiscount && item.qty >= p.displayQty){
+  const _cl = state.currentClientPhone ? state.clients[state.currentClientPhone] : null;
+  if(p.displayQty && p.displayDiscount && item.qty >= p.displayQty && !(_cl && _cl.wholesale)){
     return Math.round(base * (1 - p.displayDiscount/100)) * item.qty;
   }
   return base * item.qty;
@@ -1326,7 +1327,7 @@ function renderCatalogResults(section){
                 <button class="pc-add" onclick="event.stopPropagation(); openProduct('${p.id}')">Elegir cantidad</button>
               ` : `
                 <div class="pc-price">${pcPriceHtml(p)}</div>
-                ${p.displayQty && p.displayDiscount ? `<div style="font-size:10px;color:#5dade2;margin-top:2px;">Caja x${p.displayQty}: <b>-${p.displayDiscount}%</b></div>` : ''}
+                ${p.displayQty && p.displayDiscount && !(state.currentClientPhone && state.clients[state.currentClientPhone] && state.clients[state.currentClientPhone].wholesale) ? `<div style="font-size:10px;color:#5dade2;margin-top:2px;">Caja x${p.displayQty}: <b>-${p.displayDiscount}%</b></div>` : ''}
                 <button class="pc-add" onclick="event.stopPropagation(); addToCart('${p.id}',1)">Agregar</button>
               `}
             </div>
@@ -1384,7 +1385,9 @@ function renderProductDetail(id){
   }
   const qty = state.route.qty || 1;
   const _unitPr = effectivePrice(p);
-  const _hasDisp = p.displayQty && p.displayDiscount && qty >= p.displayQty;
+  const _clW = state.currentClientPhone ? state.clients[state.currentClientPhone] : null;
+  const _isWholesale = !!(_clW && _clW.wholesale);
+  const _hasDisp = !_isWholesale && p.displayQty && p.displayDiscount && qty >= p.displayQty;
   const _lineTotal = _hasDisp ? Math.round(_unitPr * (1 - p.displayDiscount/100)) * qty : _unitPr * qty;
   return `
   <div class="screen">
@@ -1396,7 +1399,7 @@ function renderProductDetail(id){
     <div class="pd-body">
       <h2>${p.name}</h2>
       <div class="pd-price">${pdPriceHtml(p)}</div>
-      ${p.displayQty && p.displayDiscount ? `<div style="background:${_hasDisp?'rgba(39,174,96,0.15)':'rgba(52,152,219,0.12)'};border:1px solid ${_hasDisp?'rgba(39,174,96,0.4)':'rgba(52,152,219,0.3)'};border-radius:10px;padding:10px 12px;margin:8px 0;font-size:13px;">${_hasDisp?`<span style="color:#2ecc71;font-weight:700;">✓ Precio display aplicado</span>`:`<span style="color:#5dade2;font-weight:700;">📦 Comprá ${p.displayQty} unidades</span> →`} <b>${money(Math.round(applyClientDiscount(_unitPr*(1-p.displayDiscount/100))))}/u</b> <span style="background:#e67e22;color:#fff;font-size:9px;font-weight:800;border-radius:6px;padding:2px 6px;">-${p.displayDiscount}%</span></div>` : ''}
+      ${!_isWholesale && p.displayQty && p.displayDiscount ? `<div style="background:${_hasDisp?'rgba(39,174,96,0.15)':'rgba(52,152,219,0.12)'};border:1px solid ${_hasDisp?'rgba(39,174,96,0.4)':'rgba(52,152,219,0.3)'};border-radius:10px;padding:10px 12px;margin:8px 0;font-size:13px;">${_hasDisp?`<span style="color:#2ecc71;font-weight:700;">✓ Precio display aplicado</span>`:`<span style="color:#5dade2;font-weight:700;">📦 Comprá ${p.displayQty} unidades</span> →`} <b>${money(Math.round(applyClientDiscount(_unitPr*(1-p.displayDiscount/100))))}/u</b> <span style="background:#e67e22;color:#fff;font-size:9px;font-weight:800;border-radius:6px;padding:2px 6px;">-${p.displayDiscount}%</span></div>` : ''}
       ${p.sinAzucar ? `<span style="background:#b8860b;color:#fff;font-size:10px;font-weight:800;border-radius:8px;padding:3px 10px;display:inline-block;margin-bottom:6px;">SIN AZÚCAR · SUGAR FREE</span>` : ''}
       <p class="pd-desc">${p.desc||''}</p>
       <div class="qty-row">
