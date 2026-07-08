@@ -667,7 +667,7 @@ async function uploadProductPhoto(base64, productId){
 
 async function apiSyncContent(){
   try{
-    const data = await supaFetch('/app_settings?setting_key=in.(novedades,ofertas,banner_novedades,banner_ofertas,client_discounts)&select=setting_key,setting_value', 'GET');
+    const data = await supaFetch('/app_settings?setting_key=in.(novedades,ofertas,banner_novedades,banner_ofertas,client_discounts,wholesale_clients)&select=setting_key,setting_value', 'GET');
     if(!data || data.length===0) return;
     let changed = false;
     data.forEach(row=>{
@@ -703,6 +703,21 @@ async function apiSyncContent(){
             }
           });
           if(discountsDirty) setTimeout(apiSaveClientDiscounts, 500);
+          changed = true;
+        }
+        if(row.setting_key==='wholesale_clients'){
+          const list = parsed || [];
+          // Aplicar flag wholesale a los clientes en la lista
+          list.forEach(phone=>{
+            if(!state.clients[phone]) state.clients[phone] = {phone, name:'', address:'', doc:'', points:0, orders:[]};
+            state.clients[phone].wholesale = true;
+          });
+          // Quitar flag a clientes que ya no son mayoristas
+          Object.keys(state.clients).forEach(phone=>{
+            if(!list.includes(phone) && state.clients[phone].wholesale){
+              state.clients[phone].wholesale = false;
+            }
+          });
           changed = true;
         }
       }catch(e){}
@@ -3177,6 +3192,7 @@ function toggleClientWholesale(phone){
     apiSaveClientDiscounts();
   }
   saveState();
+  apiSaveWholesaleClients();
   render();
   toast(c.wholesale ? `${c.name} ahora es mayorista (descuento especial quitado)` : `${c.name} ya no es mayorista`, "ok");
 }
@@ -3206,6 +3222,18 @@ function editClientDiscount(phone){
   render();
   apiSaveClientDiscounts();
   toast(pct > 0 ? `${c.name}: ${pct}% de descuento especial` : `${c.name}: sin descuento especial`, "ok");
+}
+async function apiSaveWholesaleClients(){
+  const list = Object.values(state.clients).filter(c=>c.wholesale).map(c=>c.phone);
+  const val = JSON.stringify(list);
+  try{
+    const existing = await supaFetch('/app_settings?setting_key=eq.wholesale_clients&select=id','GET');
+    if(existing && existing.length>0){
+      await supaFetch('/app_settings?setting_key=eq.wholesale_clients','PATCH',{setting_value:val});
+    }else{
+      await supaFetch('/app_settings','POST',{setting_key:'wholesale_clients',setting_value:val});
+    }
+  }catch(e){ console.warn('Error guardando mayoristas:',e); }
 }
 async function apiSaveClientDiscounts(){
   const discounts = {};
