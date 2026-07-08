@@ -648,6 +648,8 @@ async function apiSyncProducts(){
       sinAzucar: p.sin_azucar||false,
       displayQty: p.display_qty||null,
       displayDiscount: p.display_discount||null,
+      promoPrice: p.promo_price ? Number(p.promo_price) : null,
+      promoUntil: p.promo_until||null,
     };});
     const pendingOnly = state.products.filter(p=>_pendingSaves.has(p.id));
     const newProducts = [...apiMapped, ...pendingOnly];
@@ -818,6 +820,8 @@ async function apiSaveProduct(product){
       sin_azucar: product.sinAzucar||false,
       display_qty: product.displayQty||null,
       display_discount: product.displayDiscount||null,
+      promo_price: product.promoPrice||null,
+      promo_until: product.promoUntil||null,
     };
     if(product._apiId){
       await supaFetch('/products?id=eq.' + product._apiId, 'PATCH', body);
@@ -996,16 +1000,20 @@ function money(n){
 function formatOrderItemLabel(it){
   return it.grams ? `${it.grams}g de ${it.name}` : `${it.qty}x ${it.name}`;
 }
-/* Returns the price a logged-in client should see/pay for a product:
-   wholesale price if the current client is marked wholesale AND the
-   product has a wholesale price set, otherwise the normal price. */
+function activePromo(product){
+  if(!product || !product.promoPrice || !product.promoUntil) return null;
+  const today = new Date().toISOString().slice(0,10);
+  return product.promoUntil >= today ? product.promoPrice : null;
+}
+/* Prioridad: mayorista > promo > precio normal */
 function effectivePrice(product){
   if(!product) return 0;
   const client = state.currentClientPhone ? state.clients[state.currentClientPhone] : null;
   if(client && client.wholesale && product.wholesalePrice){
     return product.wholesalePrice;
   }
-  return product.price;
+  const promo = activePromo(product);
+  return promo !== null ? promo : product.price;
 }
 
 /* =========================================================
@@ -1512,10 +1520,19 @@ function discBadge(pct, sm=false){
   return `<span style="background:#e74c3c;color:#fff;border-radius:4px;padding:${sm?'1px 4px':'2px 6px'};font-size:${sm?'8px':'10px'};font-weight:800;margin-left:4px;vertical-align:middle;">-${pct}%</span>`;
 }
 function pcPriceHtml(p){
-  const base = effectivePrice(p);
+  const client = state.currentClientPhone ? state.clients[state.currentClientPhone] : null;
+  if(client && client.wholesale && p.wholesalePrice){
+    return money(p.wholesalePrice)+'<span style="font-size:9px;color:#6db8e8;font-weight:700;margin-left:5px;">MAYORISTA</span>';
+  }
+  const promo = activePromo(p);
+  const base = promo !== null ? promo : p.price;
   const pct = clientDiscountPct();
-  if(pct > 0) return `<span style="text-decoration:line-through;opacity:.4;font-size:10px;">${money(base)}</span> ${money(Math.round(base*(1-pct/100)))}${discBadge(pct,true)}`;
-  return money(base)+(base!==p.price?'<span style="font-size:9px;color:#6db8e8;font-weight:700;margin-left:5px;">MAYORISTA</span>':'');
+  const final = pct > 0 ? Math.round(base*(1-pct/100)) : base;
+  if(promo !== null || pct > 0){
+    const badgePct = pct > 0 ? pct : Math.round((1-promo/p.price)*100);
+    return `<span style="text-decoration:line-through;opacity:.4;font-size:10px;">${money(p.price)}</span> ${money(final)}${discBadge(badgePct,true)}`;
+  }
+  return money(p.price);
 }
 function pcWeightPriceHtml(p){
   const base = effectivePriceForWeight(p);
@@ -1524,10 +1541,19 @@ function pcWeightPriceHtml(p){
   return money(base)+'/kg'+(base!==p.pricePerKg?'<span style="font-size:9px;color:#6db8e8;font-weight:700;margin-left:5px;">MAYORISTA</span>':'');
 }
 function pdPriceHtml(p){
-  const base = effectivePrice(p);
+  const client = state.currentClientPhone ? state.clients[state.currentClientPhone] : null;
+  if(client && client.wholesale && p.wholesalePrice){
+    return money(p.wholesalePrice)+'<span style="font-size:11px;color:#6db8e8;font-weight:700;margin-left:6px;">PRECIO MAYORISTA</span>';
+  }
+  const promo = activePromo(p);
+  const base = promo !== null ? promo : p.price;
   const pct = clientDiscountPct();
-  if(pct > 0) return `<span style="text-decoration:line-through;opacity:.4;font-size:14px;">${money(base)}</span> ${money(Math.round(base*(1-pct/100)))}${discBadge(pct)}`;
-  return money(base)+(base!==p.price?'<span style="font-size:11px;color:#6db8e8;font-weight:700;margin-left:6px;">PRECIO MAYORISTA</span>':'');
+  const final = pct > 0 ? Math.round(base*(1-pct/100)) : base;
+  if(promo !== null || pct > 0){
+    const badgePct = pct > 0 ? pct : Math.round((1-promo/p.price)*100);
+    return `<span style="text-decoration:line-through;opacity:.4;font-size:14px;">${money(p.price)}</span> ${money(final)}${discBadge(badgePct)}`;
+  }
+  return money(p.price);
 }
 function pdWeightPriceHtml(p, pricePerKgEff){
   const pct = clientDiscountPct();
@@ -2671,6 +2697,10 @@ function openProductModal(id){
       <div id="pm-normal-price-group" style="display:${p&&p.sellByWeight?'none':'block'};">
         <div class="form-group"><label>Precio</label><input id="pm-price" type="number" value="${p?p.price:''}" placeholder="0"></div>
         <div class="form-group"><label>Precio mayorista (opcional)</label><input id="pm-wholesale-price" type="number" value="${p&&p.wholesalePrice?p.wholesalePrice:''}" placeholder="Dejá vacío si no aplica"></div>
+        <div style="display:flex;gap:10px;">
+          <div class="form-group" style="flex:1;"><label>🏷️ Precio en oferta</label><input id="pm-promo-price" type="number" value="${p&&p.promoPrice?p.promoPrice:''}" placeholder="Vacío = sin oferta"></div>
+          <div class="form-group" style="flex:1;"><label>Válido hasta</label><input id="pm-promo-until" type="date" value="${p&&p.promoUntil?p.promoUntil:''}"></div>
+        </div>
       </div>
       <div id="pm-weight-price-group" style="display:${p&&p.sellByWeight?'block':'none'};">
         <div class="form-group"><label>Precio por kilo</label><input id="pm-price-per-kg" type="number" value="${p&&p.pricePerKg?p.pricePerKg:''}" placeholder="Ej: 8000"></div>
@@ -2767,6 +2797,9 @@ function saveProductModal(id){
   const sinAzucar = document.getElementById("pm-sinazucar-toggle").classList.contains("on");
   const displayQty = Number(document.getElementById("pm-display-qty").value)||null;
   const displayDiscount = Number(document.getElementById("pm-display-discount").value)||null;
+  const promoPriceRaw = document.getElementById("pm-promo-price").value.trim();
+  const promoPrice = promoPriceRaw ? Number(promoPriceRaw) : null;
+  const promoUntil = document.getElementById("pm-promo-until").value || null;
   const pricePerKg = sellByWeight ? (Number(document.getElementById("pm-price-per-kg").value)||0) : null;
   const wholesalePerKgRaw = sellByWeight ? document.getElementById("pm-wholesale-price-per-kg").value.trim() : "";
   const wholesalePricePerKg = wholesalePerKgRaw ? Number(wholesalePerKgRaw) : null;
@@ -2780,12 +2813,12 @@ function saveProductModal(id){
   let savedProduct;
   if(id){
     const p = state.products.find(pr=>pr.id===id);
-    Object.assign(p, {name, section, cat, sub, price, wholesalePrice, stock, desc, sellByWeight, pricePerKg, wholesalePricePerKg, minGrams, sinTacc, sinAzucar, displayQty, displayDiscount, photo:adminPhotoDraft.current||p.photo});
+    Object.assign(p, {name, section, cat, sub, price, wholesalePrice, stock, desc, sellByWeight, pricePerKg, wholesalePricePerKg, minGrams, sinTacc, sinAzucar, displayQty, displayDiscount, promoPrice, promoUntil, photo:adminPhotoDraft.current||p.photo});
     savedProduct = p;
   }else{
     savedProduct = {
       id: "p"+Date.now(), section, cat, sub, name, price, wholesalePrice, stock, desc,
-      sellByWeight, pricePerKg, wholesalePricePerKg, minGrams, sinTacc, sinAzucar, displayQty, displayDiscount,
+      sellByWeight, pricePerKg, wholesalePricePerKg, minGrams, sinTacc, sinAzucar, displayQty, displayDiscount, promoPrice, promoUntil,
       photo: adminPhotoDraft.current||""
     };
     state.products.push(savedProduct);
