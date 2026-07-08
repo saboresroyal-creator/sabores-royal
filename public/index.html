@@ -945,7 +945,11 @@ function cartItemLineTotal(item){
   if(item.grams){
     return (effectivePriceForWeight(p)/1000) * item.grams;
   }
-  return effectivePrice(p) * item.qty;
+  const base = effectivePrice(p);
+  if(p.displayQty && p.displayDiscount && item.qty >= p.displayQty){
+    return Math.round(base * (1 - p.displayDiscount/100)) * item.qty;
+  }
+  return base * item.qty;
 }
 function cartTotal(){
   return state.cart.reduce((sum,item)=> sum + cartItemLineTotal(item), 0);
@@ -1379,6 +1383,9 @@ function renderProductDetail(id){
     </div>`;
   }
   const qty = state.route.qty || 1;
+  const _unitPr = effectivePrice(p);
+  const _hasDisp = p.displayQty && p.displayDiscount && qty >= p.displayQty;
+  const _lineTotal = _hasDisp ? Math.round(_unitPr * (1 - p.displayDiscount/100)) * qty : _unitPr * qty;
   return `
   <div class="screen">
     <div class="topbar">
@@ -1389,24 +1396,30 @@ function renderProductDetail(id){
     <div class="pd-body">
       <h2>${p.name}</h2>
       <div class="pd-price">${pdPriceHtml(p)}</div>
-      ${p.displayQty && p.displayDiscount ? `<div style="background:rgba(52,152,219,0.12);border:1px solid rgba(52,152,219,0.3);border-radius:10px;padding:10px 12px;margin:8px 0;font-size:13px;"><span style="color:#5dade2;font-weight:700;">📦 Llevás ${p.displayQty} unidades</span> → <b>${money(Math.round(applyClientDiscount(effectivePrice(p))*(1-p.displayDiscount/100)))}/u</b> <span style="background:#e67e22;color:#fff;font-size:9px;font-weight:800;border-radius:6px;padding:2px 6px;">-${p.displayDiscount}%</span></div>` : ''}
+      ${p.displayQty && p.displayDiscount ? `<div style="background:${_hasDisp?'rgba(39,174,96,0.15)':'rgba(52,152,219,0.12)'};border:1px solid ${_hasDisp?'rgba(39,174,96,0.4)':'rgba(52,152,219,0.3)'};border-radius:10px;padding:10px 12px;margin:8px 0;font-size:13px;">${_hasDisp?`<span style="color:#2ecc71;font-weight:700;">✓ Precio display aplicado</span>`:`<span style="color:#5dade2;font-weight:700;">📦 Comprá ${p.displayQty} unidades</span> →`} <b>${money(Math.round(applyClientDiscount(_unitPr*(1-p.displayDiscount/100))))}/u</b> <span style="background:#e67e22;color:#fff;font-size:9px;font-weight:800;border-radius:6px;padding:2px 6px;">-${p.displayDiscount}%</span></div>` : ''}
       ${p.sinAzucar ? `<span style="background:#b8860b;color:#fff;font-size:10px;font-weight:800;border-radius:8px;padding:3px 10px;display:inline-block;margin-bottom:6px;">SIN AZÚCAR · SUGAR FREE</span>` : ''}
       <p class="pd-desc">${p.desc||''}</p>
       <div class="qty-row">
         <button class="qty-btn" onclick="changeDetailQty(-1)">−</button>
-        <div class="qty-val">${qty}</div>
+        <input type="number" class="qty-val" value="${qty}" min="1" max="${p.stock}" onchange="setDetailQty(this.value)" style="width:56px;padding:4px 6px;border-radius:8px;background:var(--glass);border:1px solid var(--glass-bd);color:var(--white);-moz-appearance:textfield;">
         <button class="qty-btn" onclick="changeDetailQty(1)">+</button>
         <span style="font-size:12px; color:rgba(255,255,255,0.5);">${p.stock} disponibles</span>
       </div>
     </div>
     <div class="sticky-cta">
-      <button class="btn-primary" onclick="addToCart('${p.id}', ${qty}); nav('catalog',{section:'${p.section}'})"><svg width="28" height="28" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" style="flex-shrink:0"><circle cx="9" cy="20" r="1.4"/><circle cx="18" cy="20" r="1.4"/><path d="M3 4h2l2.4 12.2a2 2 0 0 0 2 1.8h7.2a2 2 0 0 0 2-1.6L21 8H6"/></svg> Agregar al carrito — ${money(applyClientDiscount(effectivePrice(p)*qty))}</button>
+      <button class="btn-primary" onclick="addToCart('${p.id}', ${qty}); nav('catalog',{section:'${p.section}'})"><svg width="28" height="28" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" style="flex-shrink:0"><circle cx="9" cy="20" r="1.4"/><circle cx="18" cy="20" r="1.4"/><path d="M3 4h2l2.4 12.2a2 2 0 0 0 2 1.8h7.2a2 2 0 0 0 2-1.6L21 8H6"/></svg> Agregar al carrito — ${money(applyClientDiscount(_lineTotal))}</button>
     </div>
   </div>`;
 }
 function changeDetailQty(delta){
   const q = Math.max(1, (state.route.qty||1)+delta);
   state.route.qty = q; render();
+}
+function setDetailQty(val){
+  const p = state.products.find(pr=>pr.id===state.route.id);
+  const max = p ? p.stock : 999;
+  state.route.qty = Math.max(1, Math.min(max, Number(val)||1));
+  render();
 }
 function changeDetailGrams(delta){
   const p = state.products.find(pr=>pr.id===state.route.id);
@@ -1520,7 +1533,7 @@ function renderCart(){
       }).join('')}
     </div>
     <div class="cart-summary">
-      <div class="summary-row total"><span>Total</span><span>${money(cartTotal())}</span></div>
+      ${(()=>{ const pct=clientDiscountPct(); const base=cartTotal(); if(pct>0){ const disc=Math.round(base*pct/100); return `<div class="summary-row"><span>Subtotal</span><span>${money(base)}</span></div><div class="summary-row" style="color:var(--ok);"><span>Tu descuento (${pct}%)</span><span>-${money(disc)}</span></div><div class="summary-row total"><span>Total</span><span>${money(base-disc)}</span></div>`; } return `<div class="summary-row total"><span>Total</span><span>${money(base)}</span></div>`; })()}
     </div>
     <div style="padding:0 16px 90px;">
       <button class="btn-primary" onclick="nav('checkout')">Continuar al pedido</button>
@@ -1533,7 +1546,7 @@ function renderCheckout(){
   const saved = state.currentClientPhone ? state.clients[state.currentClientPhone] : null;
   const savedPhoneDigits = saved ? saved.phone.replace(/^\+?54/,'') : '';
   const base = cartTotal();
-  const discPct = saved && saved.discountPct ? Number(saved.discountPct) : 0;
+  const discPct = clientDiscountPct();
   const discAmount = discPct > 0 ? Math.round(base * discPct / 100) : 0;
   const finalTotal = base - discAmount;
   return `
