@@ -696,6 +696,12 @@ async function apiSyncContent(){
               state.clients[phone].discountPct = pct;
             }
           });
+          // Limpiar descuentos de clientes que ya no están en la lista de Supabase
+          Object.keys(state.clients).forEach(phone=>{
+            if(!discounts[phone] && state.clients[phone].discountPct){
+              state.clients[phone].discountPct = undefined;
+            }
+          });
           if(discountsDirty) setTimeout(apiSaveClientDiscounts, 500);
           changed = true;
         }
@@ -1428,7 +1434,8 @@ function effectivePriceForWeight(product){
 function clientDiscountPct(){
   if(IS_ADMIN_APP) return 0;
   const c = state.currentClientPhone ? state.clients[state.currentClientPhone] : null;
-  return (c && c.discountPct) ? Number(c.discountPct) : 0;
+  if(!c || c.wholesale) return 0;
+  return c.discountPct ? Number(c.discountPct) : 0;
 }
 function applyClientDiscount(price){
   const pct = clientDiscountPct();
