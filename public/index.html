@@ -2125,6 +2125,14 @@ function cmpInitial(name){ return String(name||'').trim().charAt(0).toUpperCase(
 function cmpFmtDate(iso){ const d=new Date(iso); return d.toLocaleDateString('es-AR',{day:'2-digit',month:'2-digit',year:'2-digit'}); }
 function cmpCountProds(provId){ const l=cmpDB.listas.find(x=>x.provId===provId); return l?l.rows.length:0; }
 function cmpEsc(s){ return String(s||'').replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;'); }
+function cmpNormText(s){ return String(s||'').toLowerCase().replace(/[à-å]/g,'a').replace(/[è-ë]/g,'e').replace(/[ì-ï]/g,'i').replace(/[ò-ö]/g,'o').replace(/[ù-ü]/g,'u').replace(/ñ/g,'n').replace(/[^a-z0-9\s]/g,' ').replace(/\s+/g,' ').trim(); }
+function cmpInferQtyFromName(name){
+  const s=cmpNormText(name); let m;
+  m=s.match(/\b(\d+)\s*x\s*(\d+)\s*u(?:n(?:id)?)?(?:\b|\.)/); if(m){ const n=+m[1]*+m[2]; if(n>1&&n<=2000) return n; }
+  m=s.match(/\b(\d+)\s*u(?:n(?:id(?:ades?)?)?)?\.?(?:\s|$)/); if(m){ const n=+m[1]; if(n>1&&n<=500) return n; }
+  m=s.match(/\bx\s*(\d+)(?:\s|$)/); if(m){ const n=+m[1]; if(n>1&&n<=500) return n; }
+  return 1;
+}
 
 // ── MOTOR DE BÚSQUEDA ───────────────────────────────────
 function cmpTokenize(s){ return cmpNorm(s).split(/\s+/).filter(w=>w.length>0); }
@@ -2565,22 +2573,33 @@ function cmpDoSearch(){
   provs.forEach(pl=>{ html+=`<th><div class="cmp-prov-th-av" style="background:${cmpColor(pl.prov.id)}">${cmpInitial(pl.prov.name)}</div><br>${cmpEsc(pl.prov.name)}</th>`; });
   html+=`</tr></thead><tbody>`;
   groups.slice(0,50).forEach(g=>{
+    // Calcular qty efectivo por proveedor: si unitQty=1, intentar inferir del nombre
+    const provQtys={};
+    provs.forEach(pl=>{
+      if(g.byProv[pl.prov.id]){
+        const r=g.byProv[pl.prov.id].row;
+        let q=r.unitQty||1, inferred=false;
+        if(q===1){ const qi=cmpInferQtyFromName(r.name); if(qi>1){ q=qi; inferred=true; } }
+        provQtys[pl.prov.id]={qty:q,inferred};
+      }
+    });
     const unitPrices=[];
-    provs.forEach(pl=>{ if(g.byProv[pl.prov.id]){ const r=g.byProv[pl.prov.id].row; unitPrices.push(r.price/(r.unitQty||1)); } });
+    provs.forEach(pl=>{ if(g.byProv[pl.prov.id]){ const r=g.byProv[pl.prov.id].row; unitPrices.push(r.price/provQtys[pl.prov.id].qty); } });
     const minU=unitPrices.length?Math.min(...unitPrices):null;
-    const hasBulto=provs.some(pl=>g.byProv[pl.prov.id]&&(g.byProv[pl.prov.id].row.unitQty||1)>1);
+    const hasBulto=provs.some(pl=>g.byProv[pl.prov.id]&&provQtys[pl.prov.id]&&provQtys[pl.prov.id].qty>1);
     html+=`<tr><td>${cmpEsc(g.name)}</td>`;
     provs.forEach(pl=>{
       const entry=g.byProv[pl.prov.id];
       if(!entry){ html+=`<td class="cmp-cell-empty">&mdash;</td>`; return; }
-      const r=entry.row,qty=r.unitQty||1,uPrice=r.price/qty;
+      const r=entry.row;
+      const qInfo=provQtys[pl.prov.id],qty=qInfo.qty,uPrice=r.price/qty;
       const isBest=minU!==null&&Math.abs(uPrice-minU)<0.01&&unitPrices.length>1;
       const diffPct=(minU&&uPrice>minU)?Math.round((uPrice-minU)/minU*100):0;
       html+=`<td${isBest?' class="cmp-cell-best"':''}>`;
       if(hasBulto){
         html+=`<span class="cmp-cell-price">${cmpMoney(uPrice)}<span style="font-size:10px;font-weight:400;color:rgba(255,255,255,0.4)">/u</span></span>`;
-        if(qty>1) html+=`<span class="cmp-cell-unit">${cmpMoney(r.price)} &times; ${qty}u${r.unit?' &middot; '+cmpEsc(r.unit):''}</span>`;
-        else if(r.unit) html+=`<span class="cmp-cell-unit">${cmpEsc(r.unit)}</span>`;
+        if(qty>1) html+=`<span class="cmp-cell-unit">${cmpMoney(r.price)} &times; ${qty}u${qInfo.inferred?'*':''}${r.unit?' &middot; '+cmpEsc(r.unit):''}</span>`;
+        else html+=`<span class="cmp-cell-unit" style="color:var(--warn)">&#9888; sin datos de bulto</span>`;
       } else {
         html+=`<span class="cmp-cell-price">${cmpMoney(r.price)}</span>`;
         if(r.unit) html+=`<span class="cmp-cell-unit">${cmpEsc(r.unit)}</span>`;
