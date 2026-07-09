@@ -2316,8 +2316,8 @@ function cmpHtmlImportar(){
       <div class="cmp-upload-zone" onclick="document.getElementById('cmp-fi').click()">
         <div style="font-size:30px;">&#128194;</div>
         <p style="font-weight:700;margin-top:6px;">Tocar para seleccionar</p>
-        <p style="font-size:11px;color:rgba(255,255,255,0.4);margin-top:4px;">Excel (.xlsx, .xls) o CSV</p>
-        <input type="file" id="cmp-fi" accept=".csv,.txt,.xlsx,.xls" style="display:none" onchange="cmpOnFile(this)">
+        <p style="font-size:11px;color:rgba(255,255,255,0.4);margin-top:4px;">Excel (.xlsx, .xls), CSV o PDF</p>
+        <input type="file" id="cmp-fi" accept=".csv,.txt,.xlsx,.xls,.pdf" style="display:none" onchange="cmpOnFile(this)">
       </div>
       <div style="font-size:12px;color:rgba(255,255,255,0.4);margin-bottom:8px;text-align:center;">O bien peg&aacute; el texto:</div>
       <textarea class="cmp-inp" id="cmp-paste" style="min-height:80px;font-size:12px;font-family:monospace;resize:vertical;" placeholder="Peg&aacute; aqu&iacute; el texto de la lista (separado por tabs o comas)..."></textarea>
@@ -2338,11 +2338,54 @@ function cmpOnFile(input){
       s.onerror=()=>toast('xlsx.min.js no disponible — exportá como CSV','err');
       document.head.appendChild(s);
     } else { cmpReadXlsx(f); }
+  } else if(ext==='pdf'){
+    cmpReadPdf(f);
   } else {
     const r=new FileReader();
     r.onload=e=>cmpParseCsvText(e.target.result,f.name);
     r.readAsText(f,'UTF-8');
   }
+}
+
+async function cmpReadPdf(f){
+  toast('Leyendo PDF...');
+  const loadLib=()=>new Promise((res,rej)=>{
+    if(window.pdfjsLib){res();return;}
+    const s=document.createElement('script');
+    s.src='https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/pdf.min.js';
+    s.onload=()=>{
+      pdfjsLib.GlobalWorkerOptions.workerSrc='https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/pdf.worker.min.js';
+      res();
+    };
+    s.onerror=()=>rej(new Error('No se pudo cargar pdf.js'));
+    document.head.appendChild(s);
+  });
+  try{
+    await loadLib();
+    const buf=await f.arrayBuffer();
+    const pdf=await pdfjsLib.getDocument({data:buf}).promise;
+    // Extraer texto página a página manteniendo estructura de filas
+    const pageTexts=[];
+    for(let i=1;i<=pdf.numPages;i++){
+      const page=await pdf.getPage(i);
+      const content=await page.getTextContent();
+      // Agrupar items por línea usando la coordenada Y
+      const byY={};
+      content.items.forEach(item=>{
+        const y=Math.round(item.transform[5]);
+        if(!byY[y]) byY[y]=[];
+        byY[y].push({x:item.transform[4],str:item.str});
+      });
+      const ys=Object.keys(byY).map(Number).sort((a,b)=>b-a);
+      ys.forEach(y=>{
+        const line=byY[y].sort((a,b)=>a.x-b.x).map(i=>i.str).join('\t').trim();
+        if(line) pageTexts.push(line);
+      });
+    }
+    const text=pageTexts.join('\n');
+    if(!text.trim()){ toast('No se encontró texto en el PDF','err'); return; }
+    cmpParseCsvText(text,f.name);
+  }catch(e){ toast('Error al leer PDF: '+e.message,'err'); }
 }
 
 function cmpReadXlsx(f){
