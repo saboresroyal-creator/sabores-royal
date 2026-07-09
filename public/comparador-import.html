@@ -1,0 +1,903 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0">
+<title>Importar Lista — Sabores Royal</title>
+<style>
+:root {
+  --navy:    #0f1c45;
+  --navy2:   #1a2a5e;
+  --navy3:   #22357a;
+  --gold:    #c5a028;
+  --gold2:   #e0bb4a;
+  --ok:      #3ecf8e;
+  --danger:  #e5566d;
+  --warn:    #e0a83c;
+  --glass:   rgba(255,255,255,.06);
+  --glass2:  rgba(255,255,255,.10);
+  --bd:      rgba(255,255,255,.12);
+  --bd2:     rgba(255,255,255,.20);
+  --muted:   rgba(255,255,255,.45);
+  --text:    #f0f2ff;
+}
+*, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+html, body {
+  min-height: 100vh;
+  background: var(--navy);
+  color: var(--text);
+  font-family: system-ui, -apple-system, sans-serif;
+  font-size: 15px;
+  -webkit-tap-highlight-color: transparent;
+}
+#app {
+  max-width: 480px;
+  margin: 0 auto;
+  min-height: 100vh;
+  display: flex;
+  flex-direction: column;
+  background: linear-gradient(170deg, var(--navy) 0%, var(--navy2) 100%);
+}
+
+/* ── TOPBAR ── */
+.topbar {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  padding: 16px;
+  border-bottom: 1px solid var(--bd);
+  background: rgba(15,28,69,.85);
+  backdrop-filter: blur(12px);
+  position: sticky;
+  top: 0;
+  z-index: 50;
+}
+.topbar-logo {
+  width: 28px;
+  height: 28px;
+  border-radius: 8px;
+  background: var(--gold);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 14px;
+  font-weight: 900;
+  color: #000;
+  flex: none;
+}
+.topbar h1 {
+  font-size: 15px;
+  font-weight: 700;
+  color: var(--gold2);
+  flex: 1;
+  letter-spacing: .2px;
+}
+.topbar-user {
+  font-size: 12px;
+  color: var(--muted);
+}
+
+/* ── CONTENT ── */
+.content { flex: 1; padding: 20px 16px 40px; }
+
+/* ── SCREEN: LOGIN ── */
+.login-wrap {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  min-height: calc(100vh - 64px);
+  gap: 0;
+}
+.login-card {
+  width: 100%;
+  max-width: 340px;
+  background: var(--glass);
+  border: 1px solid var(--bd);
+  border-radius: 20px;
+  padding: 28px 24px;
+}
+.login-badge {
+  width: 52px;
+  height: 52px;
+  background: linear-gradient(135deg, var(--gold), var(--gold2));
+  border-radius: 14px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 22px;
+  font-weight: 900;
+  color: #000;
+  margin: 0 auto 18px;
+}
+.login-card h2 {
+  text-align: center;
+  font-size: 17px;
+  font-weight: 700;
+  color: var(--text);
+  margin-bottom: 4px;
+}
+.login-card p {
+  text-align: center;
+  font-size: 13px;
+  color: var(--muted);
+  margin-bottom: 22px;
+}
+
+/* ── FORM ELEMENTS ── */
+.field { margin-bottom: 14px; }
+.field label {
+  display: block;
+  font-size: 11px;
+  font-weight: 700;
+  letter-spacing: .6px;
+  text-transform: uppercase;
+  color: var(--muted);
+  margin-bottom: 6px;
+}
+.inp {
+  width: 100%;
+  background: var(--glass2);
+  border: 1px solid var(--bd);
+  border-radius: 10px;
+  padding: 11px 14px;
+  color: var(--text);
+  font-size: 14px;
+  font-family: inherit;
+  outline: none;
+  transition: border-color .15s;
+}
+.inp:focus { border-color: var(--gold); }
+.inp::placeholder { color: rgba(255,255,255,.25); }
+select.inp { cursor: pointer; }
+select.inp option { background: var(--navy2); }
+textarea.inp { resize: vertical; min-height: 90px; font-size: 12px; font-family: monospace; }
+
+/* ── BUTTONS ── */
+.btn {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 6px;
+  padding: 11px 20px;
+  border-radius: 10px;
+  border: none;
+  font-size: 14px;
+  font-weight: 700;
+  cursor: pointer;
+  font-family: inherit;
+  transition: opacity .15s, transform .1s;
+}
+.btn:active { transform: scale(.97); }
+.btn-primary { background: var(--gold); color: #000; }
+.btn-primary:hover { opacity: .9; }
+.btn-ghost {
+  background: var(--glass);
+  border: 1px solid var(--bd);
+  color: var(--text);
+}
+.btn-ghost:hover { background: var(--glass2); }
+.btn-danger { background: var(--danger); color: #fff; }
+.btn-sm { padding: 7px 14px; font-size: 13px; border-radius: 8px; }
+.btn-block { width: 100%; }
+
+/* ── CARD ── */
+.card {
+  background: var(--glass);
+  border: 1px solid var(--bd);
+  border-radius: 16px;
+  padding: 16px;
+  margin-bottom: 14px;
+}
+.card-label {
+  font-size: 10px;
+  font-weight: 700;
+  letter-spacing: .8px;
+  text-transform: uppercase;
+  color: var(--gold2);
+  margin-bottom: 12px;
+}
+
+/* ── UPLOAD ZONE ── */
+.upload-zone {
+  border: 2px dashed var(--bd);
+  border-radius: 12px;
+  padding: 30px 16px;
+  text-align: center;
+  cursor: pointer;
+  transition: border-color .2s, background .2s;
+  margin-bottom: 10px;
+}
+.upload-zone:hover, .upload-zone.drag { border-color: var(--gold); background: rgba(197,160,40,.05); }
+.upload-zone .icon { font-size: 32px; margin-bottom: 8px; }
+.upload-zone .title { font-weight: 700; font-size: 14px; margin-bottom: 4px; }
+.upload-zone .sub { font-size: 12px; color: var(--muted); }
+
+/* ── DIVIDER ── */
+.divider {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  margin: 12px 0;
+  color: var(--muted);
+  font-size: 12px;
+}
+.divider::before, .divider::after {
+  content: '';
+  flex: 1;
+  height: 1px;
+  background: var(--bd);
+}
+
+/* ── MAPPER ── */
+.col-row {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  margin-bottom: 10px;
+}
+.col-row-label {
+  font-size: 13px;
+  width: 130px;
+  flex: none;
+  color: var(--muted);
+}
+.col-row .inp { margin: 0; }
+
+/* ── TABLE ── */
+.tbl-scroll { overflow-x: auto; border-radius: 10px; border: 1px solid var(--bd); margin: 10px 0; }
+.tbl-scroll table { width: 100%; border-collapse: collapse; font-size: 12px; }
+.tbl-scroll th {
+  background: var(--navy2);
+  color: var(--gold2);
+  padding: 8px 10px;
+  text-align: left;
+  font-size: 10px;
+  text-transform: uppercase;
+  letter-spacing: .5px;
+  white-space: nowrap;
+  border-bottom: 1px solid var(--bd);
+}
+.tbl-scroll td { padding: 7px 10px; border-bottom: 1px solid rgba(255,255,255,.05); }
+.tbl-scroll tr:last-child td { border-bottom: none; }
+
+/* ── NOTE ── */
+.note {
+  background: rgba(197,160,40,.08);
+  border: 1px solid rgba(197,160,40,.22);
+  border-radius: 8px;
+  padding: 9px 12px;
+  font-size: 12px;
+  color: rgba(255,255,255,.6);
+  margin: 8px 0 12px;
+  line-height: 1.5;
+}
+
+/* ── PROV ITEM ── */
+.prov-row {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  padding: 10px 0;
+  border-bottom: 1px solid var(--bd);
+}
+.prov-row:last-child { border-bottom: none; }
+.prov-av {
+  width: 38px;
+  height: 38px;
+  border-radius: 10px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 16px;
+  font-weight: 800;
+  flex: none;
+}
+
+/* ── STATUS BANNER ── */
+.banner {
+  border-radius: 12px;
+  padding: 14px 16px;
+  font-size: 14px;
+  font-weight: 600;
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  margin-bottom: 14px;
+}
+.banner.ok { background: rgba(62,207,142,.12); border: 1px solid rgba(62,207,142,.25); color: var(--ok); }
+.banner.err { background: rgba(229,86,109,.12); border: 1px solid rgba(229,86,109,.25); color: var(--danger); }
+.banner.info { background: rgba(197,160,40,.10); border: 1px solid rgba(197,160,40,.25); color: var(--gold2); }
+
+/* ── MODAL ── */
+.modal-bg {
+  position: fixed;
+  inset: 0;
+  background: rgba(5,10,30,.8);
+  z-index: 200;
+  display: flex;
+  align-items: flex-end;
+  justify-content: center;
+  backdrop-filter: blur(4px);
+}
+.modal {
+  width: 100%;
+  max-width: 480px;
+  background: var(--navy2);
+  border-radius: 22px 22px 0 0;
+  padding: 22px 20px 32px;
+  animation: slideUp .22s ease;
+}
+.modal-handle {
+  width: 36px;
+  height: 4px;
+  background: rgba(255,255,255,.18);
+  border-radius: 4px;
+  margin: 0 auto 16px;
+}
+.modal-title { font-size: 17px; font-weight: 700; color: var(--text); margin-bottom: 18px; }
+.modal-row { display: flex; gap: 10px; margin-top: 10px; }
+.modal-row .btn { flex: 1; }
+@keyframes slideUp { from { transform: translateY(30px); opacity: 0; } to { transform: translateY(0); opacity: 1; } }
+
+/* ── TOAST ── */
+#toast {
+  position: fixed;
+  bottom: 28px;
+  left: 50%;
+  transform: translateX(-50%);
+  padding: 11px 20px;
+  border-radius: 12px;
+  font-size: 13px;
+  font-weight: 600;
+  opacity: 0;
+  transition: opacity .22s;
+  z-index: 999;
+  pointer-events: none;
+  white-space: nowrap;
+  color: #fff;
+}
+#toast.show { opacity: 1; }
+
+/* ── UTILITY ── */
+.flex-between { display: flex; align-items: center; justify-content: space-between; }
+.gap-6 { gap: 6px; }
+.mt-8 { margin-top: 8px; }
+.empty { text-align: center; padding: 32px 20px; color: var(--muted); font-size: 13px; line-height: 1.6; }
+</style>
+</head>
+<body>
+<div id="app">
+  <div class="topbar">
+    <div class="topbar-logo">S</div>
+    <h1>Importar Lista de Precios</h1>
+    <span class="topbar-user" id="topbar-user" style="display:none">Administrador</span>
+  </div>
+  <div class="content" id="content"></div>
+</div>
+<div id="toast"></div>
+<div id="modal-root"></div>
+
+<script>
+'use strict';
+
+/* ── CONFIG ─────────────────────────────────────────────── */
+const PASS = 'royal2024';
+const SUPA_KEY = 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6InRvcGd1bndlcWV6dGVkaGh0aGJsIiwicm9sZSI6ImFub24iLCJpYXQiOjE3ODI3NDczMjgsImV4cCI6MjA5ODMyMzMyOH0.KfZ8f8GlKoQoRxdPk-lrNDSTRcjd21z6d8CgITHf3WU';
+const SUPA_URL = 'https://topgunweqztedhhhthbl.supabase.co/rest/v1';
+
+/* ── STATE ───────────────────────────────────────────────── */
+let authed = false;
+let proveedores = [];
+let _impData = null;
+
+/* ── TOAST ───────────────────────────────────────────────── */
+let _tt;
+function toast(msg, type) {
+  const el = document.getElementById('toast');
+  el.textContent = msg;
+  el.style.background = type === 'err' ? '#c0392b' : type === 'ok' ? '#1e7e34' : '#8a6800';
+  el.className = 'show';
+  clearTimeout(_tt);
+  _tt = setTimeout(() => { el.className = ''; }, 2800);
+}
+
+/* ── SUPABASE ────────────────────────────────────────────── */
+async function supa(path, method, body, prefer) {
+  const h = {
+    'Content-Type': 'application/json',
+    'apikey': SUPA_KEY,
+    'Authorization': 'Bearer ' + SUPA_KEY,
+  };
+  if (prefer) h['Prefer'] = prefer;
+  const res = await fetch(SUPA_URL + path, {
+    method: method || 'GET',
+    headers: h,
+    body: body ? JSON.stringify(body) : undefined,
+  });
+  if (!res.ok) {
+    const t = await res.text();
+    let e; try { e = JSON.parse(t); } catch { e = { message: t }; }
+    throw new Error(e.message || 'HTTP ' + res.status);
+  }
+  return res.status === 204 ? null : res.json();
+}
+
+/* ── HELPERS ─────────────────────────────────────────────── */
+const COLORS = ['#1a6b4a','#6b1a4a','#1a3a6b','#6b4a1a','#4a1a6b','#6b1a1a'];
+function provColor(id) { let h = 0; for (let i = 0; i < id.length; i++) h = (h * 31 + id.charCodeAt(i)) | 0; return COLORS[Math.abs(h) % COLORS.length]; }
+function provInitial(name) { return String(name || '').trim().charAt(0).toUpperCase(); }
+function fmtDate(iso) { return new Date(iso).toLocaleDateString('es-AR', { day: '2-digit', month: '2-digit', year: '2-digit' }); }
+function esc(s) { return String(s || '').replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;'); }
+
+function norm(s) {
+  return String(s || '').toLowerCase()
+    .replace(/[à-å]/g,'a').replace(/[è-ë]/g,'e')
+    .replace(/[ì-ï]/g,'i').replace(/[ò-ö]/g,'o')
+    .replace(/[ù-ü]/g,'u').replace(/ñ/g,'n')
+    .replace(/[^a-z0-9\s]/g,' ').replace(/\s+/g,' ').trim();
+}
+
+function parseUnitQty(s) {
+  if (!s) return 1;
+  const n = norm(s); let m;
+  m = n.match(/\bx\s*(\d+)/); if (m) return +m[1];
+  m = n.match(/\bpor\s+(\d+)/); if (m) return +m[1];
+  m = n.match(/(\d+)\s*(?:unidades?|und?|u\b|piezas?|pcs?)/); if (m) return +m[1];
+  m = n.match(/(?:pack|caja|fardo|display|bulto)\s*(?:de\s*)?(?:x\s*)?(\d+)/); if (m) return +m[1];
+  m = n.match(/(\d+)\s*(?:pack|cajas?|fardos?)/); if (m) return +m[1];
+  if (n === 'docena' || n.includes('docena')) return 12;
+  if ((n.includes('media') || n.includes('1/2')) && n.includes('docena')) return 6;
+  m = n.match(/^(\d+)$/); if (m) { const v = +m[1]; if (v > 1 && v <= 144) return v; }
+  return 1;
+}
+
+function parsePrice(v) {
+  if (v === undefined || v === null || v === '') return null;
+  let s = String(v).replace(/[^\d.,]/g, '');
+  if (!s) return null;
+  let n;
+  if (s.includes(',') && s.includes('.')) {
+    n = s.lastIndexOf(',') > s.lastIndexOf('.') ? parseFloat(s.replace(/\./g,'').replace(',','.')) : parseFloat(s.replace(/,/g,''));
+  } else if (s.includes(',')) { n = parseFloat(s.replace(',','.')); }
+  else { n = parseFloat(s); }
+  return isNaN(n) ? null : n;
+}
+
+/* ── MODAL ───────────────────────────────────────────────── */
+function openModal(html) {
+  closeModal();
+  const bg = document.createElement('div');
+  bg.className = 'modal-bg'; bg.id = 'modal-bg';
+  const m = document.createElement('div');
+  m.className = 'modal'; m.innerHTML = '<div class="modal-handle"></div>' + html;
+  bg.appendChild(m);
+  bg.addEventListener('click', e => { if (e.target === bg) closeModal(); });
+  document.getElementById('modal-root').appendChild(bg);
+}
+function closeModal() { const m = document.getElementById('modal-bg'); if (m) m.remove(); }
+
+/* ── RENDER ──────────────────────────────────────────────── */
+function render() {
+  if (!authed) { renderLogin(); return; }
+  renderMain();
+}
+
+/* ── LOGIN ───────────────────────────────────────────────── */
+function renderLogin() {
+  document.getElementById('content').innerHTML = `
+    <div class="login-wrap">
+      <div class="login-card">
+        <div class="login-badge">S</div>
+        <h2>Sabores Royal</h2>
+        <p>Ingresá la contraseña para importar listas</p>
+        <div class="field">
+          <label>Contraseña</label>
+          <input type="password" class="inp" id="pass-inp" placeholder="••••••••"
+            onkeydown="if(event.key==='Enter') tryLogin()">
+        </div>
+        <button class="btn btn-primary btn-block" onclick="tryLogin()">Ingresar</button>
+      </div>
+    </div>`;
+  setTimeout(() => { const i = document.getElementById('pass-inp'); if (i) i.focus(); }, 80);
+}
+
+function tryLogin() {
+  const v = (document.getElementById('pass-inp').value || '').trim();
+  if (v === PASS) {
+    authed = true;
+    document.getElementById('topbar-user').style.display = '';
+    loadProveedores();
+  } else {
+    toast('Contraseña incorrecta', 'err');
+    const i = document.getElementById('pass-inp');
+    if (i) { i.value = ''; i.focus(); }
+  }
+}
+
+/* ── PROVEEDORES ─────────────────────────────────────────── */
+async function loadProveedores() {
+  document.getElementById('content').innerHTML = `<div class="empty">Cargando proveedores...</div>`;
+  try {
+    const data = await supa('/cmp_proveedores?select=*&order=name');
+    proveedores = (data || []).map(p => ({ id: p.id, name: p.name, lastImport: p.last_import, mapping: p.mapping }));
+    renderMain();
+  } catch (e) {
+    document.getElementById('content').innerHTML = `<div class="banner err"><span>⚠</span> Error: ${esc(e.message)}</div><button class="btn btn-ghost btn-block mt-8" onclick="loadProveedores()">Reintentar</button>`;
+  }
+}
+
+/* ── MAIN SCREEN ─────────────────────────────────────────── */
+function renderMain() {
+  const provOpts = proveedores.map(p => `<option value="${esc(p.id)}">${esc(p.name)}</option>`).join('');
+  document.getElementById('content').innerHTML = `
+    <!-- PROVEEDORES -->
+    <div class="card">
+      <div class="flex-between" style="margin-bottom:12px;">
+        <div class="card-label" style="margin:0;">Proveedor</div>
+        <button class="btn btn-ghost btn-sm" onclick="modalNuevoProv()">+ Nuevo</button>
+      </div>
+      ${proveedores.length === 0
+        ? `<div class="empty" style="padding:16px 0;">No hay proveedores. Creá uno primero.</div>`
+        : `<select class="inp" id="sel-prov"><option value="">-- Seleccionar proveedor --</option>${provOpts}</select>`
+      }
+      ${proveedores.length > 0 ? renderProvList() : ''}
+    </div>
+
+    <!-- ARCHIVO -->
+    <div class="card">
+      <div class="card-label">Archivo de precios</div>
+      <div class="upload-zone" id="upload-zone"
+        onclick="document.getElementById('file-inp').click()"
+        ondragover="event.preventDefault();this.classList.add('drag')"
+        ondragleave="this.classList.remove('drag')"
+        ondrop="event.preventDefault();this.classList.remove('drag');onDrop(event)">
+        <div class="icon">📂</div>
+        <div class="title">Seleccionar o arrastrar archivo</div>
+        <div class="sub">Excel (.xlsx .xls), CSV, PDF</div>
+        <input type="file" id="file-inp" accept=".csv,.txt,.xlsx,.xls,.pdf" style="display:none" onchange="onFile(this)">
+      </div>
+
+      <div class="divider">o pegá el texto</div>
+
+      <div class="field" style="margin-bottom:8px;">
+        <textarea class="inp" id="paste-txt" placeholder="Copiá desde Excel y pegá acá…"></textarea>
+      </div>
+      <button class="btn btn-ghost btn-block" onclick="parseText()" style="font-size:13px;">Analizar texto</button>
+    </div>
+
+    <!-- MAPPER / RESULT -->
+    <div id="mapper-zone"></div>`;
+}
+
+function renderProvList() {
+  if (!proveedores.length) return '';
+  return `<div style="margin-top:14px; border-top:1px solid var(--bd); padding-top:12px;">
+    ${proveedores.map(p => `
+    <div class="prov-row">
+      <div class="prov-av" style="background:${provColor(p.id)}">${provInitial(p.name)}</div>
+      <div style="flex:1">
+        <div style="font-weight:700; font-size:14px;">${esc(p.name)}</div>
+        <div style="font-size:11px; color:var(--muted); margin-top:2px;">${p.lastImport ? 'Última importación: ' + fmtDate(p.lastImport) : 'Sin importaciones'}</div>
+      </div>
+      <button class="btn btn-ghost btn-sm" style="font-size:11px; padding:5px 10px;" onclick="confirmDelProv('${esc(p.id)}')">Borrar</button>
+    </div>`).join('')}
+  </div>`;
+}
+
+/* ── NUEVO PROVEEDOR ─────────────────────────────────────── */
+function modalNuevoProv() {
+  openModal(`<div class="modal-title">Nuevo Proveedor</div>
+    <div class="field">
+      <label>Nombre del proveedor</label>
+      <input class="inp" id="prov-name" placeholder="Ej: Distribuidora García">
+    </div>
+    <div class="modal-row">
+      <button class="btn btn-ghost" onclick="closeModal()">Cancelar</button>
+      <button class="btn btn-primary" onclick="saveProv()">Guardar</button>
+    </div>`);
+  setTimeout(() => { const i = document.getElementById('prov-name'); if (i) i.focus(); }, 80);
+}
+
+async function saveProv() {
+  const name = (document.getElementById('prov-name').value || '').trim();
+  if (!name) { toast('Ingresá un nombre', 'err'); return; }
+  const prov = { id: 'p' + Date.now(), name, lastImport: null, mapping: null };
+  try {
+    await supa('/cmp_proveedores', 'POST', { id: prov.id, name: prov.name, last_import: null, mapping: null }, 'resolution=merge-duplicates');
+    proveedores.push(prov);
+    closeModal();
+    toast('Proveedor creado', 'ok');
+    renderMain();
+  } catch (e) { toast('Error: ' + e.message, 'err'); }
+}
+
+function confirmDelProv(id) {
+  const p = proveedores.find(x => x.id === id); if (!p) return;
+  openModal(`<div class="modal-title">Borrar proveedor</div>
+    <p style="color:var(--muted); font-size:14px; margin-bottom:18px;">¿Eliminar <b>${esc(p.name)}</b> y todas sus listas?</p>
+    <div class="modal-row">
+      <button class="btn btn-ghost" onclick="closeModal()">Cancelar</button>
+      <button class="btn btn-danger" onclick="delProv('${esc(id)}')">Eliminar</button>
+    </div>`);
+}
+
+async function delProv(id) {
+  try {
+    await Promise.all([
+      supa('/cmp_listas?prov_id=eq.' + encodeURIComponent(id), 'DELETE'),
+      supa('/cmp_proveedores?id=eq.' + encodeURIComponent(id), 'DELETE'),
+    ]);
+    proveedores = proveedores.filter(x => x.id !== id);
+    closeModal();
+    toast('Eliminado', 'ok');
+    renderMain();
+  } catch (e) { toast('Error: ' + e.message, 'err'); }
+}
+
+/* ── ARCHIVO ─────────────────────────────────────────────── */
+function onFile(input) {
+  const f = input.files[0]; if (!f) return;
+  const ext = f.name.split('.').pop().toLowerCase();
+  if (ext === 'xlsx' || ext === 'xls') {
+    readXlsx(f);
+  } else if (ext === 'pdf') {
+    readPdf(f);
+  } else {
+    const r = new FileReader();
+    r.onload = e => parseCsvText(e.target.result, f.name);
+    r.readAsText(f, 'UTF-8');
+  }
+}
+
+function onDrop(e) {
+  const f = e.dataTransfer.files[0]; if (!f) return;
+  // Trigger through same handler
+  const dt = new DataTransfer();
+  dt.items.add(f);
+  const inp = document.getElementById('file-inp');
+  inp.files = dt.files;
+  onFile(inp);
+}
+
+function readXlsx(f) {
+  const loadLib = () => new Promise((res, rej) => {
+    if (window.XLSX) { res(); return; }
+    const s = document.createElement('script');
+    s.src = 'xlsx.min.js';
+    s.onload = res;
+    s.onerror = () => rej(new Error('xlsx.min.js no encontrado'));
+    document.head.appendChild(s);
+  });
+  loadLib().then(() => {
+    const r = new FileReader();
+    r.onload = e => {
+      try {
+        const wb = XLSX.read(e.target.result, { type: 'array' });
+        const ws = wb.Sheets[wb.SheetNames[0]];
+        const data = XLSX.utils.sheet_to_json(ws, { header: 1, defval: '' });
+        if (data.length < 2) { toast('Archivo vacío', 'err'); return; }
+        const headers = data[0].map((h, i) => String(h || 'Col ' + (i + 1)).trim());
+        const rows = data.slice(1)
+          .filter(r => r.some(c => String(c || '').trim()))
+          .map(r => r.map(c => String(c === null || c === undefined ? '' : c)));
+        _impData = { headers, rows, filename: f.name };
+        showMapper();
+      } catch (err) { toast('Error Excel: ' + err.message, 'err'); }
+    };
+    r.readAsArrayBuffer(f);
+  }).catch(e => toast(e.message, 'err'));
+}
+
+async function readPdf(f) {
+  toast('Leyendo PDF…');
+  const loadLib = () => new Promise((res, rej) => {
+    if (window.pdfjsLib) { res(); return; }
+    const s = document.createElement('script');
+    s.src = 'https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/pdf.min.js';
+    s.onload = () => {
+      pdfjsLib.GlobalWorkerOptions.workerSrc = 'https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/pdf.worker.min.js';
+      res();
+    };
+    s.onerror = () => rej(new Error('No se pudo cargar pdf.js'));
+    document.head.appendChild(s);
+  });
+  try {
+    await loadLib();
+    const buf = await f.arrayBuffer();
+    const pdf = await pdfjsLib.getDocument({ data: buf }).promise;
+    const pageTexts = [];
+    for (let i = 1; i <= pdf.numPages; i++) {
+      const page = await pdf.getPage(i);
+      const content = await page.getTextContent();
+      const byY = {};
+      content.items.forEach(item => {
+        const y = Math.round(item.transform[5]);
+        if (!byY[y]) byY[y] = [];
+        byY[y].push({ x: item.transform[4], str: item.str });
+      });
+      Object.keys(byY).map(Number).sort((a, b) => b - a).forEach(y => {
+        const line = byY[y].sort((a, b) => a.x - b.x).map(i => i.str).join('\t').trim();
+        if (line) pageTexts.push(line);
+      });
+    }
+    const text = pageTexts.join('\n');
+    if (!text.trim()) { toast('No se encontró texto en el PDF', 'err'); return; }
+    parseCsvText(text, f.name);
+  } catch (e) { toast('Error PDF: ' + e.message, 'err'); }
+}
+
+function parseText() {
+  const txt = (document.getElementById('paste-txt').value || '').trim();
+  if (!txt) { toast('Pegá texto primero', 'err'); return; }
+  parseCsvText(txt, 'texto pegado');
+}
+
+function parseCsvText(text, filename) {
+  const lines = text.split(/\r?\n/).filter(l => l.trim());
+  if (lines.length < 2) { toast('El archivo parece vacío', 'err'); return; }
+  const first = lines[0];
+  let sep = '\t';
+  if ((first.match(/;/g) || []).length > (first.match(/,/g) || []).length) sep = ';';
+  else if ((first.match(/,/g) || []).length > 0) sep = ',';
+  function splitLine(l) {
+    const res = []; let cur = '', inq = false;
+    for (let i = 0; i < l.length; i++) {
+      const c = l[i];
+      if (c === '"') { inq = !inq; continue; }
+      if (c === sep && !inq) { res.push(cur.trim()); cur = ''; continue; }
+      cur += c;
+    }
+    res.push(cur.trim()); return res;
+  }
+  const headers = splitLine(lines[0]).map((h, i) => h || 'Col ' + (i + 1));
+  const rows = lines.slice(1).map(l => splitLine(l)).filter(r => r.some(c => c.trim()));
+  if (!rows.length) { toast('No se encontraron filas', 'err'); return; }
+  _impData = { headers, rows, filename };
+  showMapper();
+}
+
+/* ── MAPPER ──────────────────────────────────────────────── */
+function showMapper() {
+  if (!_impData) return;
+  const provId = (document.getElementById('sel-prov') || {}).value || '';
+  const prov = proveedores.find(p => p.id === provId);
+  const saved = prov && prov.mapping ? prov.mapping : {};
+  const h = _impData.headers;
+
+  function opts(sel) {
+    let o = '<option value="">-- No usar --</option>';
+    h.forEach((hh, i) => { o += `<option value="${i}"${sel == i ? ' selected' : ''}>${esc(hh)}</option>`; });
+    return o;
+  }
+
+  let an = -1, ap = -1, au = -1, ac = -1, ab = -1;
+  if (!prov || !prov.mapping) {
+    const nKw = ['descripcion','descripci','producto','nombre','articulo','item','detalle'];
+    const pKw = ['precio','price','importe','costo','valor'];
+    const uKw = ['unidad','presentacion','medida','unit','contenido'];
+    const cKw = ['codigo','code','cod','sku','ref'];
+    const bKw = ['bulto','x bulto','por bulto','cant bulto','unid x','uds x','uds/caja','por caja'];
+    h.forEach((hh, i) => {
+      const n = norm(hh);
+      if (an < 0 && nKw.some(k => n.includes(k))) an = i;
+      if (ap < 0 && pKw.some(k => n.includes(k))) ap = i;
+      if (au < 0 && uKw.some(k => n.includes(k))) au = i;
+      if (ac < 0 && cKw.some(k => n.includes(k))) ac = i;
+      if (ab < 0 && bKw.some(k => n.includes(k))) ab = i;
+    });
+  } else {
+    an = saved.nameCol ?? -1; ap = saved.priceCol ?? -1;
+    au = saved.unitCol ?? -1; ac = saved.codeCol ?? -1; ab = saved.bultoCol ?? -1;
+  }
+
+  const previewRows = _impData.rows.slice(0, 5);
+  let preview = `<div class="tbl-scroll"><table><thead><tr>${h.map(hh => `<th>${esc(hh)}</th>`).join('')}</tr></thead><tbody>`;
+  previewRows.forEach(r => { preview += `<tr>${h.map((_, i) => `<td>${esc(r[i] || '')}</td>`).join('')}</tr>`; });
+  preview += '</tbody></table></div>';
+
+  document.getElementById('mapper-zone').innerHTML = `
+    <div class="card">
+      <div class="banner info"><span>📄</span> <span><b>${esc(_impData.filename)}</b> — ${_impData.rows.length} filas, ${h.length} columnas</span></div>
+
+      <div class="card-label">Mapear columnas</div>
+
+      <div class="col-row">
+        <div class="col-row-label">📦 Producto</div>
+        <select class="inp" id="cn">${opts(an)}</select>
+      </div>
+      <div class="col-row">
+        <div class="col-row-label">💲 Precio</div>
+        <select class="inp" id="cp">${opts(ap)}</select>
+      </div>
+      <div class="col-row">
+        <div class="col-row-label">📋 Presentación</div>
+        <select class="inp" id="cu">${opts(au)}</select>
+      </div>
+      <div class="col-row">
+        <div class="col-row-label">📦 Unid/Bulto</div>
+        <select class="inp" id="cb">${opts(ab)}</select>
+      </div>
+      <div class="note">💡 Si una columna tiene la cantidad por bulto (ej: 12 o 24) seleccionala. Si no, lo detecto solo desde la presentación.</div>
+      <div class="col-row">
+        <div class="col-row-label"># Código</div>
+        <select class="inp" id="cc">${opts(ac)}</select>
+      </div>
+
+      <div class="card-label" style="margin-top:14px;">Vista previa</div>
+      ${preview}
+
+      <button class="btn btn-primary btn-block mt-8" onclick="doImport()" style="font-size:15px; padding:13px;">
+        ✓ Importar lista
+      </button>
+    </div>`;
+
+  document.getElementById('mapper-zone').scrollIntoView({ behavior: 'smooth', block: 'start' });
+}
+
+/* ── IMPORT ──────────────────────────────────────────────── */
+async function doImport() {
+  const provId = (document.getElementById('sel-prov') || {}).value || '';
+  if (!provId) { toast('Seleccioná un proveedor primero', 'err'); return; }
+  const cn = document.getElementById('cn').value;
+  const cp = document.getElementById('cp').value;
+  const cu = document.getElementById('cu').value;
+  const cb = document.getElementById('cb').value;
+  const cc = document.getElementById('cc').value;
+  if (cn === '') { toast('Seleccioná la columna de producto', 'err'); return; }
+  if (cp === '') { toast('Seleccioná la columna de precio', 'err'); return; }
+
+  const rows = [];
+  _impData.rows.forEach(r => {
+    const name = String(r[cn] || '').trim();
+    const price = parsePrice(r[cp]);
+    if (!name || price === null) return;
+    const unitStr = cu !== '' ? String(r[cu] || '').trim() : '';
+    let unitQty = 1;
+    if (cb !== '') {
+      const raw = parseFloat(String(r[cb] || '').replace(',', '.'));
+      unitQty = (raw > 1 && raw <= 1000) ? raw : 1;
+    } else { unitQty = parseUnitQty(unitStr); }
+    rows.push({ name, price, unit: unitStr, unitQty, code: cc !== '' ? String(r[cc] || '').trim() : '', norm: norm(name) });
+  });
+
+  if (!rows.length) { toast('No se encontraron filas válidas', 'err'); return; }
+
+  const btn = document.querySelector('#mapper-zone .btn-primary');
+  if (btn) { btn.textContent = 'Importando…'; btn.disabled = true; }
+
+  const now = new Date().toISOString();
+  const prov = proveedores.find(p => p.id === provId);
+  try {
+    await supa('/cmp_listas', 'POST',
+      { prov_id: provId, rows, at: now },
+      'resolution=merge-duplicates');
+    if (prov) {
+      const mapping = { nameCol: +cn, priceCol: +cp, unitCol: cu !== '' ? +cu : null, codeCol: cc !== '' ? +cc : null, bultoCol: cb !== '' ? +cb : null };
+      await supa('/cmp_proveedores', 'POST',
+        { id: prov.id, name: prov.name, last_import: now, mapping },
+        'resolution=merge-duplicates');
+      prov.lastImport = now; prov.mapping = mapping;
+    }
+    _impData = null;
+    document.getElementById('mapper-zone').innerHTML = `
+      <div class="banner ok">
+        <span>✓</span>
+        <div>
+          <div style="font-weight:700;">${rows.length} productos importados</div>
+          <div style="font-size:12px; opacity:.8; font-weight:400; margin-top:2px;">Lista de ${esc(prov ? prov.name : '')} actualizada</div>
+        </div>
+      </div>
+      <button class="btn btn-ghost btn-block" onclick="renderMain()">Importar otra lista</button>`;
+    toast(rows.length + ' productos guardados', 'ok');
+  } catch (e) {
+    toast('Error al guardar: ' + e.message, 'err');
+    if (btn) { btn.textContent = '✓ Importar lista'; btn.disabled = false; }
+  }
+}
+
+/* ── INIT ────────────────────────────────────────────────── */
+render();
+</script>
+</body>
+</html>
