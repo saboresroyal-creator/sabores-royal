@@ -403,6 +403,50 @@ img{display:block; max-width:100%;}
 .manual-item-row{display:flex; gap:8px; padding:0 16px 10px; align-items:center;}
 .manual-item-row select{flex:2;}
 .manual-item-row input{flex:1;}
+
+/* COMPARADOR DE PRECIOS */
+.cmp-tabs-bar{display:flex;gap:6px;padding:12px 16px 10px;overflow-x:auto;background:rgba(15,28,69,0.9);border-bottom:1px solid var(--glass-bd);position:sticky;top:57px;z-index:40;scrollbar-width:none;}
+.cmp-tabs-bar::-webkit-scrollbar{display:none;}
+.cmp-tab-btn{flex:none;padding:7px 16px;border-radius:20px;border:1px solid var(--glass-bd);background:none;color:rgba(255,255,255,0.55);font-size:13px;cursor:pointer;white-space:nowrap;}
+.cmp-tab-btn.active{background:var(--gold);color:#000;border-color:var(--gold);font-weight:700;}
+.cmp-wrap{overflow-x:auto;border-radius:12px;border:1px solid var(--glass-bd);margin:0 16px 16px;}
+.cmp-table{border-collapse:collapse;min-width:100%;font-size:13px;}
+.cmp-table th{background:var(--navy2);padding:10px 12px;white-space:nowrap;border-bottom:1px solid var(--glass-bd);border-right:1px solid var(--glass-bd);text-align:center;font-size:11px;text-transform:uppercase;letter-spacing:.4px;color:var(--gold2);}
+.cmp-table th:first-child{text-align:left;min-width:140px;position:sticky;left:0;z-index:2;background:var(--navy2);}
+.cmp-table td{padding:10px 12px;border-bottom:1px solid var(--glass-bd);border-right:1px solid var(--glass-bd);vertical-align:top;}
+.cmp-table td:first-child{font-weight:600;font-size:13px;position:sticky;left:0;z-index:1;background:var(--navy);min-width:140px;max-width:180px;word-break:break-word;}
+.cmp-table tr:last-child td{border-bottom:none;}
+.cmp-table td:last-child,.cmp-table th:last-child{border-right:none;}
+.cmp-cell-price{font-size:14px;font-weight:700;display:block;}
+.cmp-cell-unit{font-size:10px;color:rgba(255,255,255,0.4);margin-top:2px;display:block;}
+.cmp-cell-diff{font-size:10px;margin-top:4px;display:block;font-weight:700;}
+.cmp-cell-best .cmp-cell-price{color:var(--ok);}
+.cmp-best-tag{background:rgba(62,207,142,.15);color:var(--ok);font-size:9px;font-weight:700;border-radius:4px;padding:1px 5px;display:inline-block;margin-top:3px;}
+.cmp-cell-empty{color:rgba(255,255,255,0.3);font-size:12px;text-align:center;padding:10px 12px;}
+.cmp-prov-th-av{width:26px;height:26px;border-radius:6px;display:inline-flex;align-items:center;justify-content:center;font-size:12px;font-weight:700;margin-bottom:3px;}
+.cmp-upload-zone{border:2px dashed var(--glass-bd);border-radius:12px;padding:28px 16px;text-align:center;cursor:pointer;margin-bottom:12px;}
+.cmp-upload-zone:hover{border-color:var(--gold);}
+.cmp-col-row{display:flex;align-items:center;gap:8px;margin-bottom:10px;}
+.cmp-col-row span{font-size:13px;width:130px;flex:none;color:rgba(255,255,255,0.65);}
+.cmp-inp,.cmp-col-row select{background:var(--glass);border:1px solid var(--glass-bd);border-radius:8px;padding:8px 12px;color:var(--white);font-size:13px;outline:none;width:100%;}
+.cmp-inp:focus,.cmp-col-row select:focus{border-color:var(--gold);}
+.cmp-inp option,.cmp-col-row select option{background:var(--navy2);}
+.cmp-search-wrap{display:flex;gap:8px;margin:14px 16px 10px;}
+.cmp-search-wrap input{flex:1;background:var(--glass);border:1px solid var(--glass-bd);border-radius:10px;padding:10px 14px;color:var(--white);font-size:14px;outline:none;}
+.cmp-search-wrap input:focus{border-color:var(--gold);}
+.cmp-prov-item{display:flex;align-items:center;gap:12px;padding:12px 16px;border-bottom:1px solid var(--glass-bd);}
+.cmp-prov-item:last-child{border-bottom:none;}
+.cmp-avatar{width:42px;height:42px;border-radius:10px;display:flex;align-items:center;justify-content:center;font-size:17px;font-weight:700;flex:none;}
+.cmp-modal-bg{position:fixed;inset:0;background:rgba(5,8,20,0.8);z-index:500;display:flex;align-items:flex-end;justify-content:center;backdrop-filter:blur(4px);}
+.cmp-modal{width:100%;max-width:480px;max-height:88vh;overflow-y:auto;background:var(--navy2);border-radius:24px 24px 0 0;padding:20px;animation:sheetUp .25s ease;}
+.cmp-modal-title{font-size:17px;font-weight:700;margin-bottom:16px;color:var(--gold2);}
+.cmp-field{margin-bottom:12px;}
+.cmp-field label{display:block;font-size:12px;color:rgba(255,255,255,0.5);margin-bottom:4px;font-weight:600;}
+.cmp-tbl-wrap{overflow-x:auto;font-size:12px;margin-bottom:12px;border-radius:8px;border:1px solid var(--glass-bd);}
+.cmp-tbl-wrap table{width:100%;border-collapse:collapse;}
+.cmp-tbl-wrap th{background:var(--navy2);color:var(--gold2);padding:8px;text-align:left;font-size:11px;text-transform:uppercase;white-space:nowrap;border-bottom:1px solid var(--glass-bd);}
+.cmp-tbl-wrap td{padding:7px 8px;border-bottom:1px solid rgba(255,255,255,0.06);font-size:12px;}
+.cmp-note{background:rgba(197,160,40,0.08);border:1px solid rgba(197,160,40,0.25);border-radius:8px;padding:8px 10px;font-size:12px;color:rgba(255,255,255,0.55);margin:4px 0 10px;}
 </style>
 </head>
 <body>
@@ -570,7 +614,12 @@ let state = {
   bannerNovedades: null,
   bannerOfertas: null,
   adminBannerSub: 'banners',
+  cmpTab: 'comparar',
 };
+
+let cmpDB = {proveedores:[], listas:[]};
+let cmpLoaded = false;
+let _cmpImpData = null;
 
 function saveState(){
   try{ localStorage.setItem(STORAGE_KEY, JSON.stringify(state)); }catch(e){}
@@ -1967,10 +2016,11 @@ function renderAdmin(){
     {key:"banners",       label:"Novedades/Ofertas"},
     {key:"sugerencias",   label:"Sugerencias"+(unreadCount>0?` (${unreadCount})`:'')},
     {key:"config",        label:"Configuración"},
+    {key:"comparador",    label:"Comparador"},
   ];
   const tabs = state.adminIsSuperAdmin
     ? ALL_TABS
-    : ALL_TABS.filter(t => t.key !== 'config' && (state.adminLoggedPerms||[]).includes(t.key));
+    : ALL_TABS.filter(t => t.key !== 'config' && t.key !== 'comparador' && (state.adminLoggedPerms||[]).includes(t.key));
   const tab = tabs.find(t=>t.key===state.adminTab) ? state.adminTab : (tabs[0]?.key||"pedidos");
   return `
   <div class="screen">
@@ -2007,6 +2057,7 @@ function renderAdmin(){
       ${tab==="banners" ? renderAdminBanners() : ""}
       ${tab==="sugerencias" ? renderAdminSugerencias() : ""}
       ${tab==="config" ? renderAdminConfig() : ""}
+      ${tab==="comparador" ? renderAdminComparador() : ""}
     </div>
     ${tab==="productos" ? `<button class="fab" onclick="openProductModal(null)">${ic('plus')}</button>` : ""}
     ${tab==="comprobantes" ? `<button class="fab" onclick="openManualVoucherModal()">${ic('plus')}</button>` : ""}
@@ -2030,6 +2081,500 @@ function tryAdminLogin(){
 }
 function adminLogout(){ state.adminAuthed=false; state.adminIsSuperAdmin=false; state.adminLoggedName=""; nav("home"); }
 function setAdminTab(tab){ state.adminTab = tab; render(); }
+
+/* =========================================================
+   COMPARADOR DE PRECIOS (solo superadmin)
+   ========================================================= */
+
+// ── HELPERS ─────────────────────────────────────────────
+function cmpNorm(s){
+  return String(s||'').toLowerCase()
+    .replace(/[à-å]/g,'a').replace(/[è-ë]/g,'e')
+    .replace(/[ì-ï]/g,'i').replace(/[ò-ö]/g,'o')
+    .replace(/[ù-ü]/g,'u').replace(/ñ/g,'n')
+    .replace(/[^a-z0-9\s]/g,' ').replace(/\s+/g,' ').trim();
+}
+function cmpParseUnitQty(s){
+  if(!s) return 1;
+  const n=cmpNorm(s); let m;
+  m=n.match(/\bx\s*(\d+)/); if(m) return +m[1];
+  m=n.match(/\bpor\s+(\d+)/); if(m) return +m[1];
+  m=n.match(/(\d+)\s*(?:unidades?|und?|u\b|piezas?|pcs?)/); if(m) return +m[1];
+  m=n.match(/(?:pack|caja|fardo|display|bulto)\s*(?:de\s*)?(?:x\s*)?(\d+)/); if(m) return +m[1];
+  m=n.match(/(\d+)\s*(?:pack|cajas?|fardos?)/); if(m) return +m[1];
+  if(n==='docena'||n.includes('docena')) return 12;
+  if((n.includes('media')||n.includes('1/2'))&&n.includes('docena')) return 6;
+  m=n.match(/^(\d+)$/); if(m){ const v=+m[1]; if(v>1&&v<=144) return v; }
+  return 1;
+}
+function cmpParsePrice(v){
+  if(v===undefined||v===null||v==='') return null;
+  let s=String(v).replace(/[^\d.,]/g,'');
+  if(!s) return null;
+  let n;
+  if(s.includes(',')&&s.includes('.')){
+    n=s.lastIndexOf(',')>s.lastIndexOf('.')?parseFloat(s.replace(/\./g,'').replace(',','.')):parseFloat(s.replace(/,/g,''));
+  } else if(s.includes(',')){ n=parseFloat(s.replace(',','.')); }
+  else { n=parseFloat(s); }
+  return isNaN(n)?null:n;
+}
+function cmpMoney(v){ const n=parseFloat(v); return isNaN(n)?'-':'$'+n.toLocaleString('es-AR',{minimumFractionDigits:2,maximumFractionDigits:2}); }
+const CMP_COLORS=['#1a6b4a','#6b1a4a','#1a3a6b','#6b4a1a','#4a1a6b','#6b1a1a'];
+function cmpColor(id){ let h=0; for(let i=0;i<id.length;i++) h=(h*31+id.charCodeAt(i))|0; return CMP_COLORS[Math.abs(h)%CMP_COLORS.length]; }
+function cmpInitial(name){ return String(name||'').trim().charAt(0).toUpperCase(); }
+function cmpFmtDate(iso){ const d=new Date(iso); return d.toLocaleDateString('es-AR',{day:'2-digit',month:'2-digit',year:'2-digit'}); }
+function cmpCountProds(provId){ const l=cmpDB.listas.find(x=>x.provId===provId); return l?l.rows.length:0; }
+function cmpEsc(s){ return String(s||'').replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;'); }
+
+// ── MOTOR DE BÚSQUEDA ───────────────────────────────────
+function cmpTokenize(s){ return cmpNorm(s).split(/\s+/).filter(w=>w.length>0); }
+function cmpBigrams(s){ const r=[]; for(let i=0;i<s.length-1;i++) r.push(s[i]+s[i+1]); return r; }
+function cmpTokSim(a,b){
+  if(a===b) return 1;
+  if(a.length<2||b.length<2) return 0;
+  if(b.startsWith(a)||a.startsWith(b)) return 0.85;
+  const ba=cmpBigrams(a),bb=cmpBigrams(b);
+  if(!ba.length||!bb.length) return 0;
+  let inter=0; const used={};
+  ba.forEach(g=>{ for(let i=0;i<bb.length;i++){if(!used[i]&&bb[i]===g){inter++;used[i]=1;break;}} });
+  return 2*inter/(ba.length+bb.length);
+}
+function cmpProdSim(a,b){
+  const ta=cmpTokenize(a),tb=cmpTokenize(b);
+  if(!ta.length||!tb.length) return 0;
+  let matched=0; const usedB={};
+  ta.forEach(wa=>{
+    let best=0,bestI=-1;
+    tb.forEach((wb,i)=>{ if(usedB[i]) return; const s=cmpTokSim(wa,wb); if(s>best){best=s;bestI=i;} });
+    if(best>=0.75){matched+=best;if(bestI>=0)usedB[bestI]=1;}
+  });
+  return 2*matched/(ta.length+tb.length);
+}
+function cmpQScore(norm,qt){
+  if(!qt.length) return 0;
+  const pt=norm.split(/\s+/).filter(w=>w.length>0);
+  let tot=0,ok=true;
+  qt.forEach(qw=>{ let best=0; pt.forEach(pw=>{const s=cmpTokSim(qw,pw);if(s>best)best=s;}); if(best<0.6) ok=false; tot+=best; });
+  return ok?tot/qt.length:0;
+}
+
+// ── MODAL PROPIO ────────────────────────────────────────
+function cmpOpenModal(html){
+  cmpCloseModal();
+  const bg=document.createElement('div');
+  bg.className='cmp-modal-bg'; bg.id='cmp-modal-bg';
+  const m=document.createElement('div');
+  m.className='cmp-modal'; m.innerHTML=html;
+  bg.appendChild(m);
+  bg.addEventListener('click',e=>{ if(e.target===bg) cmpCloseModal(); });
+  document.body.appendChild(bg);
+}
+function cmpCloseModal(){ const m=document.getElementById('cmp-modal-bg'); if(m) m.remove(); }
+
+// ── SUPABASE ────────────────────────────────────────────
+async function cmpFetch(path, method, body, prefer){
+  const url=SUPABASE_URL+'/rest/v1'+path;
+  const headers={'Content-Type':'application/json','apikey':SUPABASE_KEY,'Authorization':'Bearer '+SUPABASE_KEY};
+  if(prefer) headers['Prefer']=prefer;
+  const res=await fetch(url,{method:method||'GET',headers,body:body?JSON.stringify(body):undefined});
+  if(!res.ok){ const t=await res.text(); let e; try{e=JSON.parse(t);}catch(x){e={message:t};} throw new Error(e.message||'HTTP '+res.status); }
+  return res.status===204?null:res.json();
+}
+
+async function cmpLoadData(){
+  try{
+    const [provs,listas]=await Promise.all([
+      cmpFetch('/cmp_proveedores?select=*&order=name'),
+      cmpFetch('/cmp_listas?select=prov_id,at,rows')
+    ]);
+    cmpDB.proveedores=(provs||[]).map(p=>({id:p.id,name:p.name,lastImport:p.last_import,mapping:p.mapping}));
+    cmpDB.listas=(listas||[]).map(l=>({provId:l.prov_id,at:l.at,rows:l.rows||[]}));
+    cmpLoaded=true;
+    render();
+  }catch(e){ toast('Error cargando comparador: '+e.message,'err'); }
+}
+
+async function cmpSaveProvSupa(prov){
+  await cmpFetch('/cmp_proveedores','POST',{id:prov.id,name:prov.name,last_import:prov.lastImport||null,mapping:prov.mapping||null},'resolution=merge-duplicates');
+}
+async function cmpDelProvSupa(id){
+  await Promise.all([
+    cmpFetch('/cmp_listas?prov_id=eq.'+encodeURIComponent(id),'DELETE'),
+    cmpFetch('/cmp_proveedores?id=eq.'+encodeURIComponent(id),'DELETE')
+  ]);
+}
+async function cmpSaveListaSupa(lista){
+  await cmpFetch('/cmp_listas','POST',{prov_id:lista.provId,rows:lista.rows,at:lista.at},'resolution=merge-duplicates');
+}
+
+// ── RENDER PRINCIPAL ────────────────────────────────────
+function renderAdminComparador(){
+  if(!cmpLoaded){ cmpLoadData(); return `<div style="padding:40px;text-align:center;color:rgba(255,255,255,0.4);">Cargando...</div>`; }
+  const tab=state.cmpTab||'comparar';
+  const tabs=[{k:'comparar',l:'Comparar'},{k:'importar',l:'Importar'},{k:'proveedores',l:'Proveedores'}];
+  let html=`<div class="cmp-tabs-bar">${tabs.map(t=>`<button class="cmp-tab-btn${tab===t.k?' active':''}" onclick="state.cmpTab='${t.k}';render()">${t.l}</button>`).join('')}</div>`;
+  if(tab==='proveedores') html+=cmpHtmlProveedores();
+  else if(tab==='importar') html+=cmpHtmlImportar();
+  else html+=cmpHtmlComparar();
+  return html;
+}
+
+// ── PROVEEDORES ─────────────────────────────────────────
+function cmpHtmlProveedores(){
+  let h=`<div style="display:flex;align-items:center;justify-content:space-between;padding:14px 16px 10px;">
+    <span style="font-size:16px;font-weight:700;">Proveedores</span>
+    <div style="display:flex;gap:6px;">
+      <button class="btn-secondary" style="font-size:12px;padding:6px 12px;" onclick="cmpExportBackup()">&#128190; Backup</button>
+      <button class="btn-secondary" style="font-size:12px;padding:6px 12px;" onclick="document.getElementById('cmp-imp-bk').click()">&#128257; Restaurar</button>
+      <input type="file" id="cmp-imp-bk" accept=".json" style="display:none" onchange="cmpImportBackup(this)">
+      <button class="btn-primary" style="font-size:12px;padding:6px 12px;" onclick="cmpModalProv(null)">+ Nuevo</button>
+    </div>
+  </div>`;
+  if(!cmpDB.proveedores.length){
+    h+=`<div style="padding:40px 20px;text-align:center;color:rgba(255,255,255,0.4);">No hay proveedores.<br>Toca <b>+ Nuevo</b> para agregar.</div>`;
+  } else {
+    h+=`<div style="margin:0 16px;background:var(--glass);border:1px solid var(--glass-bd);border-radius:14px;">`;
+    cmpDB.proveedores.forEach(p=>{
+      const prod=cmpCountProds(p.id);
+      const fecha=p.lastImport?cmpFmtDate(p.lastImport):'nunca importado';
+      h+=`<div class="cmp-prov-item">
+        <div class="cmp-avatar" style="background:${cmpColor(p.id)}">${cmpInitial(p.name)}</div>
+        <div style="flex:1">
+          <div style="font-weight:700;">${cmpEsc(p.name)}</div>
+          <div style="font-size:12px;color:rgba(255,255,255,0.4);margin-top:2px;">${prod} productos &middot; ${fecha}</div>
+        </div>
+        <div style="display:flex;gap:6px;">
+          <button class="btn-secondary" style="font-size:12px;padding:5px 10px;" onclick="cmpModalProv('${cmpEsc(p.id)}')">Editar</button>
+          <button style="font-size:12px;padding:5px 10px;background:var(--danger);color:#fff;border-radius:8px;font-weight:600;" onclick="cmpConfirmDelProv('${cmpEsc(p.id)}')">Borrar</button>
+        </div>
+      </div>`;
+    });
+    h+=`</div>`;
+  }
+  return h;
+}
+
+function cmpModalProv(id){
+  const p=id?cmpDB.proveedores.find(x=>x.id===id):null;
+  cmpOpenModal(`<div class="cmp-modal-title">${p?'Editar':'Nuevo'} Proveedor</div>
+    <div class="cmp-field"><label>Nombre</label><input class="cmp-inp" id="cpn" value="${p?cmpEsc(p.name):''}" placeholder="Ej: Distribuidora Lopez"></div>
+    ${p?`<input type="hidden" id="cpid" value="${cmpEsc(id)}">`:''}
+    <div style="display:flex;gap:10px;margin-top:8px;">
+      <button class="btn-secondary" style="flex:1;" onclick="cmpCloseModal()">Cancelar</button>
+      <button class="btn-primary" style="flex:1;" onclick="cmpSaveProv()">Guardar</button>
+    </div>`);
+  setTimeout(()=>{ const i=document.getElementById('cpn'); if(i) i.focus(); },100);
+}
+
+async function cmpSaveProv(){
+  const name=(document.getElementById('cpn').value||'').trim();
+  const idEl=document.getElementById('cpid');
+  const id=idEl?idEl.value:'';
+  if(!name){ toast('Ingresá un nombre','err'); return; }
+  let prov;
+  if(id){
+    prov=cmpDB.proveedores.find(x=>x.id===id); if(prov) prov.name=name;
+  } else {
+    prov={id:'p'+Date.now(),name,lastImport:null,mapping:null};
+    cmpDB.proveedores.push(prov);
+  }
+  cmpCloseModal();
+  try{ await cmpSaveProvSupa(prov); toast('Guardado'); render(); }
+  catch(e){ toast('Error: '+e.message,'err'); }
+}
+
+function cmpConfirmDelProv(id){
+  const p=cmpDB.proveedores.find(x=>x.id===id); if(!p) return;
+  cmpOpenModal(`<div class="cmp-modal-title">Borrar Proveedor</div>
+    <p style="color:rgba(255,255,255,0.5);margin-bottom:16px;">Eliminar <b>${cmpEsc(p.name)}</b> y todos sus precios?</p>
+    <div style="display:flex;gap:10px;">
+      <button class="btn-secondary" style="flex:1;" onclick="cmpCloseModal()">Cancelar</button>
+      <button style="flex:1;background:var(--danger);color:#fff;border-radius:10px;padding:10px;font-weight:700;" onclick="cmpDelProv('${cmpEsc(id)}')">Eliminar</button>
+    </div>`);
+}
+
+async function cmpDelProv(id){
+  cmpDB.proveedores=cmpDB.proveedores.filter(x=>x.id!==id);
+  cmpDB.listas=cmpDB.listas.filter(x=>x.provId!==id);
+  cmpCloseModal();
+  try{ await cmpDelProvSupa(id); toast('Eliminado'); render(); }
+  catch(e){ toast('Error: '+e.message,'err'); }
+}
+
+// ── IMPORTAR ────────────────────────────────────────────
+function cmpHtmlImportar(){
+  if(!cmpDB.proveedores.length) return `<div style="padding:40px 20px;text-align:center;color:rgba(255,255,255,0.4);">Primero agrega un proveedor en <b>Proveedores</b>.</div>`;
+  const opts=cmpDB.proveedores.map(p=>`<option value="${cmpEsc(p.id)}">${cmpEsc(p.name)}</option>`).join('');
+  return `<div style="padding:14px 16px 0;font-size:16px;font-weight:700;">Importar Lista</div>
+  <div style="padding:14px 16px;">
+    <div style="background:var(--glass);border:1px solid var(--glass-bd);border-radius:14px;padding:14px;margin-bottom:12px;">
+      <div style="font-size:11px;font-weight:700;color:var(--gold2);text-transform:uppercase;letter-spacing:.5px;margin-bottom:10px;">1. Proveedor</div>
+      <select class="cmp-inp" id="cmp-prov"><option value="">-- Seleccionar --</option>${opts}</select>
+    </div>
+    <div style="background:var(--glass);border:1px solid var(--glass-bd);border-radius:14px;padding:14px;margin-bottom:12px;">
+      <div style="font-size:11px;font-weight:700;color:var(--gold2);text-transform:uppercase;letter-spacing:.5px;margin-bottom:10px;">2. Archivo</div>
+      <div class="cmp-upload-zone" onclick="document.getElementById('cmp-fi').click()">
+        <div style="font-size:30px;">&#128194;</div>
+        <p style="font-weight:700;margin-top:6px;">Tocar para seleccionar</p>
+        <p style="font-size:11px;color:rgba(255,255,255,0.4);margin-top:4px;">Excel (.xlsx, .xls) o CSV</p>
+        <input type="file" id="cmp-fi" accept=".csv,.txt,.xlsx,.xls" style="display:none" onchange="cmpOnFile(this)">
+      </div>
+      <div style="font-size:12px;color:rgba(255,255,255,0.4);margin-bottom:8px;text-align:center;">O bien peg&aacute; el texto:</div>
+      <textarea class="cmp-inp" id="cmp-paste" style="min-height:80px;font-size:12px;font-family:monospace;resize:vertical;" placeholder="Peg&aacute; aqu&iacute; el texto de la lista (separado por tabs o comas)..."></textarea>
+      <button class="btn-secondary" style="width:100%;margin-top:8px;font-size:13px;" onclick="cmpParseText()">Analizar texto</button>
+    </div>
+    <div id="cmp-imp-preview"></div>
+  </div>`;
+}
+
+function cmpOnFile(input){
+  const f=input.files[0]; if(!f) return;
+  const ext=f.name.split('.').pop().toLowerCase();
+  if(ext==='xlsx'||ext==='xls'){
+    if(!window.XLSX){
+      const s=document.createElement('script');
+      s.src='xlsx.min.js';
+      s.onload=()=>cmpReadXlsx(f);
+      s.onerror=()=>toast('xlsx.min.js no disponible — exportá como CSV','err');
+      document.head.appendChild(s);
+    } else { cmpReadXlsx(f); }
+  } else {
+    const r=new FileReader();
+    r.onload=e=>cmpParseCsvText(e.target.result,f.name);
+    r.readAsText(f,'UTF-8');
+  }
+}
+
+function cmpReadXlsx(f){
+  const r=new FileReader();
+  r.onload=e=>{
+    try{
+      const wb=XLSX.read(e.target.result,{type:'array'});
+      const ws=wb.Sheets[wb.SheetNames[0]];
+      const data=XLSX.utils.sheet_to_json(ws,{header:1,defval:''});
+      if(data.length<2){ toast('Archivo vacío','err'); return; }
+      const headers=data[0].map((h,i)=>String(h||'Col '+(i+1)).trim());
+      const rows=data.slice(1).filter(r=>r.some(c=>String(c||'').trim())).map(r=>r.map(c=>String(c===null||c===undefined?'':c)));
+      _cmpImpData={headers,rows,filename:f.name};
+      cmpShowMapper();
+    }catch(err){ toast('Error al leer Excel: '+err.message,'err'); }
+  };
+  r.readAsArrayBuffer(f);
+}
+
+function cmpParseText(){
+  const txt=(document.getElementById('cmp-paste').value||'').trim();
+  if(!txt){ toast('Pegá texto primero','err'); return; }
+  cmpParseCsvText(txt,'texto pegado');
+}
+
+function cmpParseCsvText(text,filename){
+  const lines=text.split(/\r?\n/).filter(l=>l.trim());
+  if(lines.length<2){ toast('El archivo parece vacío','err'); return; }
+  const first=lines[0];
+  let sep='\t';
+  if((first.match(/;/g)||[]).length>(first.match(/,/g)||[]).length) sep=';';
+  else if((first.match(/,/g)||[]).length>0) sep=',';
+  function splitLine(l){
+    const res=[]; let cur='',inq=false;
+    for(let i=0;i<l.length;i++){
+      const c=l[i];
+      if(c==='"'){inq=!inq;continue;}
+      if(c===sep&&!inq){res.push(cur.trim());cur='';continue;}
+      cur+=c;
+    }
+    res.push(cur.trim()); return res;
+  }
+  const headers=splitLine(lines[0]).map((h,i)=>h||'Col '+(i+1));
+  const rows=lines.slice(1).map(l=>splitLine(l)).filter(r=>r.some(c=>c.trim()));
+  if(!rows.length){ toast('No se encontraron filas','err'); return; }
+  _cmpImpData={headers,rows,filename};
+  cmpShowMapper();
+}
+
+function cmpShowMapper(){
+  if(!_cmpImpData) return;
+  const provId=(document.getElementById('cmp-prov')||{}).value||'';
+  const prov=cmpDB.proveedores.find(p=>p.id===provId);
+  const saved=prov&&prov.mapping?prov.mapping:{};
+  const h=_cmpImpData.headers;
+  function opts(sel){ let o='<option value="">-- No usar --</option>'; h.forEach((hh,i)=>{ o+=`<option value="${i}"${sel==i?' selected':''}>${cmpEsc(hh)}</option>`; }); return o; }
+  let an=-1,ap=-1,au=-1,ac=-1,ab=-1;
+  if(!prov||!prov.mapping){
+    const nKw=['descripcion','descripci','producto','nombre','articulo','item','detalle'];
+    const pKw=['precio','price','importe','costo','valor'];
+    const uKw=['unidad','presentacion','medida','unit','contenido'];
+    const cKw=['codigo','code','cod','sku','ref'];
+    const bKw=['bulto','x bulto','por bulto','cant bulto','unid x','uds x','uds/caja','por caja'];
+    h.forEach((hh,i)=>{ const n=cmpNorm(hh);
+      if(an<0&&nKw.some(k=>n.includes(k))) an=i;
+      if(ap<0&&pKw.some(k=>n.includes(k))) ap=i;
+      if(au<0&&uKw.some(k=>n.includes(k))) au=i;
+      if(ac<0&&cKw.some(k=>n.includes(k))) ac=i;
+      if(ab<0&&bKw.some(k=>n.includes(k))) ab=i;
+    });
+  } else { an=saved.nameCol??-1; ap=saved.priceCol??-1; au=saved.unitCol??-1; ac=saved.codeCol??-1; ab=saved.bultoCol??-1; }
+  const previewRows=_cmpImpData.rows.slice(0,4);
+  let preview=`<div class="cmp-tbl-wrap"><table><tr>${h.map(hh=>`<th>${cmpEsc(hh)}</th>`).join('')}</tr>`;
+  previewRows.forEach(r=>{ preview+=`<tr>${h.map((_,i)=>`<td>${cmpEsc(r[i]||'')}</td>`).join('')}</tr>`; });
+  preview+='</table></div>';
+  const html=`<div style="background:var(--glass);border:1px solid var(--glass-bd);border-radius:14px;padding:14px;">
+    <div style="font-size:11px;font-weight:700;color:var(--gold2);text-transform:uppercase;letter-spacing:.5px;margin-bottom:4px;">Archivo: ${cmpEsc(_cmpImpData.filename)}</div>
+    <div style="font-size:12px;color:rgba(255,255,255,0.4);margin-bottom:12px;">${_cmpImpData.rows.length} filas &middot; ${h.length} columnas</div>
+    <div style="font-size:11px;font-weight:700;color:var(--gold2);text-transform:uppercase;letter-spacing:.5px;margin-bottom:10px;">Mapear columnas</div>
+    <div class="cmp-col-row"><span>&#128246; Producto</span><select id="cmp-cn">${opts(an)}</select></div>
+    <div class="cmp-col-row"><span>&#128176; Precio</span><select id="cmp-cp">${opts(ap)}</select></div>
+    <div class="cmp-col-row"><span>&#128208; Presentaci&oacute;n</span><select id="cmp-cu">${opts(au)}</select></div>
+    <div class="cmp-col-row"><span>&#128230; Unid/Bulto</span><select id="cmp-cb">${opts(ab)}</select></div>
+    <div class="cmp-note">&#128161; Si una columna tiene la cantidad por bulto (ej: 12, 24) seleccionala. Si no, lo detecto solo desde la presentaci&oacute;n.</div>
+    <div class="cmp-col-row"><span># C&oacute;digo</span><select id="cmp-cc">${opts(ac)}</select></div>
+    <div style="margin-top:12px;font-size:11px;font-weight:700;color:var(--gold2);text-transform:uppercase;letter-spacing:.5px;margin-bottom:8px;">Vista previa</div>
+    ${preview}
+    <button class="btn-primary" style="width:100%;margin-top:14px;" onclick="cmpDoImport()">Importar</button>
+  </div>`;
+  const el=document.getElementById('cmp-imp-preview');
+  if(el) el.innerHTML=html;
+}
+
+async function cmpDoImport(){
+  const provId=(document.getElementById('cmp-prov')||{}).value||'';
+  if(!provId){ toast('Seleccioná un proveedor','err'); return; }
+  const cn=document.getElementById('cmp-cn').value;
+  const cp=document.getElementById('cmp-cp').value;
+  const cu=document.getElementById('cmp-cu').value;
+  const cb=document.getElementById('cmp-cb').value;
+  const cc=document.getElementById('cmp-cc').value;
+  if(cn===''){ toast('Seleccioná la columna de producto','err'); return; }
+  if(cp===''){ toast('Seleccioná la columna de precio','err'); return; }
+  const rows=[];
+  _cmpImpData.rows.forEach(r=>{
+    const name=String(r[cn]||'').trim();
+    const price=cmpParsePrice(r[cp]);
+    if(!name||price===null) return;
+    const unitStr=cu!==''?String(r[cu]||'').trim():'';
+    let unitQty=1;
+    if(cb!==''){
+      const raw=parseFloat(String(r[cb]||'').replace(',','.'));
+      unitQty=(raw>1&&raw<=1000)?raw:1;
+    } else { unitQty=cmpParseUnitQty(unitStr); }
+    rows.push({name,price,unit:unitStr,unitQty,code:cc!==''?String(r[cc]||'').trim():'',norm:cmpNorm(name)});
+  });
+  if(!rows.length){ toast('No se encontraron filas válidas','err'); return; }
+  const now=new Date().toISOString();
+  const lista={provId,rows,at:now};
+  const idx=cmpDB.listas.findIndex(l=>l.provId===provId);
+  if(idx>=0) cmpDB.listas[idx]=lista; else cmpDB.listas.push(lista);
+  const prov=cmpDB.proveedores.find(p=>p.id===provId);
+  if(prov){
+    prov.mapping={nameCol:+cn,priceCol:+cp,unitCol:cu!==''?+cu:null,codeCol:cc!==''?+cc:null,bultoCol:cb!==''?+cb:null};
+    prov.lastImport=now;
+  }
+  _cmpImpData=null;
+  try{
+    await Promise.all([cmpSaveListaSupa(lista),prov?cmpSaveProvSupa(prov):Promise.resolve()]);
+    toast(rows.length+' productos importados');
+    state.cmpTab='comparar'; render();
+  }catch(e){ toast('Error guardando: '+e.message,'err'); }
+}
+
+// ── COMPARAR ────────────────────────────────────────────
+function cmpHtmlComparar(){
+  const noData=!cmpDB.listas.length;
+  return `<div class="cmp-search-wrap">
+    <input id="cmp-q" placeholder="Buscar producto..." oninput="cmpSearch()" autocomplete="off">
+  </div>
+  ${noData?`<div style="padding:40px 20px;text-align:center;color:rgba(255,255,255,0.4);">Importá listas de precios primero en <b>Importar</b>.</div>`:`<div style="padding:0 16px 8px;font-size:12px;color:rgba(255,255,255,0.35);">Escribí al menos 2 letras para buscar</div>`}
+  <div id="cmp-results"></div>`;
+}
+
+let _cmpSt;
+function cmpSearch(){ clearTimeout(_cmpSt); _cmpSt=setTimeout(cmpDoSearch,220); }
+function cmpDoSearch(){
+  const el=document.getElementById('cmp-results'); if(!el) return;
+  const q=(document.getElementById('cmp-q').value||'').trim();
+  if(q.length<2){ el.innerHTML=''; return; }
+  const qt=cmpTokenize(q);
+  const provs=[];
+  cmpDB.listas.forEach(lista=>{ const prov=cmpDB.proveedores.find(p=>p.id===lista.provId); if(prov) provs.push({prov,lista}); });
+  if(!provs.length){ el.innerHTML='<div style="padding:40px;text-align:center;color:rgba(255,255,255,0.4);">No hay listas importadas.</div>'; return; }
+  const allHits=[];
+  provs.forEach(pl=>{ pl.lista.rows.forEach(row=>{ const sc=cmpQScore(row.norm,qt); if(sc>=0.6) allHits.push({row,prov:pl.prov,sc}); }); });
+  if(!allHits.length){
+    el.innerHTML=`<div style="padding:40px;text-align:center;color:rgba(255,255,255,0.4);">Sin resultados para &ldquo;<b>${cmpEsc(q)}</b>&rdquo;.</div>`;
+    return;
+  }
+  allHits.sort((a,b)=>b.sc-a.sc);
+  const groups=[],used={};
+  allHits.forEach(h=>{
+    const key=h.prov.id+'|'+h.row.norm;
+    if(used[key]) return;
+    const g={name:h.row.name,byProv:{}}; g.byProv[h.prov.id]={row:h.row,prov:h.prov}; used[key]=1;
+    allHits.forEach(h2=>{
+      if(h2.prov.id===h.prov.id) return;
+      const k2=h2.prov.id+'|'+h2.row.norm;
+      if(used[k2]||g.byProv[h2.prov.id]) return;
+      if(cmpProdSim(h.row.norm,h2.row.norm)>=0.55){ g.byProv[h2.prov.id]={row:h2.row,prov:h2.prov}; used[k2]=1; }
+    });
+    groups.push(g);
+  });
+  let html=`<div style="padding:0 16px 8px;font-size:12px;color:rgba(255,255,255,0.35);">${groups.length} producto(s)</div>`;
+  html+=`<div class="cmp-wrap"><table class="cmp-table"><thead><tr><th>Producto</th>`;
+  provs.forEach(pl=>{ html+=`<th><div class="cmp-prov-th-av" style="background:${cmpColor(pl.prov.id)}">${cmpInitial(pl.prov.name)}</div><br>${cmpEsc(pl.prov.name)}</th>`; });
+  html+=`</tr></thead><tbody>`;
+  groups.slice(0,50).forEach(g=>{
+    const unitPrices=[];
+    provs.forEach(pl=>{ if(g.byProv[pl.prov.id]){ const r=g.byProv[pl.prov.id].row; unitPrices.push(r.price/(r.unitQty||1)); } });
+    const minU=unitPrices.length?Math.min(...unitPrices):null;
+    const hasBulto=provs.some(pl=>g.byProv[pl.prov.id]&&(g.byProv[pl.prov.id].row.unitQty||1)>1);
+    html+=`<tr><td>${cmpEsc(g.name)}</td>`;
+    provs.forEach(pl=>{
+      const entry=g.byProv[pl.prov.id];
+      if(!entry){ html+=`<td class="cmp-cell-empty">&mdash;</td>`; return; }
+      const r=entry.row,qty=r.unitQty||1,uPrice=r.price/qty;
+      const isBest=minU!==null&&Math.abs(uPrice-minU)<0.01&&unitPrices.length>1;
+      const diffPct=(minU&&uPrice>minU)?Math.round((uPrice-minU)/minU*100):0;
+      html+=`<td${isBest?' class="cmp-cell-best"':''}>`;
+      if(hasBulto){
+        html+=`<span class="cmp-cell-price">${cmpMoney(uPrice)}<span style="font-size:10px;font-weight:400;color:rgba(255,255,255,0.4)">/u</span></span>`;
+        if(qty>1) html+=`<span class="cmp-cell-unit">${cmpMoney(r.price)} &times; ${qty}u${r.unit?' &middot; '+cmpEsc(r.unit):''}</span>`;
+        else if(r.unit) html+=`<span class="cmp-cell-unit">${cmpEsc(r.unit)}</span>`;
+      } else {
+        html+=`<span class="cmp-cell-price">${cmpMoney(r.price)}</span>`;
+        if(r.unit) html+=`<span class="cmp-cell-unit">${cmpEsc(r.unit)}</span>`;
+      }
+      if(isBest&&unitPrices.length>1) html+=`<span class="cmp-best-tag">MEJOR PRECIO</span>`;
+      else if(diffPct>0) html+=`<span class="cmp-cell-diff" style="color:var(--warn)">+${diffPct}% m&aacute;s caro</span>`;
+      html+=`</td>`;
+    });
+    html+=`</tr>`;
+  });
+  html+=`</tbody></table></div>`;
+  el.innerHTML=html;
+}
+
+// ── BACKUP / RESTORE ────────────────────────────────────
+function cmpExportBackup(){
+  const blob=new Blob([JSON.stringify(cmpDB,null,2)],{type:'application/json'});
+  const a=document.createElement('a');
+  a.href=URL.createObjectURL(blob);
+  a.download='comparador-backup-'+new Date().toISOString().slice(0,10)+'.json';
+  a.click(); toast('Backup exportado');
+}
+function cmpImportBackup(input){
+  const f=input.files[0]; if(!f) return;
+  const r=new FileReader();
+  r.onload=async e=>{
+    try{
+      const data=JSON.parse(e.target.result);
+      if(!data.proveedores||!data.listas) throw new Error('Formato inválido');
+      cmpDB=data;
+      await Promise.all([...cmpDB.proveedores.map(p=>cmpSaveProvSupa(p)),...cmpDB.listas.map(l=>cmpSaveListaSupa(l))]);
+      state.cmpTab='proveedores'; render();
+      toast('Datos restaurados: '+cmpDB.proveedores.length+' proveedores');
+    }catch(err){ toast('Error al restaurar: '+err.message,'err'); }
+  };
+  r.readAsText(f,'UTF-8');
+}
 
 /* ---------- ADMIN: GESTIÓN DE SUB-ADMINS ---------- */
 const PERM_OPTIONS = [
