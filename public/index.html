@@ -921,11 +921,11 @@ async function apiSaveContent(key){
   try{
     const items = key==='novedades' ? state.novedades : state.ofertas;
     const val = JSON.stringify(items);
-    const existing = await supaFetch('/app_settings?setting_key=eq.'+key+'&select=id', 'GET');
+    const existing = await adminFetch('/app_settings?setting_key=eq.'+key+'&select=id', 'GET');
     if(existing && existing.length>0){
-      await supaFetch('/app_settings?setting_key=eq.'+key, 'PATCH', {setting_value: val});
+      await adminFetch('/app_settings?setting_key=eq.'+key, 'PATCH', {setting_value: val});
     }else{
-      await supaFetch('/app_settings', 'POST', {setting_key: key, setting_value: val});
+      await adminFetch('/app_settings', 'POST', {setting_key: key, setting_value: val});
     }
   }catch(e){ console.warn('Error guardando contenido:', e); toast('Error guardando: '+e.message, 'err'); }
 }
@@ -963,11 +963,11 @@ async function apiSaveSectionBanner(type){
     const key = type==='novedad' ? 'banner_novedades' : 'banner_ofertas';
     const obj = type==='novedad' ? state.bannerNovedades : state.bannerOfertas;
     const val = JSON.stringify(obj);
-    const existing = await supaFetch('/app_settings?setting_key=eq.'+key+'&select=id', 'GET');
+    const existing = await adminFetch('/app_settings?setting_key=eq.'+key+'&select=id', 'GET');
     if(existing && existing.length>0){
-      await supaFetch('/app_settings?setting_key=eq.'+key, 'PATCH', {setting_value: val});
+      await adminFetch('/app_settings?setting_key=eq.'+key, 'PATCH', {setting_value: val});
     }else{
-      await supaFetch('/app_settings', 'POST', {setting_key: key, setting_value: val});
+      await adminFetch('/app_settings', 'POST', {setting_key: key, setting_value: val});
     }
   }catch(e){ console.warn('Error guardando banner sección:', e); toast('Error guardando: '+e.message,'err'); }
 }
@@ -1005,9 +1005,9 @@ async function apiSaveProduct(product){
       promo_until: product.promoUntil||null,
     };
     if(product._apiId){
-      await supaFetch('/products?id=eq.' + product._apiId, 'PATCH', body);
+      await adminFetch('/products?id=eq.' + product._apiId, 'PATCH', body);
     }else{
-      const data = await supaFetch('/products?select=id', 'POST', body);
+      const data = await adminFetch('/products?select=id', 'POST', body);
       if(data && data[0]){
         const oldId = product.id;
         product._apiId = data[0].id;
@@ -1029,7 +1029,7 @@ async function apiSaveProduct(product){
 async function apiDeleteProduct(product){
   if(!product || !product._apiId) return;
   try{
-    await supaFetch('/products?id=eq.' + product._apiId, 'DELETE');
+    await adminFetch('/products?id=eq.' + product._apiId, 'DELETE');
   }catch(e){ console.warn("Error eliminando producto:", e); }
 }
 
@@ -1346,19 +1346,22 @@ function render(){
   const app = document.getElementById("app");
   const r = state.route;
   let html = "";
-  const needsLogin = !IS_ADMIN_APP && !state.currentClientPhone;
-  if(r.screen==="home") html = needsLogin ? renderClientWelcome() : renderHome();
-  else if(r.screen==="catalog") html = needsLogin ? renderClientWelcome() : renderCatalog(r.section);
-  else if(r.screen==="product") html = needsLogin ? renderClientWelcome() : renderProductDetail(r.id);
-  else if(r.screen==="cart") html = needsLogin ? renderClientWelcome() : renderCart();
-  else if(r.screen==="checkout") html = needsLogin ? renderClientWelcome() : renderCheckout();
+  // Solo Cuenta y Chat piden teléfono — el resto se navega libre y el
+  // teléfono se pide recién en el checkout (menos fricción para mirar
+  // el catálogo).
+  const needsLogin = !IS_ADMIN_APP && !state.currentClientPhone && (r.screen==="account" || r.screen==="chat");
+  if(r.screen==="home") html = renderHome();
+  else if(r.screen==="catalog") html = renderCatalog(r.section);
+  else if(r.screen==="product") html = renderProductDetail(r.id);
+  else if(r.screen==="cart") html = renderCart();
+  else if(r.screen==="checkout") html = renderCheckout();
   else if(r.screen==="success") html = renderSuccess(r.order);
-  else if(r.screen==="orders") html = needsLogin ? renderClientWelcome() : renderOrdersLookup();
+  else if(r.screen==="orders") html = renderOrdersLookup();
   else if(r.screen==="account") html = needsLogin ? renderClientWelcome() : renderAccount();
   else if(r.screen==="admin") html = renderAdmin();
   else if(r.screen==="voucher-view") html = renderVoucherView(r.voucherId);
   else if(r.screen==="price-list-view") html = renderPriceListView(r.productIds, r.priceMode);
-  else if(r.screen==="celiaco") html = needsLogin ? renderClientWelcome() : renderCeliaco();
+  else if(r.screen==="celiaco") html = renderCeliaco();
   else if(r.screen==="chat") html = needsLogin ? renderClientWelcome() : renderChat();
   else if(r.screen==="suggestions") html = renderSuggestions();
   else html = renderHome();
@@ -4153,11 +4156,11 @@ async function apiSaveWholesaleClients(){
   const list = Object.values(state.clients).filter(c=>c.wholesale).map(c=>c.phone);
   const val = JSON.stringify(list);
   try{
-    const existing = await supaFetch('/app_settings?setting_key=eq.wholesale_clients&select=id','GET');
+    const existing = await adminFetch('/app_settings?setting_key=eq.wholesale_clients&select=id','GET');
     if(existing && existing.length>0){
-      await supaFetch('/app_settings?setting_key=eq.wholesale_clients','PATCH',{setting_value:val});
+      await adminFetch('/app_settings?setting_key=eq.wholesale_clients','PATCH',{setting_value:val});
     }else{
-      await supaFetch('/app_settings','POST',{setting_key:'wholesale_clients',setting_value:val});
+      await adminFetch('/app_settings','POST',{setting_key:'wholesale_clients',setting_value:val});
     }
   }catch(e){ console.warn('Error guardando mayoristas:',e); }
 }
@@ -4166,11 +4169,11 @@ async function apiSaveClientDiscounts(){
   Object.values(state.clients).forEach(c=>{ if(c.discountPct) discounts[c.phone] = Number(c.discountPct); });
   const val = JSON.stringify(discounts);
   try{
-    const existing = await supaFetch('/app_settings?setting_key=eq.client_discounts&select=id', 'GET');
+    const existing = await adminFetch('/app_settings?setting_key=eq.client_discounts&select=id', 'GET');
     if(existing && existing.length>0){
-      await supaFetch('/app_settings?setting_key=eq.client_discounts', 'PATCH', {setting_value: val});
+      await adminFetch('/app_settings?setting_key=eq.client_discounts', 'PATCH', {setting_value: val});
     }else{
-      await supaFetch('/app_settings', 'POST', {setting_key:'client_discounts', setting_value: val});
+      await adminFetch('/app_settings', 'POST', {setting_key:'client_discounts', setting_value: val});
     }
   }catch(e){ console.warn('Error guardando descuentos:', e); }
 }
