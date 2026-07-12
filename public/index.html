@@ -4034,6 +4034,7 @@ function recomposePhotoDraft(){
   const d = adminPhotoDraft;
   const baseSrc = d.bgRemoved ? d.bgRemovedImage : d.original;
   const img = new Image();
+  img.crossOrigin = "anonymous";
   img.onload = ()=>{
     const rot = (d.rotation||0) % 360;
     const swap = rot===90 || rot===270;
