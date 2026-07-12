@@ -516,7 +516,7 @@ function renderCeliaco(){
       <h2>Apto Celíaco</h2>
     </div>
     <div style="padding:8px 16px 12px; display:flex; align-items:center; gap:10px;">
-      <img src="/sin-tacc.png" style="width:36px; height:36px; object-fit:contain;">
+      <img src="/sin-tacc-seal.png" style="width:36px; height:36px; object-fit:contain;">
       <p style="font-size:13px; color:rgba(255,255,255,0.6); line-height:1.4;">Todos nuestros productos certificados Sin TACC, aptos para personas con celiaquía.</p>
     </div>
     <div class="product-grid">
@@ -4025,7 +4025,7 @@ function paintSinTaccSeal(ctx, w, h, callback){
     callback();
   };
   sealImg.onerror = callback;
-  sealImg.src = '/sin-tacc.png';
+  sealImg.src = '/sin-tacc-seal.png';
 }
 
 /* Recomposes the final image from: removed-bg source (or original) -> filter -> background -> seal.
