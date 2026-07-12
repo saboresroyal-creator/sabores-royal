@@ -609,6 +609,7 @@ let state = {
   chatUnread: 0,
   adminChatPhone: null,
   adminChatUnread: {},
+  adminClientDetailPhone: null,
   banners: [],
   novedades: [],
   ofertas: [],
@@ -1086,6 +1087,16 @@ async function apiUpdateOrderStatus(orderId, status){
   }catch(e){
     console.warn('Error actualizando estado:', e);
     toast('No se pudo actualizar el estado en el servidor: '+e.message, 'err');
+  }
+}
+
+async function apiDeleteOrder(orderId){
+  if(!IS_ADMIN_APP) return;
+  try{
+    await adminFetch('/orders?id=eq.'+encodeURIComponent(orderId), 'DELETE');
+  }catch(e){
+    console.warn('Error eliminando pedido:', e);
+    toast('No se pudo eliminar el pedido en el servidor: '+e.message, 'err');
   }
 }
 </script>
@@ -1574,13 +1585,18 @@ function renderCatalogResults(section){
   const sinTaccOnly = !!state.route.sinTaccOnly;
   const sinAzucarOnly = !!state.route.sinAzucarOnly;
   const cats = Object.keys(state.categories[section]||{});
-  let products = state.products.filter(p=>p.section===section);
+  // La tarjeta "Sin Azúcar" muestra todo producto marcado sin azúcar, esté
+  // filado en la sección "sinazucar" o en cualquier otra (natural, market, etc).
+  const baseProducts = section==="sinazucar"
+    ? state.products.filter(p=>p.sinAzucar || p.section===section)
+    : state.products.filter(p=>p.section===section);
+  let products = baseProducts;
   if(activeCat) products = products.filter(p=>p.cat===activeCat);
   if(sinTaccOnly) products = products.filter(p=>p.sinTacc);
   if(sinAzucarOnly) products = products.filter(p=>p.sinAzucar);
   if(q) products = products.filter(p=>p.name.toLowerCase().includes(q));
-  const hasSinTacc = state.products.some(p=>p.section===section && p.sinTacc);
-  const hasSinAzucar = state.products.some(p=>p.section===section && p.sinAzucar);
+  const hasSinTacc = baseProducts.some(p=>p.sinTacc);
+  const hasSinAzucar = baseProducts.some(p=>p.sinAzucar);
   return `
     <div class="chip-row">
       <button class="chip ${!activeCat && !sinTaccOnly && !sinAzucarOnly?'active':''}" onclick="setCatalogCat(null)">Todas</button>
@@ -1598,7 +1614,7 @@ function renderCatalogResults(section){
               ${(!p.sellByWeight && p.stock<=5 && p.stock>0) ? `<span class="pc-stock-low">¡Últimas ${p.stock}!</span>`:''}
               ${p.photo ? `<img src="${p.photo}" alt="">` : ic('box')}
               ${p.sinTacc ? `<img src="/sin-tacc.png" class="sintacc-badge" alt="Sin TACC">` : ''}
-              ${p.sinAzucar ? `<span style="position:absolute;top:6px;left:6px;background:#b8860b;color:#fff;font-size:8px;font-weight:800;border-radius:6px;padding:2px 5px;letter-spacing:.3px;">SIN AZÚCAR</span>` : ''}
+              ${p.sinAzucar ? `<span style="position:absolute;top:6px;left:6px;background:#b8860b;color:#fff;font-size:8px;font-weight:800;border-radius:6px;padding:2px 5px;letter-spacing:.3px;cursor:pointer;" onclick="event.stopPropagation(); nav('catalog',{section:'sinazucar'})">SIN AZÚCAR</span>` : ''}
             </div>
             <div class="pc-body">
               <h4>${p.name}</h4>
@@ -1695,7 +1711,7 @@ function renderProductDetail(id){
       <h2>${p.name}</h2>
       <div class="pd-price">${pdPriceHtml(p)}</div>
       ${!_isWholesale && p.displayQty && p.displayDiscount ? `<div style="background:${_hasDisp?'rgba(39,174,96,0.15)':'rgba(52,152,219,0.12)'};border:1px solid ${_hasDisp?'rgba(39,174,96,0.4)':'rgba(52,152,219,0.3)'};border-radius:10px;padding:10px 12px;margin:8px 0;font-size:13px;">${_hasDisp?`<span style="color:#2ecc71;font-weight:700;">✓ Precio display aplicado</span>`:`<span style="color:#5dade2;font-weight:700;">📦 Comprá ${p.displayQty} unidades</span> →`} <b>${money(Math.round(applyClientDiscount(_unitPr*(1-p.displayDiscount/100))))}/u</b> <span style="background:#e67e22;color:#fff;font-size:9px;font-weight:800;border-radius:6px;padding:2px 6px;">-${p.displayDiscount}%</span></div>` : ''}
-      ${p.sinAzucar ? `<span style="background:#b8860b;color:#fff;font-size:10px;font-weight:800;border-radius:8px;padding:3px 10px;display:inline-block;margin-bottom:6px;">SIN AZÚCAR · SUGAR FREE</span>` : ''}
+      ${p.sinAzucar ? `<span style="background:#b8860b;color:#fff;font-size:10px;font-weight:800;border-radius:8px;padding:3px 10px;display:inline-block;margin-bottom:6px;cursor:pointer;" onclick="nav('catalog',{section:'sinazucar'})">SIN AZÚCAR · SUGAR FREE</span>` : ''}
       <p class="pd-desc">${p.desc||''}</p>
       <div class="qty-row">
         <button class="qty-btn" onclick="changeDetailQty(-1)">−</button>
@@ -2206,7 +2222,7 @@ function bindDynamic(){
 /* =========================================================
    ADMIN PANEL
    ========================================================= */
-let adminPhotoDraft = { original:"", current:"", filter:"none", bgRemoved:false, bgRemovedImage:"", background:"none", sinTacc:false, brightness:100, contrast:100, saturation:100, rotation:0 };
+let adminPhotoDraft = { original:"", current:"", filter:"none", bgRemoved:false, bgRemovedImage:"", background:"none", brightness:100, contrast:100, saturation:100, rotation:0 };
 let aiProcessing = false;
 
 function openAdmin(){ nav("admin"); }
@@ -2290,6 +2306,7 @@ function renderAdmin(){
     ${tab==="productos" ? `<button class="fab" onclick="openProductModal(null)">${ic('plus')}</button>` : ""}
     ${tab==="comprobantes" ? `<button class="fab" onclick="openManualVoucherModal()">${ic('plus')}</button>` : ""}
     ${tab==="banners" ? `<button class="fab" onclick="${(state.adminBannerSub||'banners')==='novedades'?'openContentModal(\'novedad\',null)':(state.adminBannerSub||'banners')==='ofertas'?'openContentModal(\'oferta\',null)':'openBannerModal(null)'}">${ic('plus')}</button>` : ""}
+    ${tab==="chats" && !state.adminChatPhone ? `<button class="fab" onclick="openNewChatPicker()">${ic('plus')}</button>` : ""}
   </div>`;
 }
 async function tryAdminLogin(){
@@ -3232,9 +3249,35 @@ function openAdminChat(phone){
   setTimeout(()=>{ const c=document.getElementById('admin-chat-msgs'); if(c) c.scrollTop=c.scrollHeight; },100);
 }
 
+function openNewChatPicker(){
+  const list = Object.values(state.clients).sort((a,b)=>(a.name||'').localeCompare(b.name||''));
+  const overlay = document.createElement("div");
+  overlay.className = "modal-overlay";
+  overlay.id = "new-chat-picker-overlay";
+  overlay.innerHTML = `
+    <div class="modal-sheet">
+      <div class="modal-handle"></div>
+      <h3 class="modal-title">Iniciar chat con…</h3>
+      <div style="display:flex; flex-direction:column; gap:8px; max-height:55vh; overflow-y:auto;">
+        ${list.length===0 ? `<p style="font-size:13px; color:rgba(255,255,255,0.5);">Todavía no hay clientes registrados.</p>` : list.map(c=>`
+          <button class="btn-secondary" style="display:flex; align-items:center; gap:10px; justify-content:flex-start; padding:12px 14px;" onclick="closeNewChatPicker(); goToClientChat('${c.phone}');">
+            <span style="width:18px; height:18px; color:var(--gold2);">${ic('user')}</span>
+            <span style="flex:1; text-align:left;">${escapeHtml(c.name||c.phone)}<div style="font-size:11px; color:rgba(255,255,255,0.45);">${escapeHtml(c.phone)}</div></span>
+          </button>
+        `).join('')}
+      </div>
+      <button class="btn-secondary" style="margin-top:14px;" onclick="closeNewChatPicker()">Cancelar</button>
+    </div>
+  `;
+  document.body.appendChild(overlay);
+}
+function closeNewChatPicker(){
+  const el = document.getElementById("new-chat-picker-overlay");
+  if(el) el.remove();
+}
 function renderAdminChatDetail(phone){
   const msgs=(state.chatMessages||[]).filter(m=>m.client_phone===phone).sort((a,b)=>new Date(a.created_at)-new Date(b.created_at));
-  const name=msgs[0]?.client_name||phone;
+  const name=msgs[0]?.client_name || state.clients[phone]?.name || phone;
   return `
   <div style="display:flex;flex-direction:column;height:100%;min-height:0;">
     <div style="display:flex;align-items:center;gap:10px;padding:10px 14px;border-bottom:1px solid var(--glass-bd);flex-shrink:0;">
@@ -3313,12 +3356,15 @@ function renderAdminPedidos(){
       <div class="oc-actions" style="margin-top:8px;">
         ${existingVoucher
           ? `<button class="btn-secondary" style="flex:1; padding:9px; font-size:12px;" onclick="viewVoucher('${existingVoucher.id}')">${ic('receipt')} Ver comprobante #${existingVoucher.number}</button>`
-          : `<button class="btn-outline-gold" style="padding:9px; font-size:12px;" onclick="openOrderVoucherPicker('${o.id}')">${ic('receipt')} Generar comprobante</button>`
+          : `<button class="btn-outline-gold" style="flex:0 0 auto; width:50%; padding:5px; font-size:10px;" onclick="openOrderVoucherPicker('${o.id}')">${ic('receipt')} Generar comprobante</button>`
         }
       </div>
       <div class="oc-actions" style="margin-top:8px; gap:8px;">
         <button style="flex:1; padding:9px; font-size:12px; background:var(--glass); border:1px solid var(--glass-bd); border-radius:10px; color:var(--white); cursor:pointer;" onclick="printOrder('${o.id}')">🖨️ Imprimir / PDF</button>
         <button style="flex:1; padding:9px; font-size:12px; background:var(--glass); border:1px solid var(--glass-bd); border-radius:10px; color:var(--white); cursor:pointer;" onclick="shareOrder('${o.id}')">📤 Compartir</button>
+      </div>
+      <div class="oc-actions" style="margin-top:8px;">
+        <button style="flex:1; padding:9px; font-size:12px; background:rgba(231,76,60,0.12); border:1px solid rgba(231,76,60,0.4); border-radius:10px; color:#e74c3c; cursor:pointer;" onclick="deleteOrder('${o.id}')">${ic('trash')} Borrar pedido</button>
       </div>
     </div>
   `;}).join('');
@@ -3329,6 +3375,15 @@ function advanceOrderStatus(orderId){
   const flow = ["Pendiente","Listo","Entregado"];
   const idx = flow.indexOf(order.status);
   if(idx < flow.length-1){ order.status = flow[idx+1]; saveState(); render(); apiUpdateOrderStatus(orderId, order.status); }
+}
+function deleteOrder(orderId){
+  const order = state.orders.find(o=>o.id===orderId);
+  if(!order) return;
+  if(!confirm(`¿Borrar el pedido #${order.id} de ${order.customer.name}? Esta acción no se puede deshacer.`)) return;
+  state.orders = state.orders.filter(o=>o.id!==orderId);
+  saveState(); render();
+  apiDeleteOrder(orderId);
+  toast("Pedido eliminado", "ok");
 }
 function notifyOrderWA(orderId){
   const order = state.orders.find(o=>o.id===orderId);
@@ -3517,7 +3572,7 @@ function deleteProduct(id){
 /* ---------- PRODUCT MODAL (create/edit) ---------- */
 function openProductModal(id){
   const p = id ? state.products.find(pr=>pr.id===id) : null;
-  adminPhotoDraft = { original: p?p.photo:"", current: p?p.photo:"", filter:"none", bgRemoved:false, bgRemovedImage:"", background:"none", sinTacc:p?p.sinTacc||false:false, brightness:100, contrast:100, saturation:100, rotation:0 };
+  adminPhotoDraft = { original: p?p.photo:"", current: p?p.photo:"", filter:"none", bgRemoved:false, bgRemovedImage:"", background:"none", brightness:100, contrast:100, saturation:100, rotation:0 };
   const overlay = document.createElement("div");
   overlay.className = "modal-overlay";
   overlay.id = "product-modal-overlay";
@@ -3585,7 +3640,7 @@ function openProductModal(id){
             <span style="background:#b8860b; color:#fff; font-size:9px; font-weight:800; padding:2px 8px; border-radius:8px; letter-spacing:.4px;">SIN AZÚCAR</span>
             <span style="font-size:13.5px;">Sugar free</span>
           </div>
-          <button type="button" class="toggle ${p&&p.sinAzucar?'on':''}" id="pm-sinazucar-toggle" onclick="this.classList.toggle('on')"></button>
+          <button type="button" class="toggle ${p&&p.sinAzucar?'on':''}" id="pm-sinazucar-toggle" onclick="toggleSinAzucarField()"></button>
         </div>
       </div>
 
@@ -3629,6 +3684,14 @@ function onModalCatChange(){
   const section = document.getElementById("pm-section").value;
   const cat = document.getElementById("pm-cat").value;
   document.getElementById("pm-sub").innerHTML = renderSubcatOptions(section, cat, null);
+}
+function toggleSinAzucarField(){
+  const btn = document.getElementById("pm-sinazucar-toggle");
+  const isOn = btn.classList.toggle("on");
+  if(isOn){
+    document.getElementById("pm-section").value = "sinazucar";
+    onModalSectionChange();
+  }
 }
 function toggleSellByWeightField(){
   const btn = document.getElementById("pm-sellbyweight-toggle");
@@ -3691,19 +3754,41 @@ function saveProductModal(id){
   toast("Producto guardado", "ok");
 }
 
-/* ---------- PHOTO UPLOAD + FILTERS + AI BG REMOVAL + BACKGROUNDS + SIN TACC SEAL ---------- */
+/* ---------- PHOTO UPLOAD + FILTERS + AI BG REMOVAL + BACKGROUNDS ---------- */
+// Redimensiona y comprime la foto original (las fotos de celular pueden pesar
+// 10-20MB) para que la subida no falle por el tamaño del archivo/la conexión.
+function downscaleImageDataUrl(dataUrl, maxDim=1600, quality=0.85){
+  return new Promise((resolve, reject)=>{
+    const img = new Image();
+    img.onload = ()=>{
+      let w = img.width, h = img.height;
+      if(w > maxDim || h > maxDim){
+        if(w >= h){ h = Math.round(h * maxDim/w); w = maxDim; }
+        else { w = Math.round(w * maxDim/h); h = maxDim; }
+      }
+      const canvas = document.createElement("canvas");
+      canvas.width = w; canvas.height = h;
+      canvas.getContext("2d").drawImage(img, 0, 0, w, h);
+      resolve(canvas.toDataURL("image/jpeg", quality));
+    };
+    img.onerror = reject;
+    img.src = dataUrl;
+  });
+}
 function onPhotoSelected(event){
   const file = event.target.files[0];
   if(!file) return;
   const reader = new FileReader();
-  reader.onload = (e)=>{
-    adminPhotoDraft.original = e.target.result;
-    adminPhotoDraft.current = e.target.result;
+  reader.onload = async (e)=>{
+    let dataUrl = e.target.result;
+    try{ dataUrl = await downscaleImageDataUrl(dataUrl); }
+    catch(err){ console.warn("No se pudo optimizar la foto, se usa el original:", err); }
+    adminPhotoDraft.original = dataUrl;
+    adminPhotoDraft.current = dataUrl;
     adminPhotoDraft.filter = "none";
     adminPhotoDraft.bgRemoved = false;
     adminPhotoDraft.bgRemovedImage = "";
     adminPhotoDraft.background = "none";
-    adminPhotoDraft.sinTacc = false;
     adminPhotoDraft.brightness = 100;
     adminPhotoDraft.contrast = 100;
     adminPhotoDraft.saturation = 100;
@@ -3904,35 +3989,7 @@ function renderPhotoPreview(){
         `).join('')}
       </div>
     ` : ''}
-
-    <div class="settings-row" style="margin:14px 16px 0; border-radius:12px; background:rgba(46,125,79,0.12); border:1.5px solid rgba(46,125,79,0.4);">
-      <div style="display:flex; align-items:center; gap:8px;">
-        <span style="background:#2e7d4f; color:#fff; font-size:9px; font-weight:800; padding:2px 8px; border-radius:8px;">SIN TACC</span>
-        <span style="font-size:13px;">Sello en la foto</span>
-      </div>
-      <button class="toggle ${d.sinTacc?'on':''}" onclick="togglePhotoSinTacc()"></button>
-    </div>
   `;
-}
-
-function paintSinTaccSeal(ctx, w, h, callback){
-  const s    = Math.min(w, h);
-  const ox   = (w - s) / 2;
-  const oy   = (h - s) / 2;
-  const size = s * 0.32;
-  const pad  = s * 0.02;
-  const x = ox + s - size - pad;
-  const y = oy + s - size - pad;
-  const sealImg = new Image();
-  sealImg.onload = ()=>{
-    ctx.save();
-    ctx.globalAlpha = 0.82;
-    ctx.drawImage(sealImg, x, y, size, size);
-    ctx.restore();
-    callback();
-  };
-  sealImg.onerror = callback;
-  sealImg.src = '/sin-tacc.png';
 }
 
 /* Renders the small background-swatch thumbnails inside the modal using the
@@ -3972,16 +4029,13 @@ function recomposePhotoDraft(){
       ctx.drawImage(img, 0, 0);
     }
     ctx.filter = "none";
-    const finalize = ()=>{
-      d.current = canvas.toDataURL("image/png");
-      const container = document.getElementById("photo-preview-container");
-      if(container){
-        container.innerHTML = renderPhotoPreview();
-        if(d.bgRemoved) renderBackgroundThumbnails();
-      }
-    };
-    if(d.sinTacc){ paintSinTaccSeal(ctx, w, h, finalize); }
-    else { finalize(); }
+    const needsAlpha = d.bgRemoved && (d.background||"none")==="none";
+    d.current = needsAlpha ? canvas.toDataURL("image/png") : canvas.toDataURL("image/jpeg", 0.85);
+    const container = document.getElementById("photo-preview-container");
+    if(container){
+      container.innerHTML = renderPhotoPreview();
+      if(d.bgRemoved) renderBackgroundThumbnails();
+    }
   };
   img.src = baseSrc;
 }
@@ -4010,10 +4064,6 @@ function adjPhoto(prop, val){
     img.style.filter = [filterCss, `brightness(${d.brightness}%) contrast(${d.contrast}%) saturate(${d.saturation}%)`].filter(Boolean).join(' ');
   }
 }
-function togglePhotoSinTacc(){
-  adminPhotoDraft.sinTacc = !adminPhotoDraft.sinTacc;
-  recomposePhotoDraft();
-}
 async function removePhotoBackgroundAI(){
   if(!adminPhotoDraft.current){ toast("Subí una foto primero", "err"); return; }
   if(adminPhotoDraft.bgRemoved){ toast("El fondo ya fue quitado", "ok"); return; }
@@ -4029,7 +4079,6 @@ async function removePhotoBackgroundAI(){
       adminPhotoDraft.bgRemoved = true;
       adminPhotoDraft.bgRemovedImage = e.target.result;
       adminPhotoDraft.background = "none";
-      adminPhotoDraft.sinTacc = false;
       aiProcessing = false;
       recomposePhotoDraft();
       toast("Fondo eliminado — elegí un fondo nuevo si querés", "ok");
@@ -4092,13 +4141,14 @@ function deleteSubcat(section, cat, sub){
 
 /* ---------- ADMIN: CLIENTES ---------- */
 function renderAdminClientes(){
+  if(state.adminClientDetailPhone) return renderAdminClientDetail(state.adminClientDetailPhone);
   const list = Object.values(state.clients).sort((a,b)=>b.points-a.points);
   if(list.length===0){
     return `<div class="empty-state">${ic('user')}<p>Todavía no hay clientes registrados.</p></div>`;
   }
   return list.map((c,i)=>{
     const tier = tierFor(c.points);
-    return `<div class="client-row">
+    return `<div class="client-row" style="cursor:pointer;" onclick="openAdminClientDetail('${c.phone}')">
       <div class="client-rank">${i+1}</div>
       <div class="client-row-body">
         <h4>${escapeHtml(c.name)} ${c.wholesale?`<span class="tier-badge" style="background:rgba(60,150,220,0.25); color:#6db8e8;">Mayorista</span>`:''}</h4>
@@ -4106,11 +4156,84 @@ function renderAdminClientes(){
         </p>
       </div>
       <div class="client-pts" style="display:flex; align-items:center; gap:5px;">${c.points} <img src="${CROWN_DATA_URL}" style="width:15px; height:15px; object-fit:contain;"></div>
-      ${state.adminIsSuperAdmin ? `<button class="icon-btn" style="flex:none; margin-left:8px; ${c.discountPct?'color:var(--gold2); border-color:var(--gold2);':''}" onclick="editClientDiscount('${c.phone}')" title="Descuento especial">%</button>` : ''}
-      <button class="icon-btn" style="flex:none; margin-left:8px; ${c.wholesale?'color:#6db8e8; border-color:#6db8e8;':''}" onclick="toggleClientWholesale('${c.phone}')" title="Marcar/desmarcar mayorista">${ic('package')}</button>
-      <button class="icon-btn" style="flex:none; margin-left:8px;" onclick="confirmDeleteClient('${c.phone}')">${ic('trash')}</button>
+      ${state.adminIsSuperAdmin ? `<button class="icon-btn" style="flex:none; margin-left:8px; ${c.discountPct?'color:var(--gold2); border-color:var(--gold2);':''}" onclick="event.stopPropagation(); editClientDiscount('${c.phone}')" title="Descuento especial">%</button>` : ''}
+      <button class="icon-btn" style="flex:none; margin-left:8px; ${c.wholesale?'color:#6db8e8; border-color:#6db8e8;':''}" onclick="event.stopPropagation(); toggleClientWholesale('${c.phone}')" title="Marcar/desmarcar mayorista">${ic('package')}</button>
+      <button class="icon-btn" style="flex:none; margin-left:8px;" onclick="event.stopPropagation(); confirmDeleteClient('${c.phone}')">${ic('trash')}</button>
     </div>`;
   }).join('');
+}
+function openAdminClientDetail(phone){
+  state.adminClientDetailPhone = phone;
+  render();
+}
+function closeAdminClientDetail(){
+  state.adminClientDetailPhone = null;
+  render();
+}
+function renderAdminClientDetail(phone){
+  const c = state.clients[phone];
+  if(!c){ state.adminClientDetailPhone = null; return renderAdminClientes(); }
+  const tier = tierFor(c.points);
+  const clientOrders = state.orders.filter(o=>o.customer.phone===phone).sort((a,b)=>new Date(b.date)-new Date(a.date));
+  const totalGastado = clientOrders.reduce((s,o)=>s+(o.total||0), 0);
+  return `
+    <div style="padding:4px 16px 10px; display:flex; align-items:center; gap:8px;">
+      <button onclick="closeAdminClientDetail()" style="background:none; border:none; color:var(--white); cursor:pointer; padding:4px 8px; font-size:18px;">←</button>
+      <h3 style="font-size:15px; color:var(--white);">Detalle del cliente</h3>
+    </div>
+    <div style="margin:0 16px 14px; padding:16px; border-radius:14px; background:var(--glass); border:1px solid var(--glass-bd);">
+      <h4 style="font-size:16px; color:var(--white); margin-bottom:4px;">${escapeHtml(c.name||'Sin nombre')} ${c.wholesale?`<span class="tier-badge" style="background:rgba(60,150,220,0.25); color:#6db8e8;">Mayorista</span>`:''}</h4>
+      <div style="display:flex; align-items:center; gap:5px; margin-bottom:10px;">
+        <span class="tier-badge tier-${tier.key}">${tier.label}</span>
+        <span style="display:inline-flex; align-items:center; gap:4px; color:var(--gold2); font-size:12.5px;">${c.points} <img src="${CROWN_DATA_URL}" style="width:14px; height:14px; object-fit:contain;"></span>
+        ${c.discountPct?`<span style="color:var(--gold2); font-weight:600; font-size:12.5px;">· ${c.discountPct}% desc. especial</span>`:''}
+      </div>
+      <div style="font-size:13px; color:rgba(255,255,255,0.75); line-height:1.9;">
+        <div>${ic('phone')} ${escapeHtml(c.phone)}</div>
+        ${c.email?`<div>✉️ ${escapeHtml(c.email)}</div>`:''}
+        ${c.address?`<div>📍 ${escapeHtml(c.address)}${c.city?`, ${escapeHtml(c.city)}`:''}</div>`:''}
+        ${c.doc?`<div>🪪 DNI/CUIT ${escapeHtml(c.doc)}</div>`:''}
+      </div>
+      <div style="display:flex; gap:8px; margin-top:14px;">
+        <button class="btn-outline-gold" style="flex:1; padding:10px; font-size:13px;" onclick="goToClientChat('${c.phone}')">${ic('chat')} Chatear</button>
+        <button class="icon-btn" style="flex:none; ${c.wholesale?'color:#6db8e8; border-color:#6db8e8;':''}" onclick="toggleClientWholesale('${c.phone}')" title="Marcar/desmarcar mayorista">${ic('package')}</button>
+        ${state.adminIsSuperAdmin ? `<button class="icon-btn" style="flex:none; ${c.discountPct?'color:var(--gold2); border-color:var(--gold2);':''}" onclick="editClientDiscount('${c.phone}')" title="Descuento especial">%</button>` : ''}
+        <button class="icon-btn" style="flex:none;" onclick="confirmDeleteClient('${c.phone}')">${ic('trash')}</button>
+      </div>
+    </div>
+    <div style="margin:0 16px 8px; display:flex; gap:10px;">
+      <div style="flex:1; background:var(--glass); border:1px solid var(--glass-bd); border-radius:12px; padding:10px 14px;">
+        <div style="font-size:11px; color:rgba(255,255,255,0.5); text-transform:uppercase;">Pedidos</div>
+        <div style="font-size:18px; font-weight:700; color:var(--gold2);">${clientOrders.length}</div>
+      </div>
+      <div style="flex:1; background:var(--glass); border:1px solid var(--glass-bd); border-radius:12px; padding:10px 14px;">
+        <div style="font-size:11px; color:rgba(255,255,255,0.5); text-transform:uppercase;">Total gastado</div>
+        <div style="font-size:18px; font-weight:700; color:var(--gold2);">${money(totalGastado)}</div>
+      </div>
+    </div>
+    <h3 style="color:var(--gold2); font-size:14px; margin:14px 16px 4px;">Historial de pedidos</h3>
+    ${clientOrders.length===0
+      ? `<p style="font-size:13px; color:rgba(255,255,255,0.4); margin:0 16px 18px;">Todavía no hizo pedidos.</p>`
+      : clientOrders.map(o=>`
+        <div class="order-card">
+          <div class="oc-head">
+            <span class="oc-id">#${o.id} · ${new Date(o.date).toLocaleDateString('es-AR')}</span>
+            <span class="status-pill status-${o.status.toLowerCase()}">${o.status}</span>
+          </div>
+          <div class="oc-items">${o.items.map(it=>formatOrderItemLabel(it)).join(', ')}</div>
+          <div style="font-weight:700; color:var(--gold2);">${money(o.total)}</div>
+        </div>
+      `).join('')
+    }
+  `;
+}
+function goToClientChat(phone){
+  state.adminClientDetailPhone = null;
+  state.adminTab = 'chats';
+  state.adminChatPhone = phone;
+  if(state.adminChatUnread) state.adminChatUnread[phone] = 0;
+  render();
+  setTimeout(()=>{ const c=document.getElementById('admin-chat-msgs'); if(c) c.scrollTop=c.scrollHeight; },100);
 }
 function toggleClientWholesale(phone){
   const c = state.clients[phone];
