@@ -1614,7 +1614,6 @@ function renderCatalogResults(section){
               ${(!p.sellByWeight && p.stock<=5 && p.stock>0) ? `<span class="pc-stock-low">¡Últimas ${p.stock}!</span>`:''}
               ${p.photo ? `<img src="${p.photo}" alt="">` : ic('box')}
               ${p.sinTacc ? `<img src="/sin-tacc.png" class="sintacc-badge" alt="Sin TACC">` : ''}
-              ${p.sinAzucar ? `<span style="position:absolute;top:6px;left:6px;background:#b8860b;color:#fff;font-size:8px;font-weight:800;border-radius:6px;padding:2px 5px;letter-spacing:.3px;cursor:pointer;" onclick="event.stopPropagation(); nav('catalog',{section:'sinazucar'})">SIN AZÚCAR</span>` : ''}
             </div>
             <div class="pc-body">
               <h4>${p.name}</h4>
