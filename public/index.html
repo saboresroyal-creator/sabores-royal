@@ -2218,7 +2218,7 @@ function bindDynamic(){
 /* =========================================================
    ADMIN PANEL
    ========================================================= */
-let adminPhotoDraft = { original:"", current:"", filter:"none", bgRemoved:false, bgRemovedImage:"", background:"none", brightness:100, contrast:100, saturation:100, rotation:0 };
+let adminPhotoDraft = { original:"", current:"", filter:"none", bgRemoved:false, bgRemovedImage:"", background:"none", sinTacc:false, brightness:100, contrast:100, saturation:100, rotation:0 };
 let aiProcessing = false;
 
 function openAdmin(){ nav("admin"); }
@@ -3568,7 +3568,7 @@ function deleteProduct(id){
 /* ---------- PRODUCT MODAL (create/edit) ---------- */
 function openProductModal(id){
   const p = id ? state.products.find(pr=>pr.id===id) : null;
-  adminPhotoDraft = { original: p?p.photo:"", current: p?p.photo:"", filter:"none", bgRemoved:false, bgRemovedImage:"", background:"none", brightness:100, contrast:100, saturation:100, rotation:0 };
+  adminPhotoDraft = { original: p?p.photo:"", current: p?p.photo:"", filter:"none", bgRemoved:false, bgRemovedImage:"", background:"none", sinTacc:false, brightness:100, contrast:100, saturation:100, rotation:0 };
   const overlay = document.createElement("div");
   overlay.className = "modal-overlay";
   overlay.id = "product-modal-overlay";
@@ -3785,6 +3785,7 @@ function onPhotoSelected(event){
     adminPhotoDraft.bgRemoved = false;
     adminPhotoDraft.bgRemovedImage = "";
     adminPhotoDraft.background = "none";
+    adminPhotoDraft.sinTacc = false;
     adminPhotoDraft.brightness = 100;
     adminPhotoDraft.contrast = 100;
     adminPhotoDraft.saturation = 100;
@@ -3985,6 +3986,14 @@ function renderPhotoPreview(){
         `).join('')}
       </div>
     ` : ''}
+
+    <div class="settings-row" style="margin:14px 16px 0; border-radius:12px; background:rgba(46,125,79,0.12); border:1.5px solid rgba(46,125,79,0.4);">
+      <div style="display:flex; align-items:center; gap:8px;">
+        <span style="background:#2e7d4f; color:#fff; font-size:9px; font-weight:800; padding:2px 8px; border-radius:8px;">SIN TACC</span>
+        <span style="font-size:13px;">Sello en la foto</span>
+      </div>
+      <button class="toggle ${d.sinTacc?'on':''}" onclick="togglePhotoSinTacc()"></button>
+    </div>
   `;
 }
 
@@ -3997,6 +4006,26 @@ function renderBackgroundThumbnails(){
     const ctx = canvas.getContext("2d");
     paintBackground(ctx, bg.key, canvas.width, canvas.height);
   });
+}
+
+function paintSinTaccSeal(ctx, w, h, callback){
+  const s    = Math.min(w, h);
+  const ox   = (w - s) / 2;
+  const oy   = (h - s) / 2;
+  const size = s * 0.32;
+  const pad  = s * 0.02;
+  const x = ox + s - size - pad;
+  const y = oy + s - size - pad;
+  const sealImg = new Image();
+  sealImg.onload = ()=>{
+    ctx.save();
+    ctx.globalAlpha = 0.82;
+    ctx.drawImage(sealImg, x, y, size, size);
+    ctx.restore();
+    callback();
+  };
+  sealImg.onerror = callback;
+  sealImg.src = '/sin-tacc.png';
 }
 
 /* Recomposes the final image from: removed-bg source (or original) -> filter -> background -> seal.
@@ -4025,13 +4054,17 @@ function recomposePhotoDraft(){
       ctx.drawImage(img, 0, 0);
     }
     ctx.filter = "none";
-    const needsAlpha = d.bgRemoved && (d.background||"none")==="none";
-    d.current = needsAlpha ? canvas.toDataURL("image/png") : canvas.toDataURL("image/jpeg", 0.85);
-    const container = document.getElementById("photo-preview-container");
-    if(container){
-      container.innerHTML = renderPhotoPreview();
-      if(d.bgRemoved) renderBackgroundThumbnails();
-    }
+    const finalize = ()=>{
+      const needsAlpha = d.bgRemoved && (d.background||"none")==="none";
+      d.current = needsAlpha ? canvas.toDataURL("image/png") : canvas.toDataURL("image/jpeg", 0.85);
+      const container = document.getElementById("photo-preview-container");
+      if(container){
+        container.innerHTML = renderPhotoPreview();
+        if(d.bgRemoved) renderBackgroundThumbnails();
+      }
+    };
+    if(d.sinTacc){ paintSinTaccSeal(ctx, w, h, finalize); }
+    else { finalize(); }
   };
   img.src = baseSrc;
 }
@@ -4060,6 +4093,10 @@ function adjPhoto(prop, val){
     img.style.filter = [filterCss, `brightness(${d.brightness}%) contrast(${d.contrast}%) saturate(${d.saturation}%)`].filter(Boolean).join(' ');
   }
 }
+function togglePhotoSinTacc(){
+  adminPhotoDraft.sinTacc = !adminPhotoDraft.sinTacc;
+  recomposePhotoDraft();
+}
 async function removePhotoBackgroundAI(){
   if(!adminPhotoDraft.current){ toast("Subí una foto primero", "err"); return; }
   if(adminPhotoDraft.bgRemoved){ toast("El fondo ya fue quitado", "ok"); return; }
@@ -4075,6 +4112,7 @@ async function removePhotoBackgroundAI(){
       adminPhotoDraft.bgRemoved = true;
       adminPhotoDraft.bgRemovedImage = e.target.result;
       adminPhotoDraft.background = "none";
+      adminPhotoDraft.sinTacc = false;
       aiProcessing = false;
       recomposePhotoDraft();
       toast("Fondo eliminado — elegí un fondo nuevo si querés", "ok");
