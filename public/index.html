@@ -3721,9 +3721,11 @@ function updateProductPriceInline(productId, field, value){
 }
 function deleteProduct(id){
   const toDelete = state.products.find(p=>p.id===id);
+  if(!toDelete) return;
+  if(!confirm(`¿Eliminar el producto "${toDelete.name}"? Esta acción no se puede deshacer.`)) return;
   state.products = state.products.filter(p=>p.id!==id);
   saveState(); render();
-  if(toDelete) apiDeleteProduct(toDelete);
+  apiDeleteProduct(toDelete);
 }
 
 /* ---------- PRODUCT MODAL (create/edit) ---------- */
@@ -4320,6 +4322,7 @@ function addCategory(section){
   saveState(); render();
 }
 function deleteCategory(section, cat){
+  if(!confirm(`¿Eliminar la categoría "${cat}" y todas sus subcategorías?`)) return;
   delete state.categories[section][cat];
   saveState(); render();
 }
@@ -4331,6 +4334,7 @@ function addSubcat(section, cat){
   saveState(); render();
 }
 function deleteSubcat(section, cat, sub){
+  if(!confirm(`¿Eliminar la subcategoría "${sub}"?`)) return;
   state.categories[section][cat] = state.categories[section][cat].filter(s=>s!==sub);
   saveState(); render();
 }
