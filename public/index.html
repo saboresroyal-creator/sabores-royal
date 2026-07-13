@@ -615,11 +615,13 @@ let state = {
   bannerOfertas: null,
   adminBannerSub: 'banners',
   cmpTab: 'comparar',
+  rentLedger: {monthlyAmount:1500000, movements:[]},
 };
 
 let cmpDB = {proveedores:[], listas:[]};
 let cmpLoaded = false;
 let _cmpImpData = null;
+let rentLoaded = false;
 
 function saveState(){
   try{ localStorage.setItem(STORAGE_KEY, JSON.stringify(state)); }catch(e){}
@@ -2257,10 +2259,11 @@ function renderAdmin(){
     {key:"sugerencias",   label:"Sugerencias"+(unreadCount>0?` (${unreadCount})`:'')},
     {key:"config",        label:"Configuración"},
     {key:"comparador",    label:"Comparador"},
+    {key:"alquiler",      label:"Alquiler"},
   ];
   const tabs = state.adminIsSuperAdmin
     ? ALL_TABS
-    : ALL_TABS.filter(t => t.key !== 'config' && t.key !== 'comparador' && (state.adminLoggedPerms||[]).includes(t.key));
+    : ALL_TABS.filter(t => t.key !== 'config' && t.key !== 'comparador' && t.key !== 'alquiler' && (state.adminLoggedPerms||[]).includes(t.key));
   const tab = tabs.find(t=>t.key===state.adminTab) ? state.adminTab : (tabs[0]?.key||"pedidos");
   return `
   <div class="screen">
@@ -2298,6 +2301,7 @@ function renderAdmin(){
       ${tab==="sugerencias" ? renderAdminSugerencias() : ""}
       ${tab==="config" ? renderAdminConfig() : ""}
       ${tab==="comparador" ? renderAdminComparador() : ""}
+      ${tab==="alquiler" ? renderAdminAlquiler() : ""}
     </div>
     ${tab==="productos" ? `<button class="fab" onclick="openProductModal(null)">${ic('plus')}</button>` : ""}
     ${tab==="comprobantes" ? `<button class="fab" onclick="openManualVoucherModal()">${ic('plus')}</button>` : ""}
@@ -2886,6 +2890,163 @@ function cmpImportBackup(input){
     }catch(err){ toast('Error al restaurar: '+err.message,'err'); }
   };
   r.readAsText(f,'UTF-8');
+}
+
+/* =========================================================
+   ALQUILER — seguimiento de deuda mensual (solo superadmin)
+   Se guarda como un único registro en app_settings (clave
+   'rent_ledger'), excluido de la lectura pública — igual que
+   sub_admins/orders_list. El cargo mensual se agrega solo: al
+   entrar a la pestaña se completan los meses faltantes desde el
+   último movimiento hasta el mes actual.
+   ========================================================= */
+const RENT_MONTH_NAMES = ['enero','febrero','marzo','abril','mayo','junio','julio','agosto','septiembre','octubre','noviembre','diciembre'];
+function rentId(){ return 'r'+Date.now().toString(36)+Math.random().toString(36).slice(2,8); }
+function rentAddMonths(period, n){
+  const [y,m] = period.split('-').map(Number);
+  const d = new Date(y, m-1+n, 1);
+  return d.getFullYear()+'-'+String(d.getMonth()+1).padStart(2,'0');
+}
+function rentCurrentPeriod(){
+  const d = new Date();
+  return d.getFullYear()+'-'+String(d.getMonth()+1).padStart(2,'0');
+}
+function rentMonthLabel(period){
+  const [y,m] = period.split('-').map(Number);
+  return RENT_MONTH_NAMES[m-1]+' '+y;
+}
+function rentBalance(){
+  return (state.rentLedger.movements||[]).reduce((sum,m)=> sum + (m.type==='pago' ? -m.amount : m.amount), 0);
+}
+// Completa los meses sin cargar entre el último movimiento y el mes
+// actual. Idempotente: cada mes queda marcado por su "period", así que
+// entrar varias veces al mes no duplica el cargo.
+function ensureRentAutoCharge(){
+  const ledger = state.rentLedger;
+  if(!ledger.movements || !ledger.movements.length) return;
+  const periods = ledger.movements.map(m=>m.period).filter(Boolean).sort();
+  if(!periods.length) return;
+  const chargedPeriods = new Set(periods);
+  const cp = rentCurrentPeriod();
+  let p = rentAddMonths(periods[0], 1);
+  let added = false;
+  while(p <= cp){
+    if(!chargedPeriods.has(p)){
+      ledger.movements.push({id:rentId(), date:p+'-01', type:'cargo', period:p, amount:ledger.monthlyAmount, note:'Alquiler de '+rentMonthLabel(p)});
+      chargedPeriods.add(p);
+      added = true;
+    }
+    p = rentAddMonths(p, 1);
+  }
+  if(added){ saveState(); apiSaveRent(); }
+}
+async function apiSyncRent(){
+  try{
+    const rows = await adminFetch('/app_settings?setting_key=eq.rent_ledger&select=setting_value', 'GET');
+    const row = rows && rows[0];
+    if(row){
+      const parsed = JSON.parse(row.setting_value);
+      state.rentLedger = Object.assign({monthlyAmount:1500000, movements:[]}, parsed);
+    }
+    rentLoaded = true;
+    ensureRentAutoCharge();
+    saveState();
+    render();
+  }catch(e){
+    rentLoaded = true;
+    toast('Error cargando alquiler: '+e.message, 'err');
+    render();
+  }
+}
+async function apiSaveRent(){
+  try{
+    const val = JSON.stringify(state.rentLedger);
+    const existing = await adminFetch('/app_settings?setting_key=eq.rent_ledger&select=id', 'GET');
+    if(existing && existing.length>0){
+      await adminFetch('/app_settings?setting_key=eq.rent_ledger', 'PATCH', {setting_value: val});
+    }else{
+      await adminFetch('/app_settings', 'POST', {setting_key:'rent_ledger', setting_value: val});
+    }
+  }catch(e){ toast('Error guardando alquiler: '+e.message, 'err'); }
+}
+function updateRentMonthlyAmount(val){
+  const n = Number(val);
+  if(!n || n<=0) return;
+  state.rentLedger.monthlyAmount = n;
+  saveState();
+  apiSaveRent();
+}
+function openRentPaymentModal(){
+  const overlay = document.createElement("div");
+  overlay.className = "modal-overlay";
+  overlay.id = "rent-payment-modal-overlay";
+  const today = new Date().toISOString().slice(0,10);
+  overlay.innerHTML = `
+    <div class="modal-sheet">
+      <div class="modal-handle"></div>
+      <h3 class="modal-title">Registrar pago de alquiler</h3>
+      <div class="form-group"><label>Monto</label><input id="rent-pay-amount" type="number" placeholder="Ej: 500000"></div>
+      <div class="form-group"><label>Fecha</label><input id="rent-pay-date" type="date" value="${today}"></div>
+      <div class="form-group"><label>Nota (opcional)</label><input id="rent-pay-note" placeholder="Ej: Transferencia"></div>
+      <div style="display:flex; gap:10px; margin-top:6px;">
+        <button class="btn-secondary" style="flex:1;" onclick="closeRentPaymentModal()">Cancelar</button>
+        <button class="btn-primary" style="flex:1;" onclick="saveRentPayment()">Guardar</button>
+      </div>
+    </div>`;
+  document.body.appendChild(overlay);
+}
+function closeRentPaymentModal(){ const el=document.getElementById("rent-payment-modal-overlay"); if(el) el.remove(); }
+async function saveRentPayment(){
+  const amount = Number(document.getElementById("rent-pay-amount").value);
+  const date = document.getElementById("rent-pay-date").value;
+  const note = document.getElementById("rent-pay-note").value.trim();
+  if(!amount || amount<=0){ toast("Ingresá un monto válido", "err"); return; }
+  if(!date){ toast("Ingresá una fecha", "err"); return; }
+  state.rentLedger.movements.push({id:rentId(), date, type:'pago', amount, note: note||'Pago de alquiler'});
+  closeRentPaymentModal();
+  saveState(); render();
+  try{ await apiSaveRent(); toast("Pago registrado", "ok"); }
+  catch(e){ toast("Error al guardar: "+e.message, "err"); }
+}
+async function deleteRentMovement(id){
+  if(!confirm("¿Eliminar este movimiento?")) return;
+  state.rentLedger.movements = state.rentLedger.movements.filter(m=>m.id!==id);
+  saveState(); render();
+  try{ await apiSaveRent(); } catch(e){ toast("Error al guardar: "+e.message, "err"); }
+}
+function renderAdminAlquiler(){
+  if(!rentLoaded){ apiSyncRent(); return `<div style="padding:40px;text-align:center;color:rgba(255,255,255,0.4);">Cargando...</div>`; }
+  const ledger = state.rentLedger;
+  const balance = rentBalance();
+  const movs = [...(ledger.movements||[])].sort((a,b)=> (a.date||'').localeCompare(b.date||''));
+  let running = 0;
+  const rows = movs.map(m=>{ running += (m.type==='pago' ? -m.amount : m.amount); return Object.assign({}, m, {running}); });
+  return `
+  <div style="padding:16px;">
+    <div style="background:var(--glass); border:1px solid var(--glass-bd); border-radius:16px; padding:20px; text-align:center; margin-bottom:16px;">
+      <div style="font-size:12px; color:rgba(255,255,255,0.5); text-transform:uppercase; letter-spacing:.5px;">Deuda actual de alquiler</div>
+      <div style="font-size:32px; font-weight:800; color:${balance>0?'var(--danger)':'var(--ok)'}; margin:8px 0;">${money(balance)}</div>
+      <div style="font-size:12px; color:rgba(255,255,255,0.4); display:flex; align-items:center; justify-content:center; gap:6px;">
+        Cuota mensual:
+        <input type="number" value="${ledger.monthlyAmount}" onchange="updateRentMonthlyAmount(this.value)"
+          style="width:120px; background:var(--glass); border:1px solid var(--glass-bd); border-radius:8px; color:var(--white); padding:4px 8px; font-size:12px; text-align:center;">
+      </div>
+    </div>
+    <button class="btn-primary" style="width:100%; margin-bottom:16px;" onclick="openRentPaymentModal()">+ Registrar pago</button>
+    <div style="font-size:13px; font-weight:700; color:rgba(255,255,255,0.6); margin-bottom:8px; text-transform:uppercase; letter-spacing:.4px;">Movimientos</div>
+    ${rows.length===0 ? `<div style="padding:30px; text-align:center; color:rgba(255,255,255,0.4);">Sin movimientos todavía.</div>` : rows.slice().reverse().map(m=>`
+      <div style="display:flex; justify-content:space-between; align-items:center; gap:10px; padding:12px 14px; background:var(--glass); border:1px solid var(--glass-bd); border-radius:12px; margin-bottom:8px;">
+        <div style="flex:1; min-width:0;">
+          <div style="font-size:13px; font-weight:600;">${escapeHtml(m.note||(m.type==='pago'?'Pago':'Cargo'))}</div>
+          <div style="font-size:11px; color:rgba(255,255,255,0.4);">${m.date}</div>
+        </div>
+        <div style="text-align:right;">
+          <div style="font-size:14px; font-weight:700; color:${m.type==='pago'?'var(--ok)':'var(--danger)'};">${m.type==='pago'?'-':'+'}${money(m.amount)}</div>
+          <div style="font-size:11px; color:rgba(255,255,255,0.35);">Saldo: ${money(m.running)}</div>
+        </div>
+        ${m.type==='pago' ? `<button class="icon-btn" onclick="deleteRentMovement('${m.id}')">${ic('trash')}</button>` : ''}
+      </div>`).join('')}
+  </div>`;
 }
 
 /* ---------- ADMIN: GESTIÓN DE SUB-ADMINS ---------- */
