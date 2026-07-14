@@ -1,0 +1,1749 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Sabores Royal — Dashboard de Cajas</title>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/Chart.js/4.4.1/chart.umd.min.js"></script>
+<style>
+@import url('https://fonts.googleapis.com/css2?family=DM+Mono:wght@400;500&family=Syne:wght@700;800&family=DM+Sans:wght@300;400;500;600&display=swap');
+
+:root {
+  --bg: #0d0d0f;
+  --surface: #16161a;
+  --surface2: #1e1e24;
+  --border: #2a2a32;
+  --gold: #c5a028;
+  --gold-light: #e8be3a;
+  --gold-dim: rgba(197,160,40,0.12);
+  --blue: #1a2a5e;
+  --green: #22c55e;
+  --green-dim: rgba(34,197,94,0.12);
+  --red: #ef4444;
+  --red-dim: rgba(239,68,68,0.12);
+  --yellow: #f59e0b;
+  --yellow-dim: rgba(245,158,11,0.12);
+  --purple: #a855f7;
+  --purple-dim: rgba(168,85,247,0.12);
+  --text: #e8e8f0;
+  --muted: #6b6b7e;
+  --mono: 'DM Mono', monospace;
+  --sans: 'DM Sans', sans-serif;
+  --display: 'Syne', sans-serif;
+}
+
+* { margin:0; padding:0; box-sizing:border-box; }
+
+body {
+  background: var(--bg);
+  color: var(--text);
+  font-family: var(--sans);
+  min-height: 100vh;
+  font-size: 14px;
+  line-height: 1.5;
+}
+
+/* ── HEADER ── */
+.header {
+  background: var(--surface);
+  border-bottom: 1px solid var(--border);
+  padding: 14px 24px;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  position: sticky;
+  top: 0;
+  z-index: 100;
+}
+.brand { display:flex; align-items:center; gap:12px; }
+.brand-name { font-family:var(--display); font-size:18px; font-weight:800; color:var(--gold); letter-spacing:1px; }
+.brand-sub { font-size:10px; color:var(--muted); letter-spacing:3px; text-transform:uppercase; }
+.header-date { font-family:var(--mono); font-size:12px; color:var(--muted); text-transform:capitalize; }
+
+/* ── TABS ── */
+.tabs {
+  display: flex;
+  gap: 2px;
+  background: var(--surface);
+  border-bottom: 1px solid var(--border);
+  padding: 0 16px;
+  overflow-x: auto;
+}
+.tab {
+  padding: 12px 20px;
+  cursor: pointer;
+  font-size: 12px;
+  font-weight: 500;
+  letter-spacing: 1px;
+  text-transform: uppercase;
+  color: var(--muted);
+  border-bottom: 2px solid transparent;
+  white-space: nowrap;
+  transition: all .2s;
+  position: relative;
+  user-select: none;
+}
+.tab:hover { color: var(--text); }
+.tab.active { color: var(--gold); border-bottom-color: var(--gold); }
+.badge {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  background: var(--red);
+  color: #fff;
+  font-size: 9px;
+  font-weight: 700;
+  border-radius: 8px;
+  padding: 1px 5px;
+  margin-left: 5px;
+  vertical-align: middle;
+}
+
+/* ── PANELS ── */
+.panel { display:none; padding:24px; max-width:1200px; margin:0 auto; }
+.panel.active { display:block; }
+
+/* ── CARDS ── */
+.card {
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: 12px;
+  padding: 20px;
+  margin-bottom: 16px;
+}
+.cajas-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(300px, 1fr));
+  gap: 16px;
+  align-items: start;
+  margin-bottom: 16px;
+}
+.caja-card {
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: 12px;
+  padding: 20px;
+  box-sizing: border-box;
+  min-width: 0;
+}
+.caja-card.central { border-color: var(--gold)44; }
+.caja-card.opcional { border-color: var(--purple)44; border-style: dashed; }
+.card-title {
+  font-family: var(--mono);
+  font-size: 10px;
+  letter-spacing: 2px;
+  text-transform: uppercase;
+  color: var(--muted);
+  margin-bottom: 16px;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+.dot { width:6px; height:6px; border-radius:50%; background:var(--gold); }
+
+/* ── GRID ── */
+.grid2 { display:grid; grid-template-columns:1fr 1fr; gap:16px; }
+.grid3 { display:grid; grid-template-columns:1fr 1fr 1fr; gap:16px; }
+.grid4 { display:grid; grid-template-columns:1fr 1fr 1fr 1fr; gap:16px; }
+@media(max-width:900px){ .grid4{grid-template-columns:1fr 1fr;} .grid3{grid-template-columns:1fr 1fr;} }
+@media(max-width:600px){ .grid2,.grid3,.grid4{grid-template-columns:1fr;} }
+
+/* ── INPUTS ── */
+label { font-size:11px; color:var(--muted); letter-spacing:1px; text-transform:uppercase; display:block; margin-bottom:5px; }
+input, select, textarea {
+  width:100%;
+  background: var(--surface2);
+  border: 1px solid var(--border);
+  color: var(--text);
+  border-radius: 8px;
+  padding: 9px 12px;
+  font-family: var(--mono);
+  font-size: 13px;
+  outline: none;
+  transition: border .2s;
+}
+input:focus, select:focus { border-color: var(--gold); }
+input[type="number"]::-webkit-inner-spin-button { display:none; }
+select option { background: var(--surface2); }
+
+/* ── STAT BOX ── */
+.stat {
+  background: var(--surface2);
+  border: 1px solid var(--border);
+  border-radius: 10px;
+  padding: 14px 16px;
+  text-align: center;
+}
+.stat-label { font-size:10px; color:var(--muted); letter-spacing:2px; text-transform:uppercase; margin-bottom:6px; }
+.stat-value { font-family:var(--mono); font-size:20px; font-weight:500; }
+.stat-value.gold { color:var(--gold); }
+.stat-value.green { color:var(--green); }
+.stat-value.red { color:var(--red); }
+.stat-value.blue { color:#60a5fa; }
+
+/* ── BUTTONS ── */
+.btn {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 8px 16px;
+  border-radius: 8px;
+  font-size: 12px;
+  font-weight: 500;
+  cursor: pointer;
+  border: none;
+  letter-spacing: .5px;
+  transition: all .15s;
+}
+.btn-gold { background:var(--gold); color:#0d0d0f; }
+.btn-gold:hover { background:var(--gold-light); }
+.btn-ghost { background:var(--surface2); color:var(--text); border:1px solid var(--border); }
+.btn-ghost:hover { border-color:var(--gold); color:var(--gold); }
+.btn-red { background:var(--red-dim); color:var(--red); border:1px solid var(--red); }
+.btn-red:hover { background:var(--red); color:#fff; }
+.btn-green { background:var(--green-dim); color:var(--green); border:1px solid var(--green); }
+.btn-green:hover { background:var(--green); color:#0d0d0f; }
+.btn-sm { padding:5px 10px; font-size:11px; }
+
+/* ── DIVIDER ── */
+.divider { height:1px; background:var(--border); margin:16px 0; }
+
+/* ── GASTOS LIST ── */
+.gasto-row {
+  display:grid;
+  grid-template-columns: 1fr 140px auto;
+  gap:8px;
+  align-items:center;
+  margin-bottom:8px;
+}
+.gasto-row .btn-sm { white-space:nowrap; }
+
+/* ── TABLA ── */
+table { width:100%; border-collapse:collapse; }
+th {
+  font-family:var(--mono);
+  font-size:10px;
+  letter-spacing:2px;
+  text-transform:uppercase;
+  color:var(--muted);
+  padding:8px 12px;
+  text-align:left;
+  border-bottom:1px solid var(--border);
+}
+td { padding:10px 12px; border-bottom:1px solid var(--border); font-family:var(--mono); font-size:13px; }
+.num { text-align:right; }
+.yellow { color:var(--gold); }
+.green { color:var(--green); }
+.red { color:var(--red); }
+.blue { color:#60a5fa; }
+.purple { color:var(--purple); }
+tr:hover td { background:var(--surface2); }
+
+/* ── IMPUESTOS CARDS ── */
+.imp-card {
+  background: var(--surface2);
+  border: 1px solid var(--border);
+  border-radius: 10px;
+  padding: 16px;
+  position: relative;
+}
+.imp-card.alerta { border-color: var(--yellow); background:var(--yellow-dim); }
+.imp-card.vencido { border-color: var(--red); background:var(--red-dim); }
+.imp-card.pagado { opacity:.5; }
+.imp-nombre { font-family:var(--display); font-size:15px; font-weight:700; margin-bottom:4px; }
+.imp-monto { font-family:var(--mono); font-size:20px; color:var(--gold); }
+.imp-vence { font-size:11px; color:var(--muted); margin-top:4px; }
+.imp-status { font-size:10px; font-weight:700; letter-spacing:2px; text-transform:uppercase; margin-top:6px; }
+
+/* ── RESUMEN BAR ── */
+.resumen-bar {
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: 12px;
+  padding: 16px 20px;
+  display: flex;
+  align-items: center;
+  gap: 16px;
+  flex-wrap: wrap;
+  margin-bottom: 20px;
+}
+.res-item { text-align:center; flex:1; min-width:100px; }
+.res-label { font-size:10px; color:var(--muted); letter-spacing:2px; text-transform:uppercase; }
+.res-val { font-family:var(--mono); font-size:18px; font-weight:500; margin-top:3px; }
+.res-sep { width:1px; height:40px; background:var(--border); }
+
+/* ── DATE BAR ── */
+.date-bar { display:flex; align-items:center; gap:12px; margin-bottom:20px; flex-wrap:wrap; }
+.date-bar input[type="date"] { max-width:180px; }
+
+/* ── CHART CONTAINER ── */
+.chart-wrap { position:relative; height:220px; }
+
+/* ── PERIODO TABS ── */
+.ptabs { display:flex; gap:4px; margin-bottom:16px; }
+.ptab {
+  padding:6px 14px;
+  border-radius:6px;
+  font-size:11px;
+  letter-spacing:1px;
+  text-transform:uppercase;
+  cursor:pointer;
+  border:1px solid var(--border);
+  color:var(--muted);
+  background:transparent;
+  transition:all .15s;
+}
+.ptab.active, .ptab:hover { border-color:var(--gold); color:var(--gold); }
+
+/* ── CAJA HEADER ── */
+.caja-header {
+  display:flex;
+  align-items:center;
+  justify-content:space-between;
+  margin-bottom:16px;
+}
+.caja-num {
+  font-family:var(--display);
+  font-size:16px;
+  font-weight:800;
+  color:var(--gold);
+  letter-spacing:1px;
+}
+.mb8 { margin-bottom:8px; }
+.mb16 { margin-bottom:16px; }
+.mt16 { margin-top:16px; }
+.flex { display:flex; gap:8px; align-items:center; }
+.flex-end { justify-content:flex-end; }
+.w100 { width:100%; }
+.text-right { text-align:right; }
+</style>
+</head>
+<body>
+<datalist id="conceptosGastos"></datalist>
+
+<!-- HEADER -->
+<div class="header">
+  <div class="brand">
+    <div>
+      <img src="data:image/jpeg;base64,/9j/4AAQSkZJRgABAQAAkACQAAD/4QECRXhpZgAATU0AKgAAAAgABwEOAAIAAAALAAAAYgESAAMAAAABAAEAAAEaAAUAAAABAAAAbgEbAAUAAAABAAAAdgEoAAMAAAABAAIAAAEyAAIAAAAUAAAAfodpAAQAAAABAAAAkgAAAABTY3JlZW5zaG90AAAAAACQAAAAAQAAAJAAAAABMjAyNjowNToxMCAxODoyOToxNAAABZADAAIAAAAUAAAA1JKGAAcAAAASAAAA6KABAAMAAAAB//8AAKACAAQAAAABAAABy6ADAAQAAAABAAAB6QAAAAAyMDI2OjA1OjEwIDE4OjI5OjE0AEFTQ0lJAAAAU2NyZWVuc2hvdP/tAG5QaG90b3Nob3AgMy4wADhCSU0EBAAAAAAANhwBWgADGyVHHAIAAAIAAhwCeAAKU2NyZWVuc2hvdBwCPAAGMTgyOTE0HAI3AAgyMDI2MDUxMDhCSU0EJQAAAAAAECIMRhG1R6+smqQcH2c5Fu3/4gIoSUNDX1BST0ZJTEUAAQEAAAIYYXBwbAQAAABtbnRyUkdCIFhZWiAH5gABAAEAAAAAAABhY3NwQVBQTAAAAABBUFBMAAAAAAAAAAAAAAAAAAAAAAAA9tYAAQAAAADTLWFwcGwAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAApkZXNjAAAA/AAAADBjcHJ0AAABLAAAAFB3dHB0AAABfAAAABRyWFlaAAABkAAAABRnWFlaAAABpAAAABRiWFlaAAABuAAAABRyVFJDAAABzAAAACBjaGFkAAAB7AAAACxiVFJDAAABzAAAACBnVFJDAAABzAAAACBtbHVjAAAAAAAAAAEAAAAMZW5VUwAAABQAAAAcAEQAaQBzAHAAbABhAHkAIABQADNtbHVjAAAAAAAAAAEAAAAMZW5VUwAAADQAAAAcAEMAbwBwAHkAcgBpAGcAaAB0ACAAQQBwAHAAbABlACAASQBuAGMALgAsACAAMgAwADIAMlhZWiAAAAAAAAD21QABAAAAANMsWFlaIAAAAAAAAIPfAAA9v////7tYWVogAAAAAAAASr8AALE3AAAKuVhZWiAAAAAAAAAoOAAAEQsAAMi5cGFyYQAAAAAAAwAAAAJmZgAA8qcAAA1ZAAAT0AAACltzZjMyAAAAAAABDEIAAAXe///zJgAAB5MAAP2Q///7ov///aMAAAPcAADAbv/AABEIAekBywMBIgACEQEDEQH/xAAfAAABBQEBAQEBAQAAAAAAAAAAAQIDBAUGBwgJCgv/xAC1EAACAQMDAgQDBQUEBAAAAX0BAgMABBEFEiExQQYTUWEHInEUMoGRoQgjQrHBFVLR8CQzYnKCCQoWFxgZGiUmJygpKjQ1Njc4OTpDREVGR0hJSlNUVVZXWFlaY2RlZmdoaWpzdHV2d3h5eoOEhYaHiImKkpOUlZaXmJmaoqOkpaanqKmqsrO0tba3uLm6wsPExcbHyMnK0tPU1dbX2Nna4eLj5OXm5+jp6vHy8/T19vf4+fr/xAAfAQADAQEBAQEBAQEBAAAAAAAAAQIDBAUGBwgJCgv/xAC1EQACAQIEBAMEBwUEBAABAncAAQIDEQQFITEGEkFRB2FxEyIygQgUQpGhscEJIzNS8BVictEKFiQ04SXxFxgZGiYnKCkqNTY3ODk6Q0RFRkdISUpTVFVWV1hZWmNkZWZnaGlqc3R1dnd4eXqCg4SFhoeIiYqSk5SVlpeYmZqio6Slpqeoqaqys7S1tre4ubrCw8TFxsfIycrS09TV1tfY2dri4+Tl5ufo6ery8/T19vf4+fr/2wBDAAICAgICAgMCAgMFAwMDBQYFBQUFBggGBgYGBggKCAgICAgICgoKCgoKCgoMDAwMDAwODg4ODg8PDw8PDw8PDw//2wBDAQIDAwQEBAcEBAcQCwkLEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBD/3QAEAB3/2gAMAwEAAhEDEQA/APzfooooAKKKKACiiigAooooAKKKKACiiigAooooAKKKKACiiigAooooAKKKKACiiigAooooAKKKKACiiigAooooAKKKKACiiigAooooAKKKKACiiigAooooAKKKKACiiigAooooAKKKKACiiigAooooAKKKKAP/0PzfooooAKKKKACiiigAooooAKKKKACiiigAooooAKKKKACiiigAooooAKKKKACiiigAooooAKKKKACiiigAooooAKKKKACiiigAooooAKKKKACiiigAooooAKKKKACiiigAooooAKKKKACiiigAooooAKKKKAP/0fzfooooAKKKKACiiigAooooAKKKKACiiigAooooAKKKKACiiigAooooAKKKKACiiigAooooAKKKKACiiigAooooAKKKKACiiigAooooAKKKKACiiigAooooAKKKKACiiigAooooAKKKKACiiigAooooAKKKKAP/0vzfooooAKKKKACiiigAooooAKKKKACiiigAooooAKKKKACiiigAooooAKKKKACiiigAooooAKKKKACiiigAooooAKKKKACiiigAooooAKKKKACiiigAooooAKKKKACiiigAooooAKKKKACiiigAooooAKKKKAP/0/zfooooAKKKKACiiigAooooAKKKKACiiigAooooAKKKKACiiigAooooAKKKKACiiigAooooAKKKKACiiigAooooAKKKKACiiigAooooAKKKKACiiigAooooAKKKKACiiigAooooAKKKKACiiigAooooAKKKKAP/1PzfooooAKKKKACiiigAooooAKKKKACiiigAooooAKKKKACiiigAooooAKKKKACiiigAooHPSik2luNIT8KWtWy0PWdSYR2NlNMT/dRv59K7PT/hN41vjua0FsP+mr7T+NcVXHUKXxzOynhqtT4Ynm30pNxr0jUfhZ4108EmzNwo/iibd+Wa4q70nUrB9t/ayQn/AG0Kj8xV0cXRq/w5ilQq0/iiZ1FJnnFLXWtdjkatuFFFFAgooyKKACiiigAooooAKKKKACiiigAooooAKKKKACiiigAooooAKKKKACiiigAooooA/9X836KKKACiiigAooooAKKKKACiiigAooooAKKKKACiijoMngUrgFFFFU1bcAooopAGM8etAPO0DcemBR+OPf096+vfhLp2kXPhK1vFsoluEZo3faCSynk814+ZY9YKl7WUbnpYLCfWqns72PmbTPB/inVmU6dps8it/EVKJ/30wxXoWl/BPxTdbTqE0NiD1GRIf0r6zC847D6AfkKXaK/PK/E2JmrU4peZ9rSyOjH49Tw7S/gd4etgDqdxLet3A+RTXf6d4D8JacALXTogwHVxu/nXahPWjYK+dqZliavxyPXp4ChD4YlGKBLddkMaoo4G0AfyqUJ61a2il8sV5cpNu7Z2pJaIreXUE9nb3CbJ4klH91gGH61f2ijaKIylHZhKMZbnA6n8OfCGqBjcafGG9U+T8sVweqfA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pBgKcGBqtALofNOD4qkGApwYGjQC55lHmVUyKMijQdy35lHmVUyKMijQLlnd70wvmoSRio8ipEWC+O9NL5qAkYqMsBVaAWGao2b3qEsDTGIqQJi3HWod3vUZYdKiYgVVgJS3PWoHaoy/NQySqqPI5CogySTgD6mtEr6LcLpay2Hs4HBz7V5341+IOleEYCjMLi+IykKnke7egrhfHvxdisFk0rww4muMlXnAyqkcEL6mvmm7urm+ne6u5WlmlO5mY5JP4/yr73K+H6lVKrWVkfKY/N40/cpavuaev+INU8S6g+oanMXck7R/CoPYD0rExzmgjNLX6hSpRpRUIKyR8HOUpvmk9WFFFFamQUUUUAFFFFABRRRQAUUUUAFFFFABRRRQB//S/N+iiigAooooAKKKKACiiigAooooAKKKKACiiigBMDIbuKcrMjBlYhgcgjqCO9JRQ1pa2jHd7nt3gj4vX+lldP8AEW66teAJusiY9fUfrX0xpWr2GsWkd9psy3MEn8SHOPw7fjX58EA8duuPf1+vvXQeHvFOteGLoXmkTmP+8h5jk/3ga+LzDh6FVOpRaT7dz6fA5vOnaNTVH34GGakDDNeN+EfizouvlbTUv9AvT2J+Rvoe30NetRSrIgkUhlPQjkGvy3EYWth5WqRsfeUcRRrLmgy8GGafvAqnvApRJk1wnSy6JAafvAqmrinbxSsIuBwadvAqmrinbxRYC35nvShxiqe8UvmUNAWS/vS+Z71U3ijeKLAW949aYXGKr7xSFxiiwE24UjMMVWLjFN8zNFgJy4FMMg71AzimFxxT06g2T7weaYzD8B1qpcXdtbRNLcSLEiclmOAB7k14f4t+NNnYFrLw2PtNxyPNIxGv+6P4q9PCYGtiXalE46+Lp0F77PV/EPiXRvDVm17qs4iGPlXq7nttFfLXjX4oar4lza2O6zseQVBwz/WvPdU1fUdau2vdVuGuJSScseB9B0FZ1fqeXZDRw+s9ZHwWNzapW9yGiEwOT0z1owfWlor6+1lax84tNgooopAFFFFABRRRQAUUUUAFFFFABRRRQAUUUUAFFFFAH//T/N+iiigAooooAKKKKACiiigAooooAKKKKACiiigAooooAKTAJzS0UAA4P1ruvDXxE8S+GWEVtP8AabcHmKblceg9K4WkANc9bDU68eWpG500q0qbvGVj668PfGDw3qwWHU2OmXBxxL9xj7Ef1r1S3u7e5UTW0iyxnoykEfpX55HHcZrX0nxDq+hyK+l3kkGD0B4P1B4r4jGcNQfvUXbyPpqGdzWlVXPv/eB0pVcV8paV8bPEFrhNTto7xfUZVvzHFemad8Z/Cl2qi782xc4zuUOo/wCBCvjq+SYyjq43R9JSzXC1NpWZ7Ju9KPMrkbLxn4W1DH2bVrdyeg3gH8ia6JJY5l3wyLIp7qQR+leLKjUj8SPWhVpy+Fl4OMUu8VT3kcUeaa57FtlzeKN4qn5poyaLMVy15vtSeZmqFxdQWib7qZIF/vOwUfrXMXnjzwjp5P2jVIdw7K+7+Vb0qFSp8EGZzrwj8cztC/HSmFhjJ4A714rqnxr8N2ikadBNeuOhI8tD/wB9cn8K8x1b4zeKL4lbJY7GI8DaNzfma9/D5Hi62qXL6nk1c2w9P7Vz6qvtTsdOhM1/cJAgGdzkLx9OteO+I/jTo1jvt9Bia/nH/LQ/LCP6nNfNWo6rqOqzfaNSuXuZD3c/0rPyMg96+vwnDUKdnW95+R83iM6qT0pxsdR4g8Y+IPE0pk1O5PlnpEhIjH0HeuWAApaQDFfb06NOlHlpqyPmJ1Jzd6krsWiiitjEKKKKACiiigAooooAKKKKACiiigAooooAKKKKACiiigAooooA/9T836KKKACiiigAooooAKKKKACiiigAooooAKKKKACiiigAooooAKKKKACiiigAooooAML171NDeXtswa2nkhI/uMV/lUNFRKEZK0kaRm4u50lv4y8V264i1a5AHTMpYfkatJ8QvG6dNXm/MVyGBRg+tc31Oi9eVfcdP1mp0kdk/wAQPGcnJ1efJ96oXPi3xRcpsn1a5dPTzG/xrnMCl+b1qo4ShH4Ykyr1ZfaJpZ7i4ctPIz4/vNmoaKK6eVdjluwooopiCiiigAooooAKKKKACiiigAooooAKKKKACiiigAooooAKKKKACiiigAooooAKKKKAP//V/N+iiigAooooAKKKKACiiigAooooAKKKKACiiigAooooAKKKKACiiigAooooAKKKKACiiigAooooAKKKKACiiigAooooAKKKKACiiigAooooAKKKKACiiigAooooAKKKKACiiigAooooAKKKKACiiigAooooA//Z" style="height:44px;width:auto;border-radius:6px;" alt="Sabores Royal">
+      <div class="brand-sub" style="margin-top:2px;">Sistema de Cajas</div>
+    </div>
+  </div>
+  <div style="display:flex;align-items:center;gap:12px;">
+    <div id="backupStatus" style="font-size:11px;color:var(--muted);font-family:var(--mono);"></div>
+    <button class="btn btn-green" onclick="exportData(true)" style="font-size:11px;padding:6px 14px;">⬇ Guardar backup</button>
+    <div class="header-date" id="headerDate"></div>
+    <div id="adminName" style="font-size:11px;color:var(--gold);font-family:var(--mono);"></div>
+    <button class="btn btn-ghost" onclick="cajaLogout()" style="font-size:11px;padding:6px 14px;">Salir</button>
+  </div>
+</div>
+
+<!-- TABS -->
+<div class="tabs">
+  <div class="tab active" onclick="switchTab('carga',this)">📋 Carga Diaria</div>
+  <div class="tab" onclick="switchTab('estadisticas',this)">📊 Estadísticas</div>
+  <div class="tab" onclick="switchTab('gastos',this)">🔍 Gastos</div>
+  <div class="tab" onclick="switchTab('impuestos',this)" id="tabImpuestos">🧾 Impuestos</div>
+  <div class="tab" onclick="switchTab('ajustes',this)">⚙ Ajustes</div>
+</div>
+
+<!-- ══════════════════════════════════════════
+     PANEL: CARGA DIARIA
+══════════════════════════════════════════ -->
+<div class="panel active" id="panel-carga">
+
+  <!-- Date bar -->
+  <div class="date-bar">
+    <div>
+      <label>Fecha</label>
+      <input type="date" id="selectedDate">
+    </div>
+    <div style="display:flex;align-items:flex-end;">
+      <button class="btn btn-ghost" onclick="setToday()">HOY</button>
+    </div>
+  </div>
+
+  <!-- RESUMEN DEL DÍA -->
+  <div class="resumen-bar">
+    <div class="res-item">
+      <div class="res-label">Venta Total</div>
+      <div class="res-val yellow" id="resTotal">$0</div>
+    </div>
+    <div class="res-sep"></div>
+    <div class="res-item">
+      <div class="res-label">Efectivo</div>
+      <div class="res-val green" id="resEfectivo">$0</div>
+    </div>
+    <div class="res-sep"></div>
+    <div class="res-item">
+      <div class="res-label">Tarjeta</div>
+      <div class="res-val blue" id="resTarjeta">$0</div>
+    </div>
+    <div class="res-sep"></div>
+    <div class="res-item">
+      <div class="res-label">Venta Negro</div>
+      <div class="res-val" style="color:var(--purple)" id="resNegro">$0</div>
+      <div style="font-size:10px;color:var(--muted);margin-top:2px;" id="resNegroPct">0% del total</div>
+    </div>
+    <div class="res-sep"></div>
+    <div class="res-item">
+      <div class="res-label">Gastos</div>
+      <div class="res-val red" id="resGastos">$0</div>
+    </div>
+    <div class="res-sep"></div>
+    <div class="res-item">
+      <div class="res-label">Tickets</div>
+      <div class="res-val" id="resTickets">0</div>
+    </div>
+  </div>
+
+  <!-- CAJAS PRINCIPALES (1 y 2) -->
+  <div class="cajas-grid" id="cajasContainer"></div>
+
+  <!-- CAJAS OPCIONALES (3 y 4) -->
+  <div style="margin-bottom:16px;">
+    <button class="btn btn-ghost" onclick="toggleCajasOpcionales()" id="btnToggleCajasOpc" style="font-size:11px;letter-spacing:1px;width:100%;justify-content:center;gap:8px;">
+      <span id="iconToggleCajas">▶</span> CAJA 3 &amp; CAJA 4 — Mostrar cajas opcionales
+    </button>
+    <div id="cajasOpcionalesContainer" style="display:none;margin-top:12px;">
+      <div class="cajas-grid" id="cajasOpcGrid"></div>
+    </div>
+  </div>
+
+  <!-- POZO DE EFECTIVO -->
+  <div class="card mt16" style="border-color:var(--gold);background:linear-gradient(135deg,#16161a,#1e1a0a);">
+    <div class="card-title"><div class="dot" style="background:var(--gold)"></div>POZO DE EFECTIVO — CAJA CENTRAL</div>
+    <div style="display:flex;flex-wrap:wrap;gap:12px;margin-bottom:12px;">
+      <div class="stat" style="flex:1;min-width:120px;">
+        <div class="stat-label">Rinde Caja 1</div>
+        <div class="stat-value green" id="pozoCaja0">$0</div>
+      </div>
+      <div class="stat" style="flex:1;min-width:120px;">
+        <div class="stat-label">Rinde Caja 2</div>
+        <div class="stat-value green" id="pozoCaja1">$0</div>
+      </div>
+      <div class="stat" id="pozoCaja2Wrap" style="flex:1;min-width:120px;display:none;">
+        <div class="stat-label">Rinde Caja 3</div>
+        <div class="stat-value green" id="pozoCaja2">$0</div>
+      </div>
+      <div class="stat" id="pozoCaja3Wrap" style="flex:1;min-width:120px;display:none;">
+        <div class="stat-label">Rinde Caja 4</div>
+        <div class="stat-value green" id="pozoCaja3">$0</div>
+      </div>
+      <div class="stat" style="flex:1;min-width:120px;">
+        <div class="stat-label">Efectivo Central</div>
+        <div class="stat-value green" id="pozoCentral">$0</div>
+      </div>
+      <div class="stat" style="flex:1;min-width:120px;border:1px solid var(--green)44;background:var(--green-dim);">
+        <div class="stat-label" style="color:var(--green)">Saldo días anteriores</div>
+        <div class="stat-value" id="pozoPrevio" style="color:var(--green)">$0</div>
+      </div>
+    </div>
+    <div class="divider"></div>
+    <div style="display:flex;justify-content:space-between;align-items:center;flex-wrap:wrap;gap:8px;margin-bottom:12px;">
+      <span style="font-size:11px;color:var(--muted);">Gastos oficina descontados: <span id="pozoGastosCentral" style="color:var(--red);font-family:var(--mono);">$0</span></span>
+      <span style="font-size:11px;color:var(--muted);">= Rinde C1+C2(+C3+C4) + Ef. Central − Gastos + Saldo Anterior</span>
+    </div>
+    <div class="stat" style="border:1px solid var(--gold);background:var(--gold-dim);padding:16px 20px;">
+      <div class="stat-label" style="color:var(--gold);font-size:11px;letter-spacing:3px;">💰 SALDO TOTAL ACUMULADO EN CAJA</div>
+      <div class="stat-value gold" id="pozoTotal" style="font-size:26px;">$0</div>
+    </div>
+  </div>
+
+</div>
+
+<!-- ══════════════════════════════════════════
+     PANEL: ESTADÍSTICAS
+══════════════════════════════════════════ -->
+<div class="panel" id="panel-estadisticas">
+  <div class="ptabs">
+    <button class="ptab active" onclick="setPeriod('dia',this)">Hoy</button>
+    <button class="ptab" onclick="setPeriod('semana',this)">7 días</button>
+    <button class="ptab" onclick="setPeriod('mes',this)">30 días</button>
+    <button class="ptab" onclick="setPeriod('comparativo',this)">Comparativo</button>
+  </div>
+  <div id="statsContent"></div>
+</div>
+
+<!-- ══════════════════════════════════════════
+     PANEL: GASTOS
+══════════════════════════════════════════ -->
+<div class="panel" id="panel-gastos">
+  <div class="card mb16">
+    <div class="card-title"><div class="dot"></div>BUSCAR GASTOS</div>
+    <div class="grid3" style="align-items:end;">
+      <div>
+        <label>Concepto</label>
+        <input type="text" id="buscarConcepto" placeholder="Ej: limpieza, luz..." oninput="renderBusquedaGastos()">
+      </div>
+      <div>
+        <label>Desde</label>
+        <input type="date" id="buscarDesde" onchange="renderBusquedaGastos()">
+      </div>
+      <div>
+        <label>Hasta</label>
+        <input type="date" id="buscarHasta" onchange="renderBusquedaGastos()">
+      </div>
+    </div>
+  </div>
+  <div id="gastosResultados"></div>
+</div>
+
+<!-- ══════════════════════════════════════════
+     PANEL: IMPUESTOS
+══════════════════════════════════════════ -->
+<div class="panel" id="panel-impuestos">
+  <!-- Formulario -->
+  <div class="card">
+    <div class="card-title"><div class="dot"></div>NUEVO IMPUESTO</div>
+    <div class="grid4 mb16">
+      <div>
+        <label>Nombre</label>
+        <input type="text" id="impNombre" placeholder="Ej: ARBA, AFIP...">
+      </div>
+      <div>
+        <label>Monto ($)</label>
+        <input type="number" id="impMonto" placeholder="0">
+      </div>
+      <div>
+        <label>Vencimiento</label>
+        <input type="date" id="impVence">
+      </div>
+      <div>
+        <label>Alerta (días antes)</label>
+        <input type="number" id="impAlerta" value="5" min="1">
+      </div>
+    </div>
+    <button class="btn btn-gold" onclick="addImpuesto()">+ Agregar impuesto</button>
+  </div>
+
+  <!-- Lista -->
+  <div id="impuestosList"></div>
+</div>
+
+<!-- ══════════════════════════════════════════
+     PANEL: AJUSTES
+══════════════════════════════════════════ -->
+<div class="panel" id="panel-ajustes">
+  <div class="grid2">
+    <!-- Cajeros -->
+    <div class="card">
+      <div class="card-title"><div class="dot"></div>CAJEROS</div>
+      <div id="cajerosList"></div>
+      <div class="flex mt16">
+        <input type="text" id="nuevoCajero" placeholder="Nombre del cajero">
+        <button class="btn btn-gold" onclick="addCajero()" style="white-space:nowrap">+ Agregar</button>
+      </div>
+    </div>
+    <!-- Datos -->
+    <div class="card">
+      <div class="card-title"><div class="dot"></div>DATOS Y BACKUP</div>
+      <p style="color:var(--muted);font-size:12px;margin-bottom:16px;">Los datos se guardan automáticamente en tu navegador.</p>
+      <div style="display:flex;flex-direction:column;gap:8px;">
+        <button class="btn btn-green" onclick="exportData()">⬇ Exportar backup JSON</button>
+        <button class="btn btn-ghost" onclick="importData()">⬆ Importar backup JSON</button>
+        <div class="divider"></div>
+        <button class="btn btn-red" onclick="resetData()">🗑 Borrar todos los datos</button>
+      </div>
+    </div>
+  </div>
+</div>
+
+<script>
+// ============================================================
+// STATE
+// ============================================================
+let state = { dias:{}, impuestos:[], cajeros:['Gastón','Matías','Gabriel','Emanuel'] };
+let currentPeriod = 'dia';
+let charts = {};
+
+// ============================================================
+// SUPABASE — mismo proyecto y login de administrador que usa
+// el panel de Sabores Royal. Este archivo sigue siendo un HTML
+// suelto e independiente: solo comparte la base de datos.
+// ============================================================
+const SUPABASE_URL = 'https://topgunweqztedhhhthbl.supabase.co';
+const SUPABASE_KEY = 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6InRvcGd1bndlcWV6dGVkaGh0aGJsIiwicm9sZSI6ImFub24iLCJpYXQiOjE3ODI3NDczMjgsImV4cCI6MjA5ODMyMzMyOH0.KfZ8f8GlKoQoRxdPk-lrNDSTRcjd21z6d8CgITHf3WU';
+const CAJA_SESSION_KEY = 'cajaDiaria_session';
+const CAJA_DATA_KEY = 'caja_diaria_data';
+let cajaSession = null;
+let cajaAdminName = '';
+let _remoteSyncTimer = null;
+
+function loadCajaSession(){
+  try{ const raw = localStorage.getItem(CAJA_SESSION_KEY); cajaSession = raw ? JSON.parse(raw) : null; }
+  catch(e){ cajaSession = null; }
+}
+function saveCajaSession(session){
+  cajaSession = session;
+  try{
+    if(session) localStorage.setItem(CAJA_SESSION_KEY, JSON.stringify(session));
+    else localStorage.removeItem(CAJA_SESSION_KEY);
+  }catch(e){}
+}
+async function cajaAuthRequest(grantType, body){
+  let res;
+  try{
+    res = await fetch(SUPABASE_URL + '/auth/v1/token?grant_type=' + grantType, {
+      method:'POST', headers:{'Content-Type':'application/json','apikey':SUPABASE_KEY}, body: JSON.stringify(body),
+    });
+  }catch(networkErr){ throw new Error('Sin conexión con el servidor'); }
+  const data = await res.json().catch(()=>({}));
+  if(!res.ok) throw new Error(data.error_description || data.msg || data.error || 'No se pudo autenticar');
+  return data;
+}
+async function cajaTryRefresh(){
+  if(!cajaSession || !cajaSession.refresh_token) return false;
+  try{
+    const data = await cajaAuthRequest('refresh_token', {refresh_token: cajaSession.refresh_token});
+    saveCajaSession({access_token:data.access_token, refresh_token:data.refresh_token, expires_at:Date.now()+(data.expires_in||3600)*1000, uid:(data.user&&data.user.id)||cajaSession.uid});
+    return true;
+  }catch(e){ saveCajaSession(null); return false; }
+}
+async function cajaFetch(path, method, body, _retried){
+  if(!cajaSession || !cajaSession.access_token) throw new Error('No hay sesión');
+  const headers = {'Content-Type':'application/json','apikey':SUPABASE_KEY,'Authorization':'Bearer '+cajaSession.access_token};
+  if(method==='POST' || method==='PATCH') headers['Prefer'] = 'return=representation';
+  const res = await fetch(SUPABASE_URL + '/rest/v1' + path, { method: method||'GET', headers, body: body?JSON.stringify(body):undefined });
+  if(res.status===401 && !_retried && await cajaTryRefresh()) return cajaFetch(path, method, body, true);
+  const text = await res.text();
+  if(!res.ok){ let err; try{ err=JSON.parse(text); }catch(e){ err={message:text}; } throw new Error(err.message || 'HTTP '+res.status); }
+  return text ? JSON.parse(text) : null;
+}
+async function verifyCajaAdmin(uid){
+  const rows = await cajaFetch('/admin_users?select=name&user_id=eq.'+uid+'&limit=1', 'GET');
+  const me = rows && rows[0];
+  if(!me) throw new Error('sin_acceso');
+  return me.name || 'Administrador';
+}
+async function pullRemoteState(){
+  const rows = await cajaFetch('/app_settings?setting_key=eq.'+CAJA_DATA_KEY+'&select=setting_value', 'GET');
+  const row = rows && rows[0];
+  if(row){ try{ state = JSON.parse(row.setting_value); }catch(e){} }
+}
+async function pushRemoteState(){
+  const statusEl = document.getElementById('backupStatus');
+  try{
+    const val = JSON.stringify(state);
+    const existing = await cajaFetch('/app_settings?setting_key=eq.'+CAJA_DATA_KEY+'&select=id', 'GET');
+    if(existing && existing.length>0){
+      await cajaFetch('/app_settings?setting_key=eq.'+CAJA_DATA_KEY, 'PATCH', {setting_value: val});
+    }else{
+      await cajaFetch('/app_settings', 'POST', {setting_key:CAJA_DATA_KEY, setting_value: val});
+    }
+    if(statusEl){ statusEl.textContent = '☁ Sincronizado ' + new Date().toLocaleTimeString('es-AR',{hour:'2-digit',minute:'2-digit'}); statusEl.style.color = 'var(--green)'; }
+  }catch(e){
+    if(statusEl){ statusEl.textContent = '⚠ Sin sincronizar (' + e.message + ')'; statusEl.style.color = 'var(--red)'; }
+  }
+}
+function scheduleRemoteSync(){
+  if(!cajaSession) return;
+  clearTimeout(_remoteSyncTimer);
+  _remoteSyncTimer = setTimeout(pushRemoteState, 1200);
+}
+function cajaLogout(){
+  saveCajaSession(null);
+  location.reload();
+}
+
+// ============================================================
+// LOGIN — overlay bloqueante hasta autenticar como administrador
+// ============================================================
+function renderLoginOverlay(errorMsg){
+  removeLoginOverlay();
+  const overlay = document.createElement('div');
+  overlay.id = 'caja-login-overlay';
+  overlay.style.cssText = 'position:fixed;inset:0;background:var(--bg);z-index:9999;display:flex;align-items:center;justify-content:center;padding:20px;';
+  overlay.innerHTML = `
+    <div style="width:100%;max-width:340px;background:var(--surface);border:1px solid var(--border);border-radius:16px;padding:28px 24px;">
+      <div style="text-align:center;margin-bottom:20px;">
+        <div class="brand-name" style="font-size:20px;">Caja Diaria</div>
+        <div class="brand-sub" style="margin-top:4px;">Ingresá con tu usuario de administrador</div>
+      </div>
+      ${errorMsg ? `<div style="background:var(--red-dim);color:var(--red);border:1px solid var(--red);border-radius:8px;padding:8px 12px;font-size:12px;margin-bottom:14px;">${errorMsg}</div>` : ''}
+      <div style="margin-bottom:12px;">
+        <label>Email</label>
+        <input type="email" id="caja-login-email" placeholder="email@ejemplo.com" value="saboresroyal@gmail.com">
+      </div>
+      <div style="margin-bottom:16px;">
+        <label>Contraseña</label>
+        <input type="password" id="caja-login-pass" placeholder="••••••••">
+      </div>
+      <button class="btn btn-gold" id="caja-login-btn" style="width:100%;justify-content:center;" onclick="submitCajaLogin()">Ingresar</button>
+    </div>`;
+  document.body.appendChild(overlay);
+  document.getElementById('caja-login-pass').addEventListener('keydown', e=>{ if(e.key==='Enter') submitCajaLogin(); });
+}
+function removeLoginOverlay(){ const el=document.getElementById('caja-login-overlay'); if(el) el.remove(); }
+async function submitCajaLogin(){
+  const email = document.getElementById('caja-login-email').value.trim();
+  const pass = document.getElementById('caja-login-pass').value;
+  if(!email || !pass){ renderLoginOverlay('Completá email y contraseña'); return; }
+  const btn = document.getElementById('caja-login-btn');
+  btn.disabled = true; btn.textContent = 'Ingresando…';
+  try{
+    const data = await cajaAuthRequest('password', {email, password:pass});
+    saveCajaSession({access_token:data.access_token, refresh_token:data.refresh_token, expires_at:Date.now()+(data.expires_in||3600)*1000, uid:data.user&&data.user.id});
+    cajaAdminName = await verifyCajaAdmin(cajaSession.uid);
+    removeLoginOverlay();
+    await afterLogin();
+  }catch(e){
+    saveCajaSession(null);
+    renderLoginOverlay(e.message==='sin_acceso' ? 'Tu usuario no tiene acceso al panel de administración' : (e.message||'No se pudo iniciar sesión'));
+  }
+}
+
+// ============================================================
+// PERSIST
+// ============================================================
+function normalizeState(){
+  if(!state.impuestos) state.impuestos = [];
+  if(!state.cajeros) state.cajeros = ['Gastón','Matías','Gabriel','Emanuel'];
+  if(!state.dias) state.dias = {};
+}
+function save() { localStorage.setItem('cajasApp_v2', JSON.stringify(state)); updateBadge(); scheduleRemoteSync(); }
+function load() {
+  const s = localStorage.getItem('cajasApp_v2');
+  if(s) { try { state = JSON.parse(s); } catch(e){} }
+  normalizeState();
+}
+
+function todayStr() { return new Date().toISOString().slice(0,10); }
+
+function getDay(d) {
+  if(!state.dias[d]) {
+    state.dias[d] = {
+      cajas:[
+        { cajero:'', efectivo:'', ajusteEfectivo:'', motivoAjuste:'', tarjetas:'', lote:'', negro:'', tickets:'', gastos:[] },
+        { cajero:'', efectivo:'', ajusteEfectivo:'', motivoAjuste:'', tarjetas:'', lote:'', negro:'', tickets:'', gastos:[] },
+        { cajero:'Caja Central', efectivo:'', ajusteEfectivo:'', motivoAjuste:'', tarjetas:'', lote:'', negro:'', tickets:'', gastos:[] },
+        { cajero:'', efectivo:'', ajusteEfectivo:'', motivoAjuste:'', tarjetas:'', lote:'', negro:'', tickets:'', gastos:[], opcional:true },
+        { cajero:'', efectivo:'', ajusteEfectivo:'', motivoAjuste:'', tarjetas:'', lote:'', negro:'', tickets:'', gastos:[], opcional:true }
+      ]
+    };
+  }
+  while(state.dias[d].cajas.length < 2) {
+    state.dias[d].cajas.push({ cajero:'', efectivo:'', tarjetas:'', lote:'', negro:'', tickets:'', gastos:[] });
+  }
+  if(state.dias[d].cajas.length < 3) {
+    state.dias[d].cajas.push({ cajero:'Caja Central', efectivo:'', tarjetas:'', lote:'', negro:'', tickets:'', gastos:[] });
+  }
+  if(state.dias[d].cajas.length < 4) {
+    state.dias[d].cajas.push({ cajero:'', efectivo:'', ajusteEfectivo:'', motivoAjuste:'', tarjetas:'', lote:'', negro:'', tickets:'', gastos:[], opcional:true });
+  }
+  if(state.dias[d].cajas.length < 5) {
+    state.dias[d].cajas.push({ cajero:'', efectivo:'', ajusteEfectivo:'', motivoAjuste:'', tarjetas:'', lote:'', negro:'', tickets:'', gastos:[], opcional:true });
+  }
+  // migración: mover gastosCentral y loteCentral viejos a la caja central
+  if(state.dias[d].gastosCentral && state.dias[d].gastosCentral.length>0) {
+    state.dias[d].cajas[2].gastos = [...(state.dias[d].cajas[2].gastos||[]), ...state.dias[d].gastosCentral];
+    delete state.dias[d].gastosCentral;
+  }
+  if(state.dias[d].loteCentral) {
+    if(!state.dias[d].cajas[2].lote) state.dias[d].cajas[2].lote = state.dias[d].loteCentral;
+    delete state.dias[d].loteCentral;
+  }
+  return state.dias[d];
+}
+
+// ============================================================
+// CARGA DIARIA
+// ============================================================
+function loadCargaDay() {
+  const d = document.getElementById('selectedDate').value;
+  if(!d) return;
+  const day = getDay(d);
+  renderCajas(day, d);
+  updateResumen(d);
+  updateEfectivoRealCentral(d);
+}
+
+function toggleCajasOpcionales() {
+  const cont = document.getElementById('cajasOpcionalesContainer');
+  const icon = document.getElementById('iconToggleCajas');
+  const btn = document.getElementById('btnToggleCajasOpc');
+  const visible = cont.style.display !== 'none';
+  cont.style.display = visible ? 'none' : 'block';
+  icon.textContent = visible ? '▶' : '▼';
+  btn.innerHTML = `<span id="iconToggleCajas">${visible ? '▶' : '▼'}</span> CAJA 3 & CAJA 4 — ${visible ? 'Mostrar cajas opcionales' : 'Ocultar cajas opcionales'}`;
+  // Re-check if any optional caja has data; show indicator
+  const d = document.getElementById('selectedDate').value;
+  updateOptionalBadge(d);
+}
+
+function updateOptionalBadge(d) {
+  const day = state.dias[d];
+  if(!day) return;
+  const btn = document.getElementById('btnToggleCajasOpc');
+  const hasData = [3,4].some(i => {
+    const c = day.cajas[i] || {};
+    return (parseFloat(c.efectivo)||0) > 0 || (parseFloat(c.tarjetas)||0) > 0;
+  });
+  if(hasData) {
+    const cont = document.getElementById('cajasOpcionalesContainer');
+    if(cont.style.display === 'none') {
+      cont.style.display = 'block';
+      document.getElementById('btnToggleCajasOpc').innerHTML = '<span id="iconToggleCajas">▼</span> CAJA 3 & CAJA 4 — Ocultar cajas opcionales';
+    }
+  }
+}
+
+function renderCajas(day, d) {
+  const container = document.getElementById('cajasContainer');
+  const containerOpc = document.getElementById('cajasOpcGrid');
+  container.innerHTML = '';
+  containerOpc.innerHTML = '';
+  const nombres = ['CAJA 1', 'CAJA 2', 'CAJA CENTRAL', 'CAJA 3', 'CAJA 4'];
+  day.cajas.forEach((caja,i) => {
+    const esCentral = i === 2;
+    const esOpcional = i >= 3;
+    const div = document.createElement('div');
+    div.className = esOpcional ? 'caja-card opcional' : (esCentral ? 'caja-card central' : 'caja-card');
+    if(esCentral) div.style.borderColor = 'var(--gold)44';
+
+    // selector de cajero: Caja Central tiene su opción fija + las demás
+    const optionsCajero = esCentral
+      ? `<option value="Caja Central" selected>Caja Central</option>`
+      : `<option value="">— Seleccionar —</option>
+         ${state.cajeros.map(c=>`<option value="${c}" ${caja.cajero===c?'selected':''}>${c}</option>`).join('')}`;
+
+    div.innerHTML = `
+      <div class="caja-header">
+        <div class="caja-num" ${esCentral?'style="color:var(--gold)"':esOpcional?'style="color:var(--purple)"':''}>${nombres[i]}</div>
+        ${esCentral
+          ? '<span style="font-size:10px;color:var(--muted);letter-spacing:1px;text-transform:uppercase;">Fondo Recaudador</span>'
+          : esOpcional
+          ? '<span style="font-size:10px;color:var(--purple);letter-spacing:1px;text-transform:uppercase;opacity:0.7;">Caja Opcional</span>'
+          : ''}
+      </div>
+      ${!esCentral ? `
+      <div class="mb8">
+        <label>Cajero</label>
+        <select onchange="setCajaField('${d}',${i},'cajero',this.value)">
+          ${optionsCajero}
+        </select>
+      </div>` : ''}
+      <div class="mb8">
+        <label>${esCentral ? 'Efectivo propio en caja ($)' : 'Efectivo ($)'}</label>
+        <input type="number" placeholder="0" value="${caja.efectivo}" oninput="setCajaField('${d}',${i},'efectivo',this.value)">
+      </div>
+      <div style="display:flex;flex-wrap:wrap;gap:10px;margin-bottom:8px;align-items:flex-end;">
+        <div style="flex:1;min-width:140px;">
+          <label>Ajuste efectivo ($) <span style="font-size:9px;color:var(--muted)">+ o −</span></label>
+          <input type="number" placeholder="Ej: -500 o 200" value="${caja.ajusteEfectivo||''}" oninput="setCajaField('${d}',${i},'ajusteEfectivo',this.value)" style="border-color:${(parseFloat(caja.ajusteEfectivo||0))<0?'var(--red)44':(parseFloat(caja.ajusteEfectivo||0))>0?'var(--green)44':'var(--border)'}">
+        </div>
+        <div style="flex:1;min-width:140px;">
+          <label>Motivo del ajuste</label>
+          <input type="text" placeholder="Ej: faltante, billete falso..." value="${caja.motivoAjuste||''}" oninput="setCajaField('${d}',${i},'motivoAjuste',this.value)">
+        </div>
+      </div>
+      <div class="stat mb8" style="text-align:left;padding:10px 14px;display:flex;align-items:center;justify-content:space-between;">
+        <span style="font-size:10px;letter-spacing:2px;text-transform:uppercase;color:var(--muted);">${esCentral ? 'Fondos recibidos (propio + rindes C1 + C2)' : 'Efectivo Real'}</span>
+        <span id="efectivoReal_${i}" style="font-family:var(--mono);font-size:18px;font-weight:500;color:var(--green);">${pesos((parseFloat(caja.efectivo)||0)+(parseFloat(caja.ajusteEfectivo)||0))}</span>
+      </div>
+      ${!esCentral ? `
+      <div style="display:flex;flex-wrap:wrap;gap:10px;margin-bottom:8px;">
+        <div style="flex:1;min-width:120px;">
+          <label>Tarjeta ($)</label>
+          <input type="number" placeholder="0" value="${caja.tarjetas}" oninput="setCajaField('${d}',${i},'tarjetas',this.value)">
+        </div>
+        <div style="flex:1;min-width:120px;">
+          <label>N° Lote</label>
+          <input type="text" placeholder="Ej: 001234" value="${caja.lote||''}" oninput="setCajaField('${d}',${i},'lote',this.value)">
+        </div>
+      </div>` : ''}
+      ${!esCentral ? `
+      <div class="mb8">
+        <label style="color:var(--purple)">Venta Negro ($)</label>
+        <div style="display:flex;align-items:center;gap:8px;">
+          <input type="number" placeholder="0" value="${caja.negro||''}" oninput="setCajaField('${d}',${i},'negro',this.value)" style="border-color:var(--purple)44;flex:1;">
+          <div id="pctNegroCaja_${i}" style="font-family:var(--mono);font-size:13px;color:var(--purple);white-space:nowrap;min-width:52px;text-align:right;">${(()=>{const tot=(parseFloat(caja.efectivo)||0)+(parseFloat(caja.ajusteEfectivo)||0)+(parseFloat(caja.tarjetas)||0);const neg=parseFloat(caja.negro)||0;return tot>0?Math.round(neg/tot*100)+'%':'0%';})()}</div>
+        </div>
+      </div>
+      <div class="mb8">
+        <label>Tickets emitidos</label>
+        <input type="number" placeholder="0" value="${caja.tickets}" oninput="setCajaField('${d}',${i},'tickets',this.value)">
+      </div>` : ''}
+      <div class="divider"></div>
+      <div class="card-title" style="margin-bottom:10px;"><div class="dot" style="background:var(--red)"></div>${esCentral ? 'SALIDAS / GASTOS' : 'GASTOS DE CAJA'}</div>
+      <div id="gastosCaja_${i}"></div>
+      <button class="btn btn-ghost btn-sm" onclick="addGastoCaja('${d}',${i})">+ Agregar ${esCentral ? 'salida' : 'gasto'}</button>
+      <div class="divider"></div>
+      ${esCentral ? `
+      <div style="display:flex;flex-wrap:wrap;gap:10px;">
+        <div class="stat" style="flex:1;min-width:130px;">
+          <div class="stat-label">Salidas</div>
+          <div class="stat-value red" id="gastosCajaTotal_${i}">$0</div>
+        </div>
+        <div class="stat" style="flex:2;min-width:180px;border:1px solid var(--gold)44;background:var(--gold-dim);">
+          <div class="stat-label" style="color:var(--gold)">Saldo disponible (acumulado)</div>
+          <div class="stat-value gold" id="netoCaja_${i}">${pesos((parseFloat(caja.efectivo)||0)+(parseFloat(caja.ajusteEfectivo)||0))}</div>
+          <div id="saldoDesglose"></div>
+        </div>
+      </div>
+      <div style="display:none" id="totalCaja_${i}"></div>` : `
+      <div style="display:flex;flex-wrap:wrap;gap:10px;">
+        <div class="stat" style="flex:1;min-width:120px;">
+          <div class="stat-label">Venta Total</div>
+          <div class="stat-value gold" id="totalCaja_${i}">${pesos((parseFloat(caja.efectivo)||0)+(parseFloat(caja.ajusteEfectivo)||0)+(parseFloat(caja.tarjetas)||0))}</div>
+        </div>
+        <div class="stat" style="flex:1;min-width:120px;">
+          <div class="stat-label">Gastos</div>
+          <div class="stat-value red" id="gastosCajaTotal_${i}">$0</div>
+        </div>
+        <div class="stat" style="flex:1;min-width:120px;">
+          <div class="stat-label">Efectivo a rendir</div>
+          <div class="stat-value green" id="netoCaja_${i}">${pesos((parseFloat(caja.efectivo)||0)+(parseFloat(caja.ajusteEfectivo)||0))}</div>
+        </div>
+      </div>`}
+    `;
+    if(esOpcional) {
+      containerOpc.appendChild(div);
+    } else {
+      container.appendChild(div);
+    }
+    renderGastosCaja(day, d, i);
+  });
+  updateOptionalBadge(d);
+}
+
+function renderGastosCaja(day, d, i) {
+  const list = document.getElementById(`gastosCaja_${i}`);
+  if(!list) return;
+  const gastos = day.cajas[i].gastos || [];
+  list.innerHTML = gastos.map((g,gi)=>`
+    <div class="gasto-row">
+      <input type="text" placeholder="Concepto" value="${g.concepto||''}" list="conceptosGastos" oninput="setGastoCaja('${d}',${i},${gi},'concepto',this.value)">
+      <input type="number" placeholder="$0" value="${g.monto||''}" oninput="setGastoCaja('${d}',${i},${gi},'monto',this.value)">
+      <button class="btn btn-red btn-sm" onclick="removeGastoCaja('${d}',${i},${gi})">✕</button>
+    </div>
+  `).join('');
+  updateGastosCajaTotal(d, i);
+}
+
+function renderGastosCentral(day, d) {
+  const list = document.getElementById('gastosCentralList');
+  const gastos = day.gastosCentral || [];
+  list.innerHTML = gastos.map((g,i)=>`
+    <div class="gasto-row">
+      <input type="text" placeholder="Concepto" value="${g.concepto||''}" oninput="setGastoCentral('${d}',${i},'concepto',this.value)">
+      <input type="number" placeholder="$0" value="${g.monto||''}" oninput="setGastoCentral('${d}',${i},'monto',this.value)">
+      <button class="btn btn-red btn-sm" onclick="removeGastoCentral('${d}',${i})">✕</button>
+    </div>
+  `).join('');
+  updateTotalGastosCentral(d);
+}
+
+function calcRinde(d, i) {
+  // Efectivo a rendir de una caja = efectivo real - gastos propios
+  const c = (state.dias[d] && state.dias[d].cajas[i]) || {};
+  const efReal = (parseFloat(c.efectivo)||0) + (parseFloat(c.ajusteEfectivo)||0);
+  const gastos = (c.gastos||[]).reduce((s,g)=>s+(parseFloat(g.monto)||0),0);
+  return efReal - gastos;
+}
+
+// Calcula el saldo disponible acumulado hasta el día anterior (sin incluir 'd')
+function saldoAcumuladoHasta(fechaExcluida) {
+  // Obtener todas las fechas anteriores al día seleccionado, ordenadas
+  const fechasAnteriores = Object.keys(state.dias)
+    .filter(f => f < fechaExcluida)
+    .sort();
+
+  let saldoAcum = 0;
+  fechasAnteriores.forEach(f => {
+    const cc = (state.dias[f] && state.dias[f].cajas[2]) || {};
+    const efCC = (parseFloat(cc.efectivo)||0) + (parseFloat(cc.ajusteEfectivo)||0);
+    const rinde0 = calcRinde(f, 0);
+    const rinde1 = calcRinde(f, 1);
+    const rinde3 = calcRinde(f, 3);
+    const rinde4 = calcRinde(f, 4);
+    const totalFondos = efCC + rinde0 + rinde1 + rinde3 + rinde4;
+    const salidas = (cc.gastos||[]).reduce((s,g)=>s+(parseFloat(g.monto)||0),0);
+    saldoAcum += totalFondos - salidas;
+  });
+  return saldoAcum;
+}
+
+function updateEfectivoRealCentral(d) {
+  const cc = (state.dias[d] && state.dias[d].cajas[2]) || {};
+  const efCC = (parseFloat(cc.efectivo)||0) + (parseFloat(cc.ajusteEfectivo)||0);
+  const rinde0 = calcRinde(d, 0);
+  const rinde1 = calcRinde(d, 1);
+  const rinde3 = calcRinde(d, 3);
+  const rinde4 = calcRinde(d, 4);
+  const totalFondos = efCC + rinde0 + rinde1 + rinde3 + rinde4;
+
+  const el = document.getElementById('efectivoReal_2');
+  if(el) {
+    el.textContent = pesos(totalFondos);
+    el.style.color = 'var(--gold)';
+  }
+  const salidas = (cc.gastos||[]).reduce((s,g)=>s+(parseFloat(g.monto)||0),0);
+  const saldoHoy = totalFondos - salidas;
+
+  // Sumar saldo acumulado de días anteriores
+  const saldoPrevio = saldoAcumuladoHasta(d);
+  const saldoDisp = saldoHoy + saldoPrevio;
+
+  const elNeto = document.getElementById('netoCaja_2');
+  if(elNeto) elNeto.textContent = pesos(saldoDisp);
+
+  // Mostrar desglose si hay saldo previo
+  const elDesglose = document.getElementById('saldoDesglose');
+  if(elDesglose) {
+    if(saldoPrevio !== 0) {
+      elDesglose.innerHTML = `
+        <div style="display:flex;justify-content:space-between;font-size:11px;color:var(--muted);margin-top:6px;padding-top:6px;border-top:1px solid var(--border);">
+          <span>Saldo días anteriores:</span>
+          <span style="font-family:var(--mono);color:${saldoPrevio>=0?'var(--green)':'var(--red)'};">${pesos(saldoPrevio)}</span>
+        </div>
+        <div style="display:flex;justify-content:space-between;font-size:11px;color:var(--muted);margin-top:3px;">
+          <span>Movimiento de hoy:</span>
+          <span style="font-family:var(--mono);color:${saldoHoy>=0?'var(--green)':'var(--red)'};">${pesos(saldoHoy)}</span>
+        </div>`;
+    } else {
+      elDesglose.innerHTML = '';
+    }
+  }
+  // totalCaja_2 is hidden for central, but update anyway
+  const elTotal = document.getElementById('totalCaja_2');
+  if(elTotal) elTotal.textContent = pesos(totalFondos);
+}
+
+function setCajaField(d,i,field,val) {
+  state.dias[d].cajas[i][field] = val;
+  save();
+  updateResumen(d);
+  const caja = state.dias[d].cajas[i];
+  const ef = parseFloat(caja.efectivo)||0;
+  const ajuste = parseFloat(caja.ajusteEfectivo)||0;
+  const efReal = ef + ajuste;
+  const tar = parseFloat(caja.tarjetas)||0;
+  const neg = parseFloat(caja.negro)||0;
+  const gastos = (caja.gastos||[]).reduce((s,g)=>s+(parseFloat(g.monto)||0),0);
+  const ventaTotal = efReal + tar;
+
+  // efectivo real display (solo cajas 0 y 1; central se calcula aparte)
+  if(i !== 2) {
+    const elEfReal = document.getElementById(`efectivoReal_${i}`);
+    if(elEfReal) {
+      elEfReal.textContent = pesos(efReal);
+      elEfReal.style.color = ajuste < 0 ? 'var(--red)' : 'var(--green)';
+    }
+  }
+  // porcentaje negro (solo cajas 0 y 1)
+  if(i !== 2) {
+    const elPct = document.getElementById(`pctNegroCaja_${i}`);
+    if(elPct) elPct.textContent = ventaTotal > 0 ? Math.round(neg/ventaTotal*100)+'%' : '0%';
+    // venta total caja
+    const elTotal = document.getElementById(`totalCaja_${i}`);
+    if(elTotal) elTotal.textContent = pesos(ventaTotal);
+  }
+  // gastos
+  const elGastos = document.getElementById(`gastosCajaTotal_${i}`);
+  if(elGastos) elGastos.textContent = pesos(gastos);
+  // efectivo a rendir (cajas 0 y 1) = efectivo real - gastos
+  if(i !== 2) {
+    const elNeto = document.getElementById(`netoCaja_${i}`);
+    if(elNeto) elNeto.textContent = pesos(efReal - gastos);
+  }
+  // siempre recalcular el efectivo real de caja central
+  updateEfectivoRealCentral(d);
+}
+
+function addGastoCaja(d,i) {
+  state.dias[d].cajas[i].gastos.push({concepto:'',monto:''});
+  save();
+  renderGastosCaja(state.dias[d], d, i);
+}
+
+function removeGastoCaja(d,i,gi) {
+  state.dias[d].cajas[i].gastos.splice(gi,1);
+  save();
+  renderGastosCaja(state.dias[d], d, i);
+  updateResumen(d);
+}
+
+function setGastoCaja(d,i,gi,field,val) {
+  state.dias[d].cajas[i].gastos[gi][field] = val;
+  save();
+  updateGastosCajaTotal(d,i);
+  updateResumen(d);
+  if(field==='concepto') updateConceptosDatalist();
+}
+
+function updateGastosCajaTotal(d,i) {
+  const caja = state.dias[d].cajas[i];
+  const gastos = caja.gastos || [];
+  const total = gastos.reduce((s,g)=>s+(parseFloat(g.monto)||0),0);
+  const el = document.getElementById(`gastosCajaTotal_${i}`);
+  if(el) el.textContent = pesos(total);
+  const efReal = (parseFloat(caja.efectivo)||0) + (parseFloat(caja.ajusteEfectivo)||0);
+  const tar = parseFloat(caja.tarjetas)||0;
+  if(i !== 2) {
+    const elTotal = document.getElementById(`totalCaja_${i}`);
+    if(elTotal) elTotal.textContent = pesos(efReal+tar);
+    const elNeto = document.getElementById(`netoCaja_${i}`);
+    if(elNeto) elNeto.textContent = pesos(efReal - total);
+  }
+  // siempre recalcular central
+  updateEfectivoRealCentral(d);
+}
+
+function addGastoCentral() {
+  const d = document.getElementById('selectedDate').value;
+  state.dias[d].gastosCentral.push({concepto:'',monto:''});
+  save();
+  renderGastosCentral(state.dias[d], d);
+}
+
+function removeGastoCentral(d,i) {
+  state.dias[d].gastosCentral.splice(i,1);
+  save();
+  renderGastosCentral(state.dias[d], d);
+  updateResumen(d);
+}
+
+function setGastoCentral(d,i,field,val) {
+  state.dias[d].gastosCentral[i][field] = val;
+  save();
+  updateTotalGastosCentral(d);
+  updateResumen(d);
+}
+
+function updateTotalGastosCentral(d) {
+  const gastos = state.dias[d].gastosCentral || [];
+  const total = gastos.reduce((s,g)=>s+(parseFloat(g.monto)||0),0);
+  document.getElementById('totalGastosCentral').textContent = pesos(total);
+}
+
+function updateResumen(d) {
+  const s = dayStats(d);
+  document.getElementById('resTotal').textContent = pesos(s.total);
+  document.getElementById('resEfectivo').textContent = pesos(s.efectivo);
+  document.getElementById('resTarjeta').textContent = pesos(s.tarjeta);
+  document.getElementById('resNegro').textContent = pesos(s.negro);
+  const pct = s.total>0 ? Math.round(s.negro/s.total*100) : 0;
+  document.getElementById('resNegroPct').textContent = pct + '% del total';
+  document.getElementById('resGastos').textContent = pesos(s.gastos);
+  document.getElementById('resTickets').textContent = s.tickets;
+
+  // ── POZO DE EFECTIVO ──
+  const day = state.dias[d];
+  if(!day) return;
+
+  // efectivo a rendir de cajas 1, 2 y opcionales (3, 4)
+  const rendes = [0,1,3,4].map(i => {
+    const c = (day.cajas && day.cajas[i]) || {};
+    const efReal = (parseFloat(c.efectivo)||0) + (parseFloat(c.ajusteEfectivo)||0);
+    const gastos = (c.gastos||[]).reduce((s,g)=>s+(parseFloat(g.monto)||0),0);
+    return efReal - gastos;
+  });
+
+  // efectivo propio de caja central (efectivo real de la caja central)
+  const cc = day.cajas[2] || {};
+  const efCentral = (parseFloat(cc.efectivo)||0) + (parseFloat(cc.ajusteEfectivo)||0);
+
+  // gastos de oficina (gastos de la caja central)
+  const gastosCentral = (cc.gastos||[]).reduce((s,g)=>s+(parseFloat(g.monto)||0),0);
+
+  const saldoHoyPozo = rendes[0] + rendes[1] + rendes[2] + rendes[3] + efCentral - gastosCentral;
+  const saldoPrevioPozo = saldoAcumuladoHasta(d);
+  const total = saldoHoyPozo + saldoPrevioPozo;
+
+  const elC0 = document.getElementById('pozoCaja0');
+  const elC1 = document.getElementById('pozoCaja1');
+  const elC2 = document.getElementById('pozoCaja2');
+  const elC3 = document.getElementById('pozoCaja3');
+  const c3wrap = document.getElementById('pozoCaja2Wrap');
+  const c4wrap = document.getElementById('pozoCaja3Wrap');
+  const elCC = document.getElementById('pozoCentral');
+  const elGC = document.getElementById('pozoGastosCentral');
+  const elTot = document.getElementById('pozoTotal');
+  const elPrev = document.getElementById('pozoPrevio');
+  if(elC0) elC0.textContent = pesos(rendes[0]);
+  if(elC1) elC1.textContent = pesos(rendes[1]);
+  if(elC2) elC2.textContent = pesos(rendes[2]);
+  if(elC3) elC3.textContent = pesos(rendes[3]);
+  if(c3wrap) c3wrap.style.display = rendes[2] !== 0 ? '' : 'none';
+  if(c4wrap) c4wrap.style.display = rendes[3] !== 0 ? '' : 'none';
+  if(elCC) elCC.textContent = pesos(efCentral);
+  if(elGC) elGC.textContent = pesos(gastosCentral);
+  if(elTot) { elTot.textContent = pesos(total); elTot.style.color = total>=0 ? 'var(--gold)' : 'var(--red)'; }
+  if(elPrev) { elPrev.textContent = pesos(saldoPrevioPozo); elPrev.style.color = saldoPrevioPozo>=0 ? 'var(--green)' : 'var(--red)'; }
+}
+
+function setToday() {
+  document.getElementById('selectedDate').value = todayStr();
+  loadCargaDay();
+}
+
+// ============================================================
+// STATS
+// ============================================================
+function setPeriod(p, el) {
+  currentPeriod = p;
+  document.querySelectorAll('.ptab').forEach(t=>t.classList.remove('active'));
+  el.classList.add('active');
+  renderStats();
+}
+
+function renderStats() {
+  const container = document.getElementById('statsContent');
+  container.innerHTML = '';
+  destroyCharts();
+
+  const today = todayStr();
+  const dates = Object.keys(state.dias).sort();
+
+  if(currentPeriod === 'dia') renderStatsDia(container, today);
+  else if(currentPeriod === 'semana') renderStatsPeriod(container, 7, 'ÚLTIMOS 7 DÍAS');
+  else if(currentPeriod === 'mes') renderStatsPeriod(container, 30, 'ÚLTIMOS 30 DÍAS');
+  else if(currentPeriod === 'comparativo') renderStatsComparativo(container);
+}
+
+function getDateRange(days) {
+  const dates = [];
+  for(let i=days-1;i>=0;i--) {
+    const d = new Date(); d.setDate(d.getDate()-i);
+    dates.push(d.toISOString().slice(0,10));
+  }
+  return dates;
+}
+
+function dayStats(dateStr) {
+  const day = state.dias[dateStr];
+  if(!day) return {total:0,tarjeta:0,gastos:0,tickets:0,efectivo:0,negro:0,gastosCentral:0};
+  let total=0,tarjeta=0,gastos=0,tickets=0,efectivo=0,negro=0,gastosCentral=0;
+  day.cajas.forEach((c,i)=>{
+    if(i === 2) {
+      // Caja Central: NO suma a venta. Solo contabilizamos sus salidas aparte.
+      (c.gastos||[]).forEach(g=>gastosCentral+=parseFloat(g.monto)||0);
+      return;
+    }
+    const ef=(parseFloat(c.efectivo)||0)+(parseFloat(c.ajusteEfectivo)||0);
+    const tar=parseFloat(c.tarjetas)||0, neg=parseFloat(c.negro)||0;
+    total+=ef+tar; tarjeta+=tar; efectivo+=ef; negro+=neg;
+    tickets+=parseInt(c.tickets)||0;
+    (c.gastos||[]).forEach(g=>gastos+=parseFloat(g.monto)||0);
+  });
+  // Remove double-counted gastos from optional cajas (3 and 4) if they overlap
+  // No change needed: cajas 3 and 4 are regular cajas, they already counted correctly above
+  return {total,tarjeta,gastos,tickets,efectivo,negro,gastosCentral};
+}
+
+function renderStatsDia(container, today) {
+  const s = dayStats(today);
+  const day = state.dias[today];
+  const ticketProm = s.tickets>0 ? s.total/s.tickets : 0;
+
+  container.innerHTML = `
+    <div class="grid4 mb16">
+      <div class="stat"><div class="stat-label">Venta Total</div><div class="stat-value gold">${pesos(s.total)}</div></div>
+      <div class="stat"><div class="stat-label">Efectivo</div><div class="stat-value green">${pesos(s.efectivo)}</div></div>
+      <div class="stat"><div class="stat-label">Tarjeta</div><div class="stat-value blue">${pesos(s.tarjeta)}</div></div>
+      <div class="stat"><div class="stat-label">Gastos</div><div class="stat-value red">${pesos(s.gastos)}</div></div>
+    </div>
+    <div class="grid4 mb16">
+      <div class="stat">
+        <div class="stat-label" style="color:var(--purple)">Venta Negro</div>
+        <div class="stat-value" style="color:var(--purple)">${pesos(s.negro)}</div>
+        <div style="font-size:11px;color:var(--muted);margin-top:4px;">${s.total>0?Math.round(s.negro/s.total*100):0}% del total</div>
+      </div>
+      <div class="stat"><div class="stat-label">Tickets totales</div><div class="stat-value">${s.tickets}</div></div>
+      <div class="stat"><div class="stat-label">Promedio/ticket</div><div class="stat-value gold">${pesos(ticketProm)}</div></div>
+      <div class="stat"><div class="stat-label">Resultado neto</div><div class="stat-value ${(s.total-s.gastos)>=0?'green':'red'}">${pesos(s.total-s.gastos)}</div></div>
+    </div>
+    ${day ? `
+    <div class="card">
+      <div class="card-title"><div class="dot"></div>DETALLE POR CAJA — HOY</div>
+      <table>
+        <thead><tr><th>Caja</th><th>Cajero</th><th class="num">Efectivo</th><th class="num">Tarjeta</th><th class="num" style="color:var(--purple)">Negro</th><th class="num">% Negro</th><th class="num">Total</th><th class="num">Gastos</th><th class="num">Tickets</th></tr></thead>
+        <tbody>
+          ${day.cajas.map((c,i)=>{
+            const nombres2 = ['CAJA 1','CAJA 2','CAJA CENTRAL','CAJA 3','CAJA 4'];
+            const esCentral = i === 2;
+            const ef=(parseFloat(c.efectivo)||0)+(parseFloat(c.ajusteEfectivo)||0);
+            const tar=parseFloat(c.tarjetas)||0, neg=parseFloat(c.negro)||0;
+            const tkt=parseInt(c.tickets)||0;
+            const gst=(c.gastos||[]).reduce((s,g)=>s+(parseFloat(g.monto)||0),0);
+            const tot=esCentral ? 0 : ef+tar;
+            const pctNeg=tot>0?Math.round(neg/tot*100):0;
+            return `<tr ${esCentral?'style="opacity:.7;font-style:italic;"':''}>
+              <td class="yellow">${nombres2[i]||'CAJA '+(i+1)}</td>
+              <td>${esCentral ? '<span style="font-size:10px;letter-spacing:1px;color:var(--muted)">FONDO</span>' : (c.cajero||'—')}</td>
+              <td class="num green">${esCentral ? '—' : pesos(ef)}</td>
+              <td class="num blue">${esCentral ? '—' : pesos(tar)}</td>
+              <td class="num purple">${esCentral ? '—' : pesos(neg)}</td>
+              <td class="num" style="color:var(--muted)">${esCentral ? '—' : pctNeg+'%'}</td>
+              <td class="num yellow">${esCentral ? '—' : pesos(tot)}</td>
+              <td class="num red">${pesos(gst)}</td>
+              <td class="num">${esCentral ? '—' : tkt}</td>
+            </tr>`;
+          }).join('')}
+        </tbody>
+      </table>
+    </div>` : '<div class="card" style="text-align:center;color:var(--muted);padding:40px;">Sin datos para hoy todavía.</div>'}
+  `;
+}
+
+function renderStatsPeriod(container, days, title) {
+  const range = getDateRange(days);
+  const chartLabels = range.map(d=>d.slice(5));
+  const chartTotal = range.map(d=>dayStats(d).total);
+  const chartTarjeta = range.map(d=>dayStats(d).tarjeta);
+  const chartTickets = range.map(d=>dayStats(d).tickets);
+
+  const totals = range.map(d=>dayStats(d).total).filter(v=>v>0);
+  const maxV = totals.length ? Math.max(...totals) : 0;
+  const minV = totals.length ? Math.min(...totals) : 0;
+  const avgV = totals.length ? totals.reduce((a,b)=>a+b,0)/totals.length : 0;
+  const tkList = range.map(d=>dayStats(d).tickets).filter(v=>v>0);
+  const maxTk = tkList.length ? Math.max(...tkList) : 0;
+  const minTk = tkList.length ? Math.min(...tkList) : 0;
+
+  container.innerHTML = `
+    <div class="card-title"><div class="dot"></div>${title}</div>
+    <div class="grid3 mb16">
+      <div class="stat"><div class="stat-label">Máx. venta día</div><div class="stat-value gold">${pesos(maxV)}</div></div>
+      <div class="stat"><div class="stat-label">Promedio diario</div><div class="stat-value">${pesos(avgV)}</div></div>
+      <div class="stat"><div class="stat-label">Mín. venta día</div><div class="stat-value">${pesos(minV)}</div></div>
+    </div>
+    <div class="card mb16">
+      <div class="card-title"><div class="dot"></div>VENTAS DIARIAS</div>
+      <div class="chart-wrap"><canvas id="chartVentas"></canvas></div>
+    </div>
+    <div class="card mb16">
+      <div class="card-title"><div class="dot"></div>TICKETS POR DÍA</div>
+      <div class="chart-wrap"><canvas id="chartTickets"></canvas></div>
+      <div class="grid2 mt16">
+        <div class="stat"><div class="stat-label">Máx. tickets</div><div class="stat-value">${maxTk}</div></div>
+        <div class="stat"><div class="stat-label">Mín. tickets</div><div class="stat-value">${minTk}</div></div>
+      </div>
+    </div>
+  `;
+
+  setTimeout(()=>{
+    makeLineChart('chartVentas', chartLabels, [
+      {label:'Total',data:chartTotal,color:'#c5a028'},
+      {label:'Tarjeta',data:chartTarjeta,color:'#60a5fa'}
+    ]);
+    makeBarChart('chartTickets', chartLabels, chartTickets, '#22c55e');
+  }, 50);
+}
+
+function renderStatsComparativo(container) {
+  const range30 = getDateRange(30);
+  const nombres = ['CAJA 1','CAJA 2','CAJA CENTRAL'];
+  const cajaStats = [0,1,2,3,4].map(()=>({total:0,tarjeta:0,gastos:0,tickets:0,efectivo:0,negro:0}));
+  range30.forEach(d=>{
+    const day=state.dias[d];
+    if(!day) return;
+    day.cajas.forEach((c,i)=>{
+      if(!cajaStats[i]) return;
+      if(i === 2) {
+        // Central: solo gastos/salidas, no venta
+        (c.gastos||[]).forEach(g=>cajaStats[i].gastos+=parseFloat(g.monto)||0);
+        return;
+      }
+      const ef=parseFloat(c.efectivo)||0,tar=parseFloat(c.tarjetas)||0,neg=parseFloat(c.negro)||0;
+      cajaStats[i].total+=ef+tar;
+      cajaStats[i].tarjeta+=tar;
+      cajaStats[i].efectivo+=ef;
+      cajaStats[i].negro+=neg;
+      cajaStats[i].tickets+=parseInt(c.tickets)||0;
+      (c.gastos||[]).forEach(g=>cajaStats[i].gastos+=parseFloat(g.monto)||0);
+    });
+  });
+
+  const rows = cajaStats.map((cs,i)=>{
+    const esCentral = i === 2;
+    return `<tr ${esCentral?'style="opacity:.7;font-style:italic;"':''}>
+    <td class="yellow">${nombres[i]}${esCentral?' <span style="font-size:9px;color:var(--muted)">(fondo)</span>':''}</td>
+    <td class="num yellow">${esCentral ? '—' : pesos(cs.total)}</td>
+    <td class="num blue">${esCentral ? '—' : pesos(cs.tarjeta)}</td>
+    <td class="num green">${esCentral ? '—' : pesos(cs.efectivo)}</td>
+    <td class="num purple">${esCentral ? '—' : pesos(cs.negro)}</td>
+    <td class="num" style="color:var(--muted)">${esCentral ? '—' : (cs.total>0?Math.round(cs.negro/cs.total*100):0)+'%'}</td>
+    <td class="num red">${pesos(cs.gastos)}</td>
+    <td class="num">${esCentral ? '—' : cs.tickets}</td>
+  </tr>`;
+  }).join('');
+
+  container.innerHTML = `
+    <div class="card mb16">
+      <div class="card-title"><div class="dot"></div>COMPARATIVO CAJAS — ÚLTIMOS 30 DÍAS</div>
+      <table>
+        <thead><tr><th>Caja</th><th class="num">Venta Total</th><th class="num">Tarjeta</th><th class="num">Efectivo</th><th class="num" style="color:var(--purple)">Negro</th><th class="num">% Negro</th><th class="num">Gastos</th><th class="num">Tickets</th></tr></thead>
+        <tbody>${rows}</tbody>
+      </table>
+    </div>
+    <div class="grid3">
+      <div class="card">
+        <div class="card-title"><div class="dot"></div>VENTA TOTAL POR CAJA</div>
+        <div class="chart-wrap"><canvas id="chartCompTotal"></canvas></div>
+      </div>
+      <div class="card">
+        <div class="card-title"><div class="dot"></div>TICKETS POR CAJA</div>
+        <div class="chart-wrap"><canvas id="chartCompTickets"></canvas></div>
+      </div>
+      <div class="card">
+        <div class="card-title"><div class="dot"></div>NEGRO POR CAJA</div>
+        <div class="chart-wrap"><canvas id="chartCompNegro"></canvas></div>
+      </div>
+    </div>
+  `;
+
+  setTimeout(()=>{
+    makePieChart('chartCompTotal', ['Caja 1','Caja 2'], [cajaStats[0].total,cajaStats[1].total], ['#c5a028','#60a5fa']);
+    makePieChart('chartCompTickets', ['Caja 1','Caja 2'], [cajaStats[0].tickets,cajaStats[1].tickets], ['#22c55e','#f59e0b']);
+    makePieChart('chartCompNegro', ['Caja 1','Caja 2'], [cajaStats[0].negro,cajaStats[1].negro], ['#a855f7','#ef4444']);
+  }, 50);
+}
+
+// ── CHARTS ──
+function destroyCharts() {
+  Object.values(charts).forEach(c=>c.destroy());
+  charts = {};
+}
+
+function makeLineChart(id, labels, datasets, color) {
+  const ctx = document.getElementById(id);
+  if(!ctx) return;
+  charts[id] = new Chart(ctx, {
+    type:'line',
+    data:{
+      labels,
+      datasets: datasets.map(ds=>({
+        label:ds.label, data:ds.data,
+        borderColor:ds.color, backgroundColor:ds.color+'22',
+        borderWidth:2, pointRadius:3, fill:true, tension:.3
+      }))
+    },
+    options:{
+      responsive:true, maintainAspectRatio:false,
+      plugins:{legend:{labels:{color:'#6b6b7e',font:{size:11}}}},
+      scales:{
+        x:{ticks:{color:'#6b6b7e',font:{size:10}},grid:{color:'#2a2a32'}},
+        y:{ticks:{color:'#6b6b7e',font:{size:10},callback:v=>'$'+v.toLocaleString('es-AR')},grid:{color:'#2a2a32'}}
+      }
+    }
+  });
+}
+
+function makeBarChart(id, labels, data, color) {
+  const ctx = document.getElementById(id);
+  if(!ctx) return;
+  charts[id] = new Chart(ctx, {
+    type:'bar',
+    data:{labels,datasets:[{data,backgroundColor:color+'88',borderColor:color,borderWidth:1}]},
+    options:{
+      responsive:true, maintainAspectRatio:false,
+      plugins:{legend:{display:false}},
+      scales:{
+        x:{ticks:{color:'#6b6b7e',font:{size:10}},grid:{color:'#2a2a32'}},
+        y:{ticks:{color:'#6b6b7e',font:{size:10}},grid:{color:'#2a2a32'}}
+      }
+    }
+  });
+}
+
+function makePieChart(id, labels, data, colors) {
+  const ctx = document.getElementById(id);
+  if(!ctx) return;
+  charts[id] = new Chart(ctx, {
+    type:'doughnut',
+    data:{labels,datasets:[{data,backgroundColor:colors.map(c=>c+'cc'),borderColor:colors,borderWidth:2}]},
+    options:{
+      responsive:true, maintainAspectRatio:false,
+      plugins:{legend:{labels:{color:'#e8e8f0',font:{size:12}}}}
+    }
+  });
+}
+
+// ============================================================
+// IMPUESTOS
+// ============================================================
+function addImpuesto() {
+  const nombre = document.getElementById('impNombre').value.trim();
+  const monto = parseFloat(document.getElementById('impMonto').value)||0;
+  const vence = document.getElementById('impVence').value;
+  const alerta = parseInt(document.getElementById('impAlerta').value)||5;
+  if(!nombre || !vence) { alert('Completá nombre y vencimiento.'); return; }
+  state.impuestos.push({id:Date.now(), nombre, monto, vence, alerta, pagado:false});
+  save();
+  document.getElementById('impNombre').value='';
+  document.getElementById('impMonto').value='';
+  document.getElementById('impVence').value='';
+  renderImpuestos();
+}
+
+function renderImpuestos() {
+  const container = document.getElementById('impuestosList');
+  if(!container) return;
+  if(!state.impuestos.length) {
+    container.innerHTML = '<div class="card" style="text-align:center;color:var(--muted);padding:40px;">No hay impuestos cargados.</div>';
+    updateBadge();
+    return;
+  }
+
+  const today = new Date(); today.setHours(0,0,0,0);
+  const sorted = [...state.impuestos].sort((a,b)=>a.vence.localeCompare(b.vence));
+
+  container.innerHTML = `<div class="grid3">${sorted.map(imp=>{
+    const vence = new Date(imp.vence+'T00:00:00');
+    const diff = Math.ceil((vence-today)/(1000*60*60*24));
+    let cls='imp-card', status='', statusColor='var(--muted)';
+    if(imp.pagado){ cls+=' pagado'; status='✓ PAGADO'; statusColor='var(--green)'; }
+    else if(diff<=0){ cls+=' vencido'; status='⚠ VENCIDO'; statusColor='var(--red)'; }
+    else if(diff<=imp.alerta){ cls+=' alerta'; status=`⏰ Vence en ${diff} días`; statusColor='var(--yellow)'; }
+    else { status=`Faltan ${diff} días`; }
+
+    return `<div class="${cls}">
+      <div class="imp-nombre">${imp.nombre}</div>
+      <div class="imp-monto">${pesos(imp.monto)}</div>
+      <div class="imp-vence">Vence: ${imp.vence}</div>
+      <div class="imp-status" style="color:${statusColor}">${status}</div>
+      <div class="flex mt16">
+        ${!imp.pagado ? `<button class="btn btn-green btn-sm" onclick="togglePagado(${imp.id})">Marcar pagado</button>` : `<button class="btn btn-ghost btn-sm" onclick="togglePagado(${imp.id})">Desmarcar</button>`}
+        <button class="btn btn-red btn-sm" onclick="removeImpuesto(${imp.id})">✕</button>
+      </div>
+    </div>`;
+  }).join('')}</div>`;
+
+  updateBadge();
+}
+
+function togglePagado(id) {
+  const imp = state.impuestos.find(i=>i.id===id);
+  if(imp) { imp.pagado = !imp.pagado; save(); renderImpuestos(); }
+}
+
+function removeImpuesto(id) {
+  state.impuestos = state.impuestos.filter(i=>i.id!==id);
+  save(); renderImpuestos();
+}
+
+function updateBadge() {
+  const today = new Date(); today.setHours(0,0,0,0);
+  const alertas = state.impuestos.filter(imp=>{
+    if(imp.pagado) return false;
+    const vence = new Date(imp.vence+'T00:00:00');
+    const diff = Math.ceil((vence-today)/(1000*60*60*24));
+    return diff<=imp.alerta;
+  }).length;
+  const tab = document.getElementById('tabImpuestos');
+  const existing = tab.querySelector('.badge');
+  if(existing) existing.remove();
+  if(alertas>0) tab.innerHTML += `<span class="badge">${alertas}</span>`;
+}
+
+// ============================================================
+// CAJEROS
+// ============================================================
+function renderCajeros() {
+  const list = document.getElementById('cajerosList');
+  list.innerHTML = state.cajeros.map((c,i)=>`
+    <div class="flex mb8">
+      <input type="text" value="${c}" oninput="state.cajeros[${i}]=this.value;save();" style="flex:1">
+      <button class="btn btn-red btn-sm" onclick="removeCajero(${i})">✕</button>
+    </div>
+  `).join('');
+}
+
+function addCajero() {
+  const val = document.getElementById('nuevoCajero').value.trim();
+  if(!val) return;
+  state.cajeros.push(val);
+  document.getElementById('nuevoCajero').value='';
+  save(); renderCajeros();
+}
+
+function removeCajero(i) {
+  if(state.cajeros.length<=1){alert('Debe haber al menos un cajero.');return;}
+  state.cajeros.splice(i,1);
+  save(); renderCajeros();
+}
+
+// ============================================================
+// EXPORT / IMPORT
+// ============================================================
+function exportData(showStatus) {
+  const now = new Date();
+  const ts = now.toISOString().slice(0,16).replace('T','-').replace(':','-');
+  const blob = new Blob([JSON.stringify(state,null,2)], {type:'application/json'});
+  const a = document.createElement('a');
+  a.href = URL.createObjectURL(blob);
+  a.download = `sabores-royal-backup-${ts}.json`;
+  a.click();
+  if(showStatus) {
+    const el = document.getElementById('backupStatus');
+    if(el) {
+      el.textContent = '✓ Guardado ' + now.toLocaleTimeString('es-AR',{hour:'2-digit',minute:'2-digit'});
+      el.style.color = 'var(--green)';
+      setTimeout(()=>{ el.textContent=''; }, 4000);
+    }
+  }
+}
+
+// Descarga automática al cerrar/recargar
+window.addEventListener('beforeunload', function() {
+  exportData(false);
+});
+
+function importData() {
+  const input = document.createElement('input');
+  input.type='file'; input.accept='.json';
+  input.onchange = e=>{
+    const file = e.target.files[0];
+    const reader = new FileReader();
+    reader.onload = async ev=>{
+      try {
+        state = JSON.parse(ev.target.result);
+        normalizeState();
+        localStorage.setItem('cajasApp_v2', JSON.stringify(state));
+        await pushRemoteState();
+        alert('Datos importados correctamente.'); location.reload();
+      } catch(e){ alert('Archivo inválido.'); }
+    };
+    reader.readAsText(file);
+  };
+  input.click();
+}
+
+async function resetData() {
+  if(!confirm('¿Borrar TODOS los datos? Esta acción no se puede deshacer.')) return;
+  state = { dias:{}, impuestos:[], cajeros:['Gastón','Matías','Gabriel','Emanuel'] };
+  localStorage.removeItem('cajasApp_v2');
+  try{ await pushRemoteState(); }catch(e){}
+  location.reload();
+}
+
+// ============================================================
+// AUTOCOMPLETADO DE CONCEPTOS
+// ============================================================
+function updateConceptosDatalist() {
+  const conceptos = new Set();
+  Object.values(state.dias).forEach(day => {
+    (day.cajas||[]).forEach(c => {
+      (c.gastos||[]).forEach(g => { if(g.concepto && g.concepto.trim()) conceptos.add(g.concepto.trim()); });
+    });
+  });
+  const dl = document.getElementById('conceptosGastos');
+  if(dl) dl.innerHTML = [...conceptos].sort().map(c=>`<option value="${c}">`).join('');
+}
+
+// ============================================================
+// BÚSQUEDA DE GASTOS
+// ============================================================
+function renderBusquedaGastos() {
+  const q = (document.getElementById('buscarConcepto').value||'').toLowerCase().trim();
+  const desde = document.getElementById('buscarDesde').value;
+  const hasta = document.getElementById('buscarHasta').value;
+  const nombres = ['Caja 1','Caja 2','Caja Central (salidas)','Caja 3','Caja 4'];
+  const resultados = [];
+
+  Object.entries(state.dias).sort((a,b)=>b[0].localeCompare(a[0])).forEach(([fecha, day])=>{
+    if(desde && fecha < desde) return;
+    if(hasta && fecha > hasta) return;
+    (day.cajas||[]).forEach((c,ci)=>{
+      (c.gastos||[]).forEach(g=>{
+        if(!g.concepto && !g.monto) return;
+        if(q && !(g.concepto||'').toLowerCase().includes(q)) return;
+        resultados.push({ fecha, caja: nombres[ci]||`Caja ${ci+1}`, cajero: c.cajero||'—', concepto: g.concepto||'—', monto: parseFloat(g.monto)||0 });
+      });
+    });
+  });
+
+  const container = document.getElementById('gastosResultados');
+  if(!resultados.length) {
+    container.innerHTML = `<div class="card" style="text-align:center;color:var(--muted);padding:40px;">No se encontraron gastos.</div>`;
+    return;
+  }
+
+  const totalFiltrado = resultados.reduce((s,r)=>s+r.monto,0);
+
+  container.innerHTML = `
+    <div class="card">
+      <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:16px;">
+        <div class="card-title" style="margin:0;"><div class="dot"></div>${resultados.length} RESULTADO${resultados.length!==1?'S':''}</div>
+        <div style="font-family:var(--mono);font-size:16px;color:var(--red);">Total: ${pesos(totalFiltrado)}</div>
+      </div>
+      <table>
+        <thead><tr><th>Fecha</th><th>Caja</th><th>Cajero</th><th>Concepto</th><th class="num">Monto</th></tr></thead>
+        <tbody>
+          ${resultados.map(r=>`<tr>
+            <td style="font-family:var(--mono);font-size:12px;">${r.fecha}</td>
+            <td class="yellow">${r.caja}</td>
+            <td style="color:var(--muted)">${r.cajero}</td>
+            <td>${r.concepto}</td>
+            <td class="num red">${pesos(r.monto)}</td>
+          </tr>`).join('')}
+        </tbody>
+      </table>
+    </div>`;
+}
+
+// ============================================================
+// TABS
+// ============================================================
+function switchTab(name, el) {
+  document.querySelectorAll('.tab').forEach(t=>t.classList.remove('active'));
+  el.classList.add('active');
+  document.querySelectorAll('.panel').forEach(p=>p.classList.remove('active'));
+  document.getElementById(`panel-${name}`).classList.add('active');
+  if(name==='estadisticas') { destroyCharts(); renderStats(); }
+  if(name==='impuestos') renderImpuestos();
+  if(name==='ajustes') renderCajeros();
+  if(name==='gastos') { updateConceptosDatalist(); renderBusquedaGastos(); }
+}
+
+// ============================================================
+// UTILS
+// ============================================================
+function pesos(n) {
+  return '$' + (n||0).toLocaleString('es-AR',{minimumFractionDigits:0,maximumFractionDigits:0});
+}
+
+// ============================================================
+// INIT
+// ============================================================
+async function afterLogin(){
+  const nameEl = document.getElementById('adminName');
+  if(nameEl) nameEl.textContent = cajaAdminName || '';
+  try{
+    await pullRemoteState();
+    normalizeState();
+    try{ localStorage.setItem('cajasApp_v2', JSON.stringify(state)); }catch(e){}
+  }catch(e){
+    console.warn('No se pudo sincronizar con el servidor, se usan los datos locales:', e);
+  }
+  finishInit();
+}
+function finishInit() {
+  const now = new Date();
+  document.getElementById('headerDate').textContent = now.toLocaleDateString('es-AR',{weekday:'long',day:'numeric',month:'long',year:'numeric'});
+  const dateInput = document.getElementById('selectedDate');
+  dateInput.value = todayStr();
+  dateInput.addEventListener('change', loadCargaDay);
+  loadCargaDay();
+  renderImpuestos();
+  updateConceptosDatalist();
+}
+async function boot(){
+  load();
+  loadCajaSession();
+  if(cajaSession && cajaSession.access_token){
+    try{
+      cajaAdminName = await verifyCajaAdmin(cajaSession.uid);
+      await afterLogin();
+      return;
+    }catch(e){ saveCajaSession(null); }
+  }
+  renderLoginOverlay();
+}
+
+boot();
+</script>
+</body>
+</html>
