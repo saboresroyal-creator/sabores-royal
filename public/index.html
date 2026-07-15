@@ -859,7 +859,7 @@ async function uploadProductPhoto(base64, productId){
 
 async function apiSyncContent(){
   try{
-    const data = await supaFetch('/app_settings?setting_key=in.(novedades,ofertas,banner_novedades,banner_ofertas,client_discounts,wholesale_clients)&select=setting_key,setting_value', 'GET');
+    const data = await supaFetch('/app_settings?setting_key=in.(novedades,ofertas,banner_novedades,banner_ofertas,client_discounts,wholesale_clients,categories,store_config,fiscal_config,banners)&select=setting_key,setting_value', 'GET');
     if(!data || data.length===0) return;
     let changed = false;
     data.forEach(row=>{
@@ -876,6 +876,20 @@ async function apiSyncContent(){
         }
         if(row.setting_key==='banner_ofertas' && JSON.stringify(parsed)!==JSON.stringify(state.bannerOfertas)){
           state.bannerOfertas = parsed; changed = true;
+        }
+        if(row.setting_key==='categories' && parsed && JSON.stringify(parsed)!==JSON.stringify(state.categories)){
+          state.categories = parsed; changed = true;
+        }
+        if(row.setting_key==='banners' && JSON.stringify(parsed)!==JSON.stringify(state.banners)){
+          state.banners = parsed||[]; changed = true;
+        }
+        if(row.setting_key==='store_config' && parsed){
+          const merged = Object.assign({}, state.config, parsed);
+          if(JSON.stringify(merged)!==JSON.stringify(state.config)){ state.config = merged; changed = true; }
+        }
+        if(row.setting_key==='fiscal_config' && parsed){
+          const merged = Object.assign({}, state.fiscal, parsed);
+          if(JSON.stringify(merged)!==JSON.stringify(state.fiscal)){ state.fiscal = merged; changed = true; }
         }
         if(row.setting_key==='client_discounts'){
           const discounts = parsed || {};
@@ -931,6 +945,20 @@ async function apiSaveContent(key){
   }catch(e){ console.warn('Error guardando contenido:', e); toast('Error guardando: '+e.message, 'err'); }
 }
 
+// Igual que apiSaveContent, pero genérico: guarda cualquier valor bajo
+// cualquier setting_key de app_settings (categorías, config, fiscal, banners).
+async function apiSaveSetting(key, value){
+  try{
+    const val = JSON.stringify(value);
+    const existing = await adminFetch('/app_settings?setting_key=eq.'+key+'&select=id', 'GET');
+    if(existing && existing.length>0){
+      await adminFetch('/app_settings?setting_key=eq.'+key, 'PATCH', {setting_value: val});
+    }else{
+      await adminFetch('/app_settings', 'POST', {setting_key: key, setting_value: val});
+    }
+  }catch(e){ console.warn('Error guardando '+key+':', e); toast('Error guardando: '+e.message, 'err'); }
+}
+
 // Sub-administradores: ahora son usuarios reales de Supabase Auth
 // (creados a mano en el Dashboard) vinculados vía admin_link_user.
 // Ya no se guardan contraseñas acá.
@@ -939,6 +967,26 @@ async function apiSyncAdminUsers(){
     const rows = await adminFetch('/admin_users?select=user_id,name,email,is_super,perms&order=created_at.asc', 'GET');
     state.subAdmins = (rows||[]).filter(a=>!a.is_super);
   }catch(e){ console.warn('Sync admin_users:', e); }
+}
+
+async function apiSyncSuggestions(){
+  if(!IS_ADMIN_APP || !state.adminAuthed) return;
+  try{
+    const rows = await adminFetch('/suggestions?select=*&order=created_at.desc&limit=200', 'GET');
+    const mapped = (rows||[]).map(r=>({
+      id: String(r.id),
+      name: r.client_name || 'Anónimo',
+      phone: r.client_phone || '',
+      message: r.message,
+      date: r.created_at,
+      read: !!r.read,
+    }));
+    if(JSON.stringify(mapped) !== JSON.stringify(state.suggestions)){
+      state.suggestions = mapped;
+      saveState();
+      render();
+    }
+  }catch(e){ console.warn('Sync sugerencias:', e); }
 }
 
 async function apiSyncClients(){
@@ -1098,6 +1146,84 @@ async function apiDeleteOrder(orderId){
     console.warn('Error eliminando pedido:', e);
     toast('No se pudo eliminar el pedido en el servidor: '+e.message, 'err');
   }
+}
+
+// Convierte una fila de la tabla `vouchers` al shape que ya usa el resto de la app.
+function mapVoucherRow(row){
+  return {
+    id: row.id,
+    type: row.type,
+    number: row.number,
+    date: row.voucher_date,
+    items: row.items,
+    customer: row.customer,
+    total: Number(row.total),
+    generalDiscount: row.general_discount || null,
+    generalDiscountAmount: row.general_discount_amount!=null ? Number(row.general_discount_amount) : 0,
+    showIVA: !!row.show_iva,
+    ivaPct: row.iva_pct!=null ? Number(row.iva_pct) : undefined,
+    iva: row.iva!=null ? Number(row.iva) : undefined,
+    neto: row.neto!=null ? Number(row.neto) : undefined,
+    orderId: row.order_id || null,
+    editedAt: row.edited_at || undefined,
+  };
+}
+
+// Trae los comprobantes guardados en el servidor: agrega los que falten
+// localmente, actualiza los que hayan cambiado (editados desde otro
+// dispositivo), y sube los contadores locales al máximo visto en el
+// servidor por tipo para no repetir números entre dispositivos.
+async function apiSyncVouchers(){
+  if(!IS_ADMIN_APP || !state.adminAuthed) return;
+  try{
+    const rows = await adminFetch('/vouchers?select=*&order=created_at.desc&limit=500', 'GET');
+    if(!rows) return;
+    let changed = false;
+    rows.forEach(row=>{
+      const mapped = mapVoucherRow(row);
+      const idx = state.vouchers.findIndex(v=>v.id===row.id);
+      if(idx===-1){ state.vouchers.push(mapped); changed = true; }
+      else if(JSON.stringify(state.vouchers[idx])!==JSON.stringify(mapped)){ state.vouchers[idx] = mapped; changed = true; }
+    });
+    state.vouchers.sort((a,b)=> new Date(b.date) - new Date(a.date));
+    Object.keys(VOUCHER_META).forEach(type=>{
+      const maxServer = rows.filter(r=>r.type===type).reduce((m,r)=>Math.max(m, r.number||0), 0);
+      state.voucherCounters[type] = Math.max(state.voucherCounters[type]||0, maxServer);
+    });
+    if(changed){ saveState(); render(); }
+  }catch(e){ console.warn('Sync comprobantes:', e); }
+}
+
+async function apiSaveVoucher(voucher){
+  try{
+    const body = {
+      id: voucher.id,
+      type: voucher.type,
+      number: voucher.number,
+      voucher_date: voucher.date,
+      items: voucher.items,
+      customer: voucher.customer,
+      total: voucher.total,
+      general_discount: voucher.generalDiscount || null,
+      general_discount_amount: voucher.generalDiscountAmount || null,
+      show_iva: !!voucher.showIVA,
+      iva_pct: voucher.ivaPct!=null ? voucher.ivaPct : null,
+      iva: voucher.iva!=null ? voucher.iva : null,
+      neto: voucher.neto!=null ? voucher.neto : null,
+      order_id: voucher.orderId || null,
+      edited_at: voucher.editedAt || null,
+    };
+    await adminFetch('/vouchers', 'POST', body, 'resolution=merge-duplicates,return=representation');
+  }catch(e){
+    console.warn('Error guardando comprobante:', e);
+    toast('El comprobante se guardó en este dispositivo, pero no en el servidor: '+e.message, 'err');
+  }
+}
+
+async function apiDeleteVoucher(voucherId){
+  try{
+    await adminFetch('/vouchers?id=eq.'+encodeURIComponent(voucherId), 'DELETE');
+  }catch(e){ console.warn('Error eliminando comprobante:', e); }
 }
 </script>
 <script>
@@ -2193,22 +2319,19 @@ function renderSuggestions(){
     </div>
   </div>`;
 }
-function submitSuggestion(){
+async function submitSuggestion(){
   const name = document.getElementById("sg-name").value.trim() || "Anónimo";
   const message = document.getElementById("sg-message").value.trim();
   if(!message){ toast("Escribí un mensaje antes de enviar", "err"); return; }
-  state.suggestions.unshift({
-    id: "sug"+Date.now(),
-    name,
-    phone: state.currentClientPhone || "",
-    message,
-    date: new Date().toISOString(),
-    read: false,
-  });
-  saveState();
-  document.getElementById("sg-message").value = "";
-  toast("¡Gracias por tu sugerencia!", "ok");
-  nav("account");
+  try{
+    await rpcFetch('submit_suggestion', {p_phone: state.currentClientPhone||"", p_name: name, p_message: message});
+    document.getElementById("sg-message").value = "";
+    toast("¡Gracias por tu sugerencia!", "ok");
+    nav("account");
+  }catch(e){
+    console.warn("Error enviando sugerencia:", e);
+    toast("No se pudo enviar. Probá de nuevo en un momento.", "err");
+  }
 }
 
 /* ---------- DYNAMIC BINDINGS (after render) ---------- */
@@ -4320,11 +4443,13 @@ function addCategory(section){
   state.categories[section] = state.categories[section] || {};
   state.categories[section][name] = [];
   saveState(); render();
+  apiSaveSetting('categories', state.categories);
 }
 function deleteCategory(section, cat){
   if(!confirm(`¿Eliminar la categoría "${cat}" y todas sus subcategorías?`)) return;
   delete state.categories[section][cat];
   saveState(); render();
+  apiSaveSetting('categories', state.categories);
 }
 function addSubcat(section, cat){
   const name = prompt("Nombre de la subcategoría:");
@@ -4332,11 +4457,13 @@ function addSubcat(section, cat){
   state.categories[section][cat] = state.categories[section][cat]||[];
   state.categories[section][cat].push(name);
   saveState(); render();
+  apiSaveSetting('categories', state.categories);
 }
 function deleteSubcat(section, cat, sub){
   if(!confirm(`¿Eliminar la subcategoría "${sub}"?`)) return;
   state.categories[section][cat] = state.categories[section][cat].filter(s=>s!==sub);
   saveState(); render();
+  apiSaveSetting('categories', state.categories);
 }
 
 /* ---------- ADMIN: CLIENTES ---------- */
@@ -4667,8 +4794,8 @@ function renderAdminConfig(){
     </div>
   `;
 }
-function updateConfig(key, val){ state.config[key] = val; saveState(); }
-function updateFiscal(key, val){ state.fiscal[key] = val; saveState(); }
+function updateConfig(key, val){ state.config[key] = val; saveState(); apiSaveSetting('store_config', state.config); }
+function updateFiscal(key, val){ state.fiscal[key] = val; saveState(); apiSaveSetting('fiscal_config', state.fiscal); }
 function resetFiscalDefaults(){
   if(!confirm("¿Restablecer los datos fiscales (razón social, CUIT, alias, etc) a los valores correctos? Esto no afecta productos, clientes ni comprobantes ya generados.")) return;
   state.fiscal = {
@@ -4681,6 +4808,7 @@ function resetFiscalDefaults(){
   };
   saveState();
   render();
+  apiSaveSetting('fiscal_config', state.fiscal);
   toast("Datos fiscales restablecidos", "ok");
 }
 function exportData(){
@@ -4776,6 +4904,7 @@ function createVoucher(type, items, customer, orderId, includeIVA, generalDiscou
     creditPointsToClient(customer, total, voucher.id);
   }
   saveState();
+  apiSaveVoucher(voucher);
   return voucher;
 }
 
@@ -5170,6 +5299,7 @@ function updateVoucherInPlace(voucherId, type, items, customer, includeIVA, gene
   voucher.neto = ivaCalc.neto;
   voucher.editedAt = new Date().toISOString();
   saveState();
+  apiSaveVoucher(voucher);
   return voucher;
 }
 
@@ -5180,6 +5310,7 @@ function confirmDeleteVoucher(voucherId){
   if(!confirm(`¿Eliminar ${label}? Esta acción no se puede deshacer.`)) return;
   state.vouchers = state.vouchers.filter(v=>v.id!==voucherId);
   saveState();
+  apiDeleteVoucher(voucherId);
   toast("Comprobante eliminado", "ok");
   state.adminTab = "comprobantes";
   nav("admin");
@@ -5421,12 +5552,16 @@ function renderAdminSugerencias(){
 }
 function markSuggestionRead(id){
   const s = state.suggestions.find(sg=>sg.id===id);
-  if(s && !s.read){ s.read = true; saveState(); render(); }
+  if(s && !s.read){
+    s.read = true; saveState(); render();
+    adminFetch('/suggestions?id=eq.'+id, 'PATCH', {read:true}).catch(e=>console.warn('Error marcando sugerencia leída:', e));
+  }
 }
 function deleteSuggestion(id){
   if(!confirm("¿Eliminar esta sugerencia?")) return;
   state.suggestions = state.suggestions.filter(s=>s.id!==id);
   saveState(); render();
+  adminFetch('/suggestions?id=eq.'+id, 'DELETE').catch(e=>console.warn('Error eliminando sugerencia:', e));
 }
 
 /* ---------- ADMIN: BANNERS (ofertas / novedades en el home) ---------- */
@@ -5594,12 +5729,14 @@ function saveBannerModal(idx){
   saveState();
   closeBannerModal();
   render();
+  apiSaveSetting('banners', state.banners);
   toast("Banner guardado", "ok");
 }
 function deleteBanner(idx){
   if(!confirm("¿Eliminar este banner del inicio?")) return;
   state.banners.splice(idx,1);
   saveState(); render();
+  apiSaveSetting('banners', state.banners);
 }
 
 /* ---------- ADMIN: NOVEDADES / OFERTAS ---------- */
@@ -6055,16 +6192,16 @@ apiSyncProducts();
 apiSyncContent();
 if(IS_ADMIN_APP){
   tryRestoreAdminSession().then(()=>{
-    if(state.adminAuthed){ apiSyncClients(); apiSyncOrders(); syncAdminChats(); }
+    if(state.adminAuthed){ apiSyncClients(); apiSyncOrders(); apiSyncSuggestions(); apiSyncVouchers(); syncAdminChats(); }
   });
 }else if(state.currentClientPhone){ syncClientChat(); }
 startChatPoll();
 
 document.addEventListener('visibilitychange', ()=>{
-  if(document.visibilityState === 'visible'){ apiSyncProducts(); apiSyncContent(); if(IS_ADMIN_APP){ apiSyncClients(); apiSyncOrders(); } }
+  if(document.visibilityState === 'visible'){ apiSyncProducts(); apiSyncContent(); if(IS_ADMIN_APP){ apiSyncClients(); apiSyncOrders(); apiSyncSuggestions(); apiSyncVouchers(); } }
 });
-window.addEventListener('focus', ()=>{ apiSyncProducts(); apiSyncContent(); if(IS_ADMIN_APP){ apiSyncClients(); apiSyncOrders(); } });
-setInterval(()=>{ apiSyncProducts(); apiSyncContent(); if(IS_ADMIN_APP){ apiSyncClients(); apiSyncOrders(); } }, 30000);
+window.addEventListener('focus', ()=>{ apiSyncProducts(); apiSyncContent(); if(IS_ADMIN_APP){ apiSyncClients(); apiSyncOrders(); apiSyncSuggestions(); apiSyncVouchers(); } });
+setInterval(()=>{ apiSyncProducts(); apiSyncContent(); if(IS_ADMIN_APP){ apiSyncClients(); apiSyncOrders(); apiSyncSuggestions(); apiSyncVouchers(); } }, 30000);
 
 if('serviceWorker' in navigator){
   navigator.serviceWorker.register('sw.js');
