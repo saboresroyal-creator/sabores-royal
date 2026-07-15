@@ -333,8 +333,6 @@ tr:hover td { background:var(--surface2); }
     <div id="backupStatus" style="font-size:11px;color:var(--muted);font-family:var(--mono);"></div>
     <button class="btn btn-green" onclick="exportData(true)" style="font-size:11px;padding:6px 14px;">⬇ Guardar backup</button>
     <div class="header-date" id="headerDate"></div>
-    <div id="adminName" style="font-size:11px;color:var(--gold);font-family:var(--mono);"></div>
-    <button class="btn btn-ghost" onclick="cajaLogout()" style="font-size:11px;padding:6px 14px;">Salir</button>
   </div>
 </div>
 
@@ -558,63 +556,23 @@ let currentPeriod = 'dia';
 let charts = {};
 
 // ============================================================
-// SUPABASE — mismo proyecto y login de administrador que usa
-// el panel de Sabores Royal. Este archivo sigue siendo un HTML
+// SUPABASE — mismo proyecto que usa Sabores Royal, sin login:
+// usa la clave pública (anon) directo, igual que hace la app
+// para contenido no sensible. Este archivo sigue siendo un HTML
 // suelto e independiente: solo comparte la base de datos.
 // ============================================================
 const SUPABASE_URL = 'https://topgunweqztedhhhthbl.supabase.co';
 const SUPABASE_KEY = 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6InRvcGd1bndlcWV6dGVkaGh0aGJsIiwicm9sZSI6ImFub24iLCJpYXQiOjE3ODI3NDczMjgsImV4cCI6MjA5ODMyMzMyOH0.KfZ8f8GlKoQoRxdPk-lrNDSTRcjd21z6d8CgITHf3WU';
-const CAJA_SESSION_KEY = 'cajaDiaria_session';
 const CAJA_DATA_KEY = 'caja_diaria_data';
-let cajaSession = null;
-let cajaAdminName = '';
 let _remoteSyncTimer = null;
 
-function loadCajaSession(){
-  try{ const raw = localStorage.getItem(CAJA_SESSION_KEY); cajaSession = raw ? JSON.parse(raw) : null; }
-  catch(e){ cajaSession = null; }
-}
-function saveCajaSession(session){
-  cajaSession = session;
-  try{
-    if(session) localStorage.setItem(CAJA_SESSION_KEY, JSON.stringify(session));
-    else localStorage.removeItem(CAJA_SESSION_KEY);
-  }catch(e){}
-}
-async function cajaAuthRequest(grantType, body){
-  let res;
-  try{
-    res = await fetch(SUPABASE_URL + '/auth/v1/token?grant_type=' + grantType, {
-      method:'POST', headers:{'Content-Type':'application/json','apikey':SUPABASE_KEY}, body: JSON.stringify(body),
-    });
-  }catch(networkErr){ throw new Error('Sin conexión con el servidor'); }
-  const data = await res.json().catch(()=>({}));
-  if(!res.ok) throw new Error(data.error_description || data.msg || data.error || 'No se pudo autenticar');
-  return data;
-}
-async function cajaTryRefresh(){
-  if(!cajaSession || !cajaSession.refresh_token) return false;
-  try{
-    const data = await cajaAuthRequest('refresh_token', {refresh_token: cajaSession.refresh_token});
-    saveCajaSession({access_token:data.access_token, refresh_token:data.refresh_token, expires_at:Date.now()+(data.expires_in||3600)*1000, uid:(data.user&&data.user.id)||cajaSession.uid});
-    return true;
-  }catch(e){ saveCajaSession(null); return false; }
-}
-async function cajaFetch(path, method, body, _retried){
-  if(!cajaSession || !cajaSession.access_token) throw new Error('No hay sesión');
-  const headers = {'Content-Type':'application/json','apikey':SUPABASE_KEY,'Authorization':'Bearer '+cajaSession.access_token};
+async function cajaFetch(path, method, body){
+  const headers = {'Content-Type':'application/json','apikey':SUPABASE_KEY,'Authorization':'Bearer '+SUPABASE_KEY};
   if(method==='POST' || method==='PATCH') headers['Prefer'] = 'return=representation';
   const res = await fetch(SUPABASE_URL + '/rest/v1' + path, { method: method||'GET', headers, body: body?JSON.stringify(body):undefined });
-  if(res.status===401 && !_retried && await cajaTryRefresh()) return cajaFetch(path, method, body, true);
   const text = await res.text();
   if(!res.ok){ let err; try{ err=JSON.parse(text); }catch(e){ err={message:text}; } throw new Error(err.message || 'HTTP '+res.status); }
   return text ? JSON.parse(text) : null;
-}
-async function verifyCajaAdmin(uid){
-  const rows = await cajaFetch('/admin_users?select=name&user_id=eq.'+uid+'&limit=1', 'GET');
-  const me = rows && rows[0];
-  if(!me) throw new Error('sin_acceso');
-  return me.name || 'Administrador';
 }
 async function pullRemoteState(){
   const rows = await cajaFetch('/app_settings?setting_key=eq.'+CAJA_DATA_KEY+'&select=setting_value', 'GET');
@@ -637,60 +595,8 @@ async function pushRemoteState(){
   }
 }
 function scheduleRemoteSync(){
-  if(!cajaSession) return;
   clearTimeout(_remoteSyncTimer);
   _remoteSyncTimer = setTimeout(pushRemoteState, 1200);
-}
-function cajaLogout(){
-  saveCajaSession(null);
-  location.reload();
-}
-
-// ============================================================
-// LOGIN — overlay bloqueante hasta autenticar como administrador
-// ============================================================
-function renderLoginOverlay(errorMsg){
-  removeLoginOverlay();
-  const overlay = document.createElement('div');
-  overlay.id = 'caja-login-overlay';
-  overlay.style.cssText = 'position:fixed;inset:0;background:var(--bg);z-index:9999;display:flex;align-items:center;justify-content:center;padding:20px;';
-  overlay.innerHTML = `
-    <div style="width:100%;max-width:340px;background:var(--surface);border:1px solid var(--border);border-radius:16px;padding:28px 24px;">
-      <div style="text-align:center;margin-bottom:20px;">
-        <div class="brand-name" style="font-size:20px;">Caja Diaria</div>
-        <div class="brand-sub" style="margin-top:4px;">Ingresá con tu usuario de administrador</div>
-      </div>
-      ${errorMsg ? `<div style="background:var(--red-dim);color:var(--red);border:1px solid var(--red);border-radius:8px;padding:8px 12px;font-size:12px;margin-bottom:14px;">${errorMsg}</div>` : ''}
-      <div style="margin-bottom:12px;">
-        <label>Email</label>
-        <input type="email" id="caja-login-email" placeholder="email@ejemplo.com" value="saboresroyal@gmail.com">
-      </div>
-      <div style="margin-bottom:16px;">
-        <label>Contraseña</label>
-        <input type="password" id="caja-login-pass" placeholder="••••••••">
-      </div>
-      <button class="btn btn-gold" id="caja-login-btn" style="width:100%;justify-content:center;" onclick="submitCajaLogin()">Ingresar</button>
-    </div>`;
-  document.body.appendChild(overlay);
-  document.getElementById('caja-login-pass').addEventListener('keydown', e=>{ if(e.key==='Enter') submitCajaLogin(); });
-}
-function removeLoginOverlay(){ const el=document.getElementById('caja-login-overlay'); if(el) el.remove(); }
-async function submitCajaLogin(){
-  const email = document.getElementById('caja-login-email').value.trim();
-  const pass = document.getElementById('caja-login-pass').value;
-  if(!email || !pass){ renderLoginOverlay('Completá email y contraseña'); return; }
-  const btn = document.getElementById('caja-login-btn');
-  btn.disabled = true; btn.textContent = 'Ingresando…';
-  try{
-    const data = await cajaAuthRequest('password', {email, password:pass});
-    saveCajaSession({access_token:data.access_token, refresh_token:data.refresh_token, expires_at:Date.now()+(data.expires_in||3600)*1000, uid:data.user&&data.user.id});
-    cajaAdminName = await verifyCajaAdmin(cajaSession.uid);
-    removeLoginOverlay();
-    await afterLogin();
-  }catch(e){
-    saveCajaSession(null);
-    renderLoginOverlay(e.message==='sin_acceso' ? 'Tu usuario no tiene acceso al panel de administración' : (e.message||'No se pudo iniciar sesión'));
-  }
 }
 
 // ============================================================
@@ -1708,9 +1614,8 @@ function pesos(n) {
 // ============================================================
 // INIT
 // ============================================================
-async function afterLogin(){
-  const nameEl = document.getElementById('adminName');
-  if(nameEl) nameEl.textContent = cajaAdminName || '';
+async function boot(){
+  load();
   try{
     await pullRemoteState();
     normalizeState();
@@ -1718,9 +1623,6 @@ async function afterLogin(){
   }catch(e){
     console.warn('No se pudo sincronizar con el servidor, se usan los datos locales:', e);
   }
-  finishInit();
-}
-function finishInit() {
   const now = new Date();
   document.getElementById('headerDate').textContent = now.toLocaleDateString('es-AR',{weekday:'long',day:'numeric',month:'long',year:'numeric'});
   const dateInput = document.getElementById('selectedDate');
@@ -1729,18 +1631,6 @@ function finishInit() {
   loadCargaDay();
   renderImpuestos();
   updateConceptosDatalist();
-}
-async function boot(){
-  load();
-  loadCajaSession();
-  if(cajaSession && cajaSession.access_token){
-    try{
-      cajaAdminName = await verifyCajaAdmin(cajaSession.uid);
-      await afterLogin();
-      return;
-    }catch(e){ saveCajaSession(null); }
-  }
-  renderLoginOverlay();
 }
 
 boot();
