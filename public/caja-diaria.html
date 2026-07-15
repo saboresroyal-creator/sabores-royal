@@ -5,6 +5,7 @@
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
 <title>Sabores Royal — Dashboard de Cajas</title>
 <script src="https://cdnjs.cloudflare.com/ajax/libs/Chart.js/4.4.1/chart.umd.min.js"></script>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/xlsx/0.18.5/xlsx.full.min.js"></script>
 <style>
 @import url('https://fonts.googleapis.com/css2?family=DM+Mono:wght@400;500&family=Syne:wght@700;800&family=DM+Sans:wght@300;400;500;600&display=swap');
 
@@ -454,12 +455,51 @@ tr:hover td { background:var(--surface2); }
      PANEL: ESTADÍSTICAS
 ══════════════════════════════════════════ -->
 <div class="panel" id="panel-estadisticas">
-  <div class="ptabs">
-    <button class="ptab active" onclick="setPeriod('dia',this)">Hoy</button>
-    <button class="ptab" onclick="setPeriod('semana',this)">7 días</button>
-    <button class="ptab" onclick="setPeriod('mes',this)">30 días</button>
-    <button class="ptab" onclick="setPeriod('comparativo',this)">Comparativo</button>
+
+  <!-- FILA 1: VISTA (caja selector) -->
+  <div style="margin-bottom:10px;">
+    <div style="font-size:10px;letter-spacing:1.5px;color:var(--muted);margin-bottom:6px;">VER</div>
+    <div class="ptabs" id="cajaTabs">
+      <button class="ptab active" onclick="setCajaVista('todas',this)">📊 Todas</button>
+      <button class="ptab" onclick="setCajaVista('caja0',this)">Caja 1</button>
+      <button class="ptab" onclick="setCajaVista('caja1',this)">Caja 2</button>
+      <button class="ptab" onclick="setCajaVista('caja3',this)">Caja 3</button>
+      <button class="ptab" onclick="setCajaVista('caja4',this)">Caja 4</button>
+    </div>
   </div>
+
+  <!-- FILA 2: PERÍODO -->
+  <div style="margin-bottom:10px;">
+    <div style="font-size:10px;letter-spacing:1.5px;color:var(--muted);margin-bottom:6px;">PERÍODO</div>
+    <div class="ptabs" id="periodTabs">
+      <button class="ptab active" onclick="setPeriod('dia',this)">Hoy</button>
+      <button class="ptab" onclick="setPeriod('semana',this)">7 días</button>
+      <button class="ptab" onclick="setPeriod('mes',this)">30 días</button>
+      <button class="ptab" onclick="setPeriod('rango',this)">📅 Rango</button>
+    </div>
+  </div>
+
+  <!-- RANGO FECHAS -->
+  <div id="rangoFiltros" style="display:none;padding:4px 0 10px 0;">
+    <div style="display:flex;gap:12px;align-items:flex-end;flex-wrap:wrap;">
+      <div>
+        <label style="font-size:11px;color:var(--muted);display:block;margin-bottom:4px;">DESDE</label>
+        <input type="date" id="rangoDesde" onchange="renderStats()" style="background:var(--surface2);border:1px solid var(--border);color:var(--text);border-radius:6px;padding:6px 10px;font-size:13px;">
+      </div>
+      <div>
+        <label style="font-size:11px;color:var(--muted);display:block;margin-bottom:4px;">HASTA</label>
+        <input type="date" id="rangoHasta" onchange="renderStats()" style="background:var(--surface2);border:1px solid var(--border);color:var(--text);border-radius:6px;padding:6px 10px;font-size:13px;">
+      </div>
+    </div>
+  </div>
+
+  <!-- BOTÓN EXPORTAR EXCEL -->
+  <div style="display:flex;justify-content:flex-end;margin-bottom:10px;">
+    <button class="btn btn-green" onclick="exportarExcel()" style="font-size:12px;padding:7px 16px;display:flex;align-items:center;gap:6px;">
+      <span style="font-size:15px;">📥</span> Exportar Excel
+    </button>
+  </div>
+
   <div id="statsContent"></div>
 </div>
 
@@ -539,6 +579,7 @@ tr:hover td { background:var(--surface2); }
       <p style="color:var(--muted);font-size:12px;margin-bottom:16px;">Los datos se guardan automáticamente en tu navegador.</p>
       <div style="display:flex;flex-direction:column;gap:8px;">
         <button class="btn btn-green" onclick="exportData()">⬇ Exportar backup JSON</button>
+        <button class="btn btn-green" onclick="exportarExcelCompleto()" style="background:rgba(34,197,94,0.15);border:1px solid #22c55e;">📥 Exportar backup Excel</button>
         <button class="btn btn-ghost" onclick="importData()">⬆ Importar backup JSON</button>
         <div class="divider"></div>
         <button class="btn btn-red" onclick="resetData()">🗑 Borrar todos los datos</button>
@@ -553,6 +594,7 @@ tr:hover td { background:var(--surface2); }
 // ============================================================
 let state = { dias:{}, impuestos:[], cajeros:['Gastón','Matías','Gabriel','Emanuel'] };
 let currentPeriod = 'dia';
+let currentCajaVista = 'todas'; // 'todas' | 'caja0' | 'caja1' | 'caja3' | 'caja4'
 let charts = {};
 
 // ============================================================
@@ -1087,9 +1129,16 @@ function setToday() {
 // ============================================================
 // STATS
 // ============================================================
+function setCajaVista(v, el) {
+  currentCajaVista = v;
+  document.querySelectorAll('#cajaTabs .ptab').forEach(t=>t.classList.remove('active'));
+  el.classList.add('active');
+  renderStats();
+}
+
 function setPeriod(p, el) {
   currentPeriod = p;
-  document.querySelectorAll('.ptab').forEach(t=>t.classList.remove('active'));
+  document.querySelectorAll('#periodTabs .ptab').forEach(t=>t.classList.remove('active'));
   el.classList.add('active');
   renderStats();
 }
@@ -1100,12 +1149,40 @@ function renderStats() {
   destroyCharts();
 
   const today = todayStr();
-  const dates = Object.keys(state.dias).sort();
+  const rangoFiltros = document.getElementById('rangoFiltros');
+  if(rangoFiltros) rangoFiltros.style.display = currentPeriod === 'rango' ? 'block' : 'none';
 
-  if(currentPeriod === 'dia') renderStatsDia(container, today);
-  else if(currentPeriod === 'semana') renderStatsPeriod(container, 7, 'ÚLTIMOS 7 DÍAS');
-  else if(currentPeriod === 'mes') renderStatsPeriod(container, 30, 'ÚLTIMOS 30 DÍAS');
-  else if(currentPeriod === 'comparativo') renderStatsComparativo(container);
+  // Obtener rango de fechas según período
+  let range;
+  if(currentPeriod === 'dia') {
+    range = [today];
+  } else if(currentPeriod === 'semana') {
+    range = getDateRange(7);
+  } else if(currentPeriod === 'mes') {
+    range = getDateRange(30);
+  } else if(currentPeriod === 'rango') {
+    const desde = document.getElementById('rangoDesde').value;
+    const hasta = document.getElementById('rangoHasta').value;
+    if(!desde || !hasta) {
+      container.innerHTML = '<div class="card" style="text-align:center;color:var(--muted);padding:40px;">Seleccioná las fechas DESDE y HASTA para ver el reporte.</div>';
+      return;
+    }
+    if(desde > hasta) {
+      container.innerHTML = '<div class="card" style="text-align:center;color:var(--red);padding:40px;">La fecha DESDE no puede ser mayor que HASTA.</div>';
+      return;
+    }
+    range = [];
+    let cur = new Date(desde + 'T00:00:00');
+    const end = new Date(hasta + 'T00:00:00');
+    while(cur <= end) { range.push(cur.toISOString().slice(0,10)); cur.setDate(cur.getDate()+1); }
+  }
+
+  if(currentCajaVista === 'todas') {
+    renderStatsTodas(container, range);
+  } else {
+    const cajaIdx = parseInt(currentCajaVista.replace('caja',''));
+    renderStatsCajaIndividual(container, range, cajaIdx);
+  }
 }
 
 function getDateRange(days) {
@@ -1138,173 +1215,464 @@ function dayStats(dateStr) {
   return {total,tarjeta,gastos,tickets,efectivo,negro,gastosCentral};
 }
 
-function renderStatsDia(container, today) {
-  const s = dayStats(today);
-  const day = state.dias[today];
-  const ticketProm = s.tickets>0 ? s.total/s.tickets : 0;
-
-  container.innerHTML = `
-    <div class="grid4 mb16">
-      <div class="stat"><div class="stat-label">Venta Total</div><div class="stat-value gold">${pesos(s.total)}</div></div>
-      <div class="stat"><div class="stat-label">Efectivo</div><div class="stat-value green">${pesos(s.efectivo)}</div></div>
-      <div class="stat"><div class="stat-label">Tarjeta</div><div class="stat-value blue">${pesos(s.tarjeta)}</div></div>
-      <div class="stat"><div class="stat-label">Gastos</div><div class="stat-value red">${pesos(s.gastos)}</div></div>
-    </div>
-    <div class="grid4 mb16">
-      <div class="stat">
-        <div class="stat-label" style="color:var(--purple)">Venta Negro</div>
-        <div class="stat-value" style="color:var(--purple)">${pesos(s.negro)}</div>
-        <div style="font-size:11px;color:var(--muted);margin-top:4px;">${s.total>0?Math.round(s.negro/s.total*100):0}% del total</div>
-      </div>
-      <div class="stat"><div class="stat-label">Tickets totales</div><div class="stat-value">${s.tickets}</div></div>
-      <div class="stat"><div class="stat-label">Promedio/ticket</div><div class="stat-value gold">${pesos(ticketProm)}</div></div>
-      <div class="stat"><div class="stat-label">Resultado neto</div><div class="stat-value ${(s.total-s.gastos)>=0?'green':'red'}">${pesos(s.total-s.gastos)}</div></div>
-    </div>
-    ${day ? `
-    <div class="card">
-      <div class="card-title"><div class="dot"></div>DETALLE POR CAJA — HOY</div>
-      <table>
-        <thead><tr><th>Caja</th><th>Cajero</th><th class="num">Efectivo</th><th class="num">Tarjeta</th><th class="num" style="color:var(--purple)">Negro</th><th class="num">% Negro</th><th class="num">Total</th><th class="num">Gastos</th><th class="num">Tickets</th></tr></thead>
-        <tbody>
-          ${day.cajas.map((c,i)=>{
-            const nombres2 = ['CAJA 1','CAJA 2','CAJA CENTRAL','CAJA 3','CAJA 4'];
-            const esCentral = i === 2;
-            const ef=(parseFloat(c.efectivo)||0)+(parseFloat(c.ajusteEfectivo)||0);
-            const tar=parseFloat(c.tarjetas)||0, neg=parseFloat(c.negro)||0;
-            const tkt=parseInt(c.tickets)||0;
-            const gst=(c.gastos||[]).reduce((s,g)=>s+(parseFloat(g.monto)||0),0);
-            const tot=esCentral ? 0 : ef+tar;
-            const pctNeg=tot>0?Math.round(neg/tot*100):0;
-            return `<tr ${esCentral?'style="opacity:.7;font-style:italic;"':''}>
-              <td class="yellow">${nombres2[i]||'CAJA '+(i+1)}</td>
-              <td>${esCentral ? '<span style="font-size:10px;letter-spacing:1px;color:var(--muted)">FONDO</span>' : (c.cajero||'—')}</td>
-              <td class="num green">${esCentral ? '—' : pesos(ef)}</td>
-              <td class="num blue">${esCentral ? '—' : pesos(tar)}</td>
-              <td class="num purple">${esCentral ? '—' : pesos(neg)}</td>
-              <td class="num" style="color:var(--muted)">${esCentral ? '—' : pctNeg+'%'}</td>
-              <td class="num yellow">${esCentral ? '—' : pesos(tot)}</td>
-              <td class="num red">${pesos(gst)}</td>
-              <td class="num">${esCentral ? '—' : tkt}</td>
-            </tr>`;
-          }).join('')}
-        </tbody>
-      </table>
-    </div>` : '<div class="card" style="text-align:center;color:var(--muted);padding:40px;">Sin datos para hoy todavía.</div>'}
-  `;
+// ── STATS TODAS LAS CAJAS ──
+function dayCajaStats(dateStr, cajaIdx) {
+  const day = state.dias[dateStr];
+  if(!day || !day.cajas[cajaIdx]) return {total:0,tarjeta:0,gastos:0,tickets:0,efectivo:0,negro:0};
+  const c = day.cajas[cajaIdx];
+  const ef = (parseFloat(c.efectivo)||0) + (parseFloat(c.ajusteEfectivo)||0);
+  const tar = parseFloat(c.tarjetas)||0;
+  const neg = parseFloat(c.negro)||0;
+  const tkt = parseInt(c.tickets)||0;
+  const gst = (c.gastos||[]).reduce((s,g)=>s+(parseFloat(g.monto)||0),0);
+  return { total: ef+tar, tarjeta: tar, efectivo: ef, negro: neg, tickets: tkt, gastos: gst, cajero: c.cajero||'—' };
 }
 
-function renderStatsPeriod(container, days, title) {
-  const range = getDateRange(days);
+function renderStatsTodas(container, range) {
+  // Resumen global del período
+  const totals = range.map(d=>dayStats(d));
+  const sumTotal = totals.reduce((a,b)=>a+b.total,0);
+  const sumEf = totals.reduce((a,b)=>a+b.efectivo,0);
+  const sumTar = totals.reduce((a,b)=>a+b.tarjeta,0);
+  const sumNeg = totals.reduce((a,b)=>a+b.negro,0);
+  const sumTk = totals.reduce((a,b)=>a+b.tickets,0);
+  const sumGst = totals.reduce((a,b)=>a+b.gastos,0);
+  const ventasConDatos = totals.map(s=>s.total).filter(v=>v>0);
+  const maxV = ventasConDatos.length ? Math.max(...ventasConDatos) : 0;
+  const minV = ventasConDatos.length ? Math.min(...ventasConDatos) : 0;
+  const avgV = ventasConDatos.length ? sumTotal/ventasConDatos.length : 0;
+  const ticketProm = sumTk>0 ? sumTotal/sumTk : 0;
+  const esDia = range.length === 1;
   const chartLabels = range.map(d=>d.slice(5));
   const chartTotal = range.map(d=>dayStats(d).total);
-  const chartTarjeta = range.map(d=>dayStats(d).tarjeta);
-  const chartTickets = range.map(d=>dayStats(d).tickets);
-
-  const totals = range.map(d=>dayStats(d).total).filter(v=>v>0);
-  const maxV = totals.length ? Math.max(...totals) : 0;
-  const minV = totals.length ? Math.min(...totals) : 0;
-  const avgV = totals.length ? totals.reduce((a,b)=>a+b,0)/totals.length : 0;
-  const tkList = range.map(d=>dayStats(d).tickets).filter(v=>v>0);
-  const maxTk = tkList.length ? Math.max(...tkList) : 0;
-  const minTk = tkList.length ? Math.min(...tkList) : 0;
+  const chartTar = range.map(d=>dayStats(d).tarjeta);
+  const chartEf = range.map(d=>dayStats(d).efectivo);
+  const chartTk = range.map(d=>dayStats(d).tickets);
 
   container.innerHTML = `
-    <div class="card-title"><div class="dot"></div>${title}</div>
-    <div class="grid3 mb16">
-      <div class="stat"><div class="stat-label">Máx. venta día</div><div class="stat-value gold">${pesos(maxV)}</div></div>
-      <div class="stat"><div class="stat-label">Promedio diario</div><div class="stat-value">${pesos(avgV)}</div></div>
-      <div class="stat"><div class="stat-label">Mín. venta día</div><div class="stat-value">${pesos(minV)}</div></div>
+    <div class="card mb16">
+      <div class="card-title"><div class="dot"></div>RESUMEN TOTAL — TODAS LAS CAJAS</div>
+      <div class="grid4 mb16">
+        <div class="stat"><div class="stat-label">Venta Total</div><div class="stat-value gold">${pesos(sumTotal)}</div></div>
+        <div class="stat"><div class="stat-label">Efectivo</div><div class="stat-value green">${pesos(sumEf)}</div></div>
+        <div class="stat"><div class="stat-label">Tarjeta</div><div class="stat-value blue">${pesos(sumTar)}</div></div>
+        <div class="stat"><div class="stat-label">Gastos</div><div class="stat-value red">${pesos(sumGst)}</div></div>
+      </div>
+      <div class="grid4">
+        <div class="stat"><div class="stat-label" style="color:var(--purple)">Venta Negro</div><div class="stat-value" style="color:var(--purple)">${pesos(sumNeg)}</div><div style="font-size:11px;color:var(--muted);margin-top:4px">${sumTotal>0?Math.round(sumNeg/sumTotal*100):0}%</div></div>
+        <div class="stat"><div class="stat-label">Tickets</div><div class="stat-value">${sumTk}</div></div>
+        <div class="stat"><div class="stat-label">Prom./ticket</div><div class="stat-value gold">${pesos(ticketProm)}</div></div>
+        <div class="stat"><div class="stat-label">Resultado neto</div><div class="stat-value ${(sumTotal-sumGst)>=0?'green':'red'}">${pesos(sumTotal-sumGst)}</div></div>
+      </div>
+      ${!esDia ? `<div class="grid3 mt16">
+        <div class="stat"><div class="stat-label">Máx. día</div><div class="stat-value gold">${pesos(maxV)}</div></div>
+        <div class="stat"><div class="stat-label">Prom. diario</div><div class="stat-value">${pesos(avgV)}</div></div>
+        <div class="stat"><div class="stat-label">Mín. día</div><div class="stat-value">${pesos(minV)}</div></div>
+      </div>` : ''}
     </div>
+    ${!esDia && range.length<=62 ? `
     <div class="card mb16">
       <div class="card-title"><div class="dot"></div>VENTAS DIARIAS</div>
-      <div class="chart-wrap"><canvas id="chartVentas"></canvas></div>
+      <div class="chart-wrap"><canvas id="chartTotalVentas"></canvas></div>
     </div>
     <div class="card mb16">
       <div class="card-title"><div class="dot"></div>TICKETS POR DÍA</div>
-      <div class="chart-wrap"><canvas id="chartTickets"></canvas></div>
-      <div class="grid2 mt16">
-        <div class="stat"><div class="stat-label">Máx. tickets</div><div class="stat-value">${maxTk}</div></div>
-        <div class="stat"><div class="stat-label">Mín. tickets</div><div class="stat-value">${minTk}</div></div>
-      </div>
-    </div>
+      <div class="chart-wrap"><canvas id="chartTotalTk"></canvas></div>
+    </div>` : ''}
+    ${renderTablaDiariaTodas(range)}
   `;
-
-  setTimeout(()=>{
-    makeLineChart('chartVentas', chartLabels, [
-      {label:'Total',data:chartTotal,color:'#c5a028'},
-      {label:'Tarjeta',data:chartTarjeta,color:'#60a5fa'}
-    ]);
-    makeBarChart('chartTickets', chartLabels, chartTickets, '#22c55e');
-  }, 50);
+  if(!esDia && range.length<=62) {
+    setTimeout(()=>{
+      makeLineChart('chartTotalVentas', chartLabels, [
+        {label:'Total',data:chartTotal,color:'#c5a028'},
+        {label:'Efectivo',data:chartEf,color:'#22c55e'},
+        {label:'Tarjeta',data:chartTar,color:'#60a5fa'}
+      ]);
+      makeBarChart('chartTotalTk', chartLabels, chartTk, '#c5a028');
+    }, 50);
+  }
 }
 
-function renderStatsComparativo(container) {
-  const range30 = getDateRange(30);
-  const nombres = ['CAJA 1','CAJA 2','CAJA CENTRAL'];
-  const cajaStats = [0,1,2,3,4].map(()=>({total:0,tarjeta:0,gastos:0,tickets:0,efectivo:0,negro:0}));
-  range30.forEach(d=>{
-    const day=state.dias[d];
-    if(!day) return;
-    day.cajas.forEach((c,i)=>{
-      if(!cajaStats[i]) return;
-      if(i === 2) {
-        // Central: solo gastos/salidas, no venta
-        (c.gastos||[]).forEach(g=>cajaStats[i].gastos+=parseFloat(g.monto)||0);
-        return;
-      }
-      const ef=parseFloat(c.efectivo)||0,tar=parseFloat(c.tarjetas)||0,neg=parseFloat(c.negro)||0;
-      cajaStats[i].total+=ef+tar;
-      cajaStats[i].tarjeta+=tar;
-      cajaStats[i].efectivo+=ef;
-      cajaStats[i].negro+=neg;
-      cajaStats[i].tickets+=parseInt(c.tickets)||0;
-      (c.gastos||[]).forEach(g=>cajaStats[i].gastos+=parseFloat(g.monto)||0);
-    });
-  });
+function renderTablaDiariaTodas(range) {
+  const nombres = ['Caja 1','Caja 2','Caja Central','Caja 3','Caja 4'];
+  const diasConDatos = range.filter(d=>state.dias[d]);
+  if(!diasConDatos.length) return '<div class="card" style="text-align:center;color:var(--muted);padding:40px;">Sin datos en este período.</div>';
 
-  const rows = cajaStats.map((cs,i)=>{
-    const esCentral = i === 2;
-    return `<tr ${esCentral?'style="opacity:.7;font-style:italic;"':''}>
-    <td class="yellow">${nombres[i]}${esCentral?' <span style="font-size:9px;color:var(--muted)">(fondo)</span>':''}</td>
-    <td class="num yellow">${esCentral ? '—' : pesos(cs.total)}</td>
-    <td class="num blue">${esCentral ? '—' : pesos(cs.tarjeta)}</td>
-    <td class="num green">${esCentral ? '—' : pesos(cs.efectivo)}</td>
-    <td class="num purple">${esCentral ? '—' : pesos(cs.negro)}</td>
-    <td class="num" style="color:var(--muted)">${esCentral ? '—' : (cs.total>0?Math.round(cs.negro/cs.total*100):0)+'%'}</td>
-    <td class="num red">${pesos(cs.gastos)}</td>
-    <td class="num">${esCentral ? '—' : cs.tickets}</td>
-  </tr>`;
+  const rows = diasConDatos.map(d => {
+    const day = state.dias[d];
+    const ds = dayStats(d);
+    const fecha = d.slice(8)+'/'+d.slice(5,7)+'/'+d.slice(0,4);
+    // Fila total del día
+    const filaDia = `<tr style="background:rgba(197,160,40,0.1);">
+      <td class="yellow" style="font-weight:700;">${fecha}</td>
+      <td style="color:var(--muted);font-size:11px;">TOTAL DÍA</td>
+      <td class="num green">${pesos(ds.efectivo)}</td>
+      <td class="num blue">${pesos(ds.tarjeta)}</td>
+      <td class="num purple">${pesos(ds.negro)}</td>
+      <td class="num" style="color:var(--muted)">${ds.total>0?Math.round(ds.negro/ds.total*100):0}%</td>
+      <td class="num gold">${pesos(ds.total)}</td>
+      <td class="num red">${pesos(ds.gastos)}</td>
+      <td class="num">${ds.tickets}</td>
+    </tr>`;
+    // Filas por caja
+    const filasCajas = day.cajas.map((c,i) => {
+      const esCentral = i===2;
+      const cs = dayCajaStats(d, i);
+      return `<tr style="opacity:${esCentral?.65:1};${esCentral?'font-style:italic;':''}">
+        <td></td>
+        <td style="padding-left:16px;color:var(--muted);font-size:12px;">↳ ${nombres[i]||'Caja '+(i+1)}${!esCentral&&c.cajero?` <span style="color:var(--text);font-size:11px;">(${c.cajero})</span>`:''}</td>
+        <td class="num green">${esCentral?'—':pesos(cs.efectivo)}</td>
+        <td class="num blue">${esCentral?'—':pesos(cs.tarjeta)}</td>
+        <td class="num purple">${esCentral?'—':pesos(cs.negro)}</td>
+        <td class="num" style="color:var(--muted)">${esCentral?'—':cs.total>0?Math.round(cs.negro/cs.total*100)+'%':'0%'}</td>
+        <td class="num yellow">${esCentral?'—':pesos(cs.total)}</td>
+        <td class="num red">${pesos(cs.gastos)}</td>
+        <td class="num">${esCentral?'—':cs.tickets}</td>
+      </tr>`;
+    }).join('');
+    return filaDia + filasCajas;
   }).join('');
 
-  container.innerHTML = `
-    <div class="card mb16">
-      <div class="card-title"><div class="dot"></div>COMPARATIVO CAJAS — ÚLTIMOS 30 DÍAS</div>
+  return `<div class="card mb16">
+    <div class="card-title"><div class="dot"></div>DETALLE DIARIO POR CAJA</div>
+    <div style="overflow-x:auto;">
       <table>
-        <thead><tr><th>Caja</th><th class="num">Venta Total</th><th class="num">Tarjeta</th><th class="num">Efectivo</th><th class="num" style="color:var(--purple)">Negro</th><th class="num">% Negro</th><th class="num">Gastos</th><th class="num">Tickets</th></tr></thead>
+        <thead><tr>
+          <th>Fecha</th><th>Caja</th>
+          <th class="num green">Efectivo</th>
+          <th class="num blue">Tarjeta</th>
+          <th class="num" style="color:var(--purple)">Negro</th>
+          <th class="num">% Negro</th>
+          <th class="num yellow">Total</th>
+          <th class="num red">Gastos</th>
+          <th class="num">Tickets</th>
+        </tr></thead>
         <tbody>${rows}</tbody>
       </table>
     </div>
-    <div class="grid3">
-      <div class="card">
-        <div class="card-title"><div class="dot"></div>VENTA TOTAL POR CAJA</div>
-        <div class="chart-wrap"><canvas id="chartCompTotal"></canvas></div>
+  </div>`;
+}
+
+// ── STATS CAJA INDIVIDUAL ──
+function renderStatsCajaIndividual(container, range, cajaIdx) {
+  const nombres = ['CAJA 1','CAJA 2','CAJA CENTRAL','CAJA 3','CAJA 4'];
+  const nombre = nombres[cajaIdx] || ('CAJA '+(cajaIdx+1));
+  const colores = ['#c5a028','#60a5fa','#a855f7','#22c55e','#f59e0b'];
+  const color = colores[cajaIdx] || '#c5a028';
+
+  // Acumular stats del período para esta caja
+  let sumTotal=0,sumEf=0,sumTar=0,sumNeg=0,sumTk=0,sumGst=0;
+  const diasConDatos = range.filter(d=>state.dias[d]&&state.dias[d].cajas[cajaIdx]);
+  diasConDatos.forEach(d=>{
+    const cs=dayCajaStats(d,cajaIdx);
+    sumTotal+=cs.total; sumEf+=cs.efectivo; sumTar+=cs.tarjeta;
+    sumNeg+=cs.negro; sumTk+=cs.tickets; sumGst+=cs.gastos;
+  });
+  const ventasDias = diasConDatos.map(d=>dayCajaStats(d,cajaIdx).total).filter(v=>v>0);
+  const maxV = ventasDias.length ? Math.max(...ventasDias) : 0;
+  const minV = ventasDias.length ? Math.min(...ventasDias) : 0;
+  const avgV = ventasDias.length ? sumTotal/ventasDias.length : 0;
+  const ticketProm = sumTk>0 ? sumTotal/sumTk : 0;
+  const esDia = range.length===1;
+
+  const chartLabels = range.map(d=>d.slice(5));
+  const chartTotal = range.map(d=>dayCajaStats(d,cajaIdx).total);
+  const chartEf = range.map(d=>dayCajaStats(d,cajaIdx).efectivo);
+  const chartTar = range.map(d=>dayCajaStats(d,cajaIdx).tarjeta);
+  const chartNeg = range.map(d=>dayCajaStats(d,cajaIdx).negro);
+  const chartTk = range.map(d=>dayCajaStats(d,cajaIdx).tickets);
+
+  container.innerHTML = `
+    <div class="card mb16">
+      <div class="card-title"><div class="dot" style="background:${color}"></div>RESUMEN — ${nombre}</div>
+      <div class="grid4 mb16">
+        <div class="stat"><div class="stat-label">Venta Total</div><div class="stat-value" style="color:${color}">${pesos(sumTotal)}</div></div>
+        <div class="stat"><div class="stat-label">Efectivo</div><div class="stat-value green">${pesos(sumEf)}</div></div>
+        <div class="stat"><div class="stat-label">Tarjeta</div><div class="stat-value blue">${pesos(sumTar)}</div></div>
+        <div class="stat"><div class="stat-label">Gastos</div><div class="stat-value red">${pesos(sumGst)}</div></div>
       </div>
-      <div class="card">
-        <div class="card-title"><div class="dot"></div>TICKETS POR CAJA</div>
-        <div class="chart-wrap"><canvas id="chartCompTickets"></canvas></div>
+      <div class="grid4">
+        <div class="stat"><div class="stat-label" style="color:var(--purple)">Venta Negro</div><div class="stat-value" style="color:var(--purple)">${pesos(sumNeg)}</div><div style="font-size:11px;color:var(--muted);margin-top:4px">${sumTotal>0?Math.round(sumNeg/sumTotal*100):0}%</div></div>
+        <div class="stat"><div class="stat-label">Tickets</div><div class="stat-value">${sumTk}</div></div>
+        <div class="stat"><div class="stat-label">Prom./ticket</div><div class="stat-value" style="color:${color}">${pesos(ticketProm)}</div></div>
+        <div class="stat"><div class="stat-label">Resultado neto</div><div class="stat-value ${(sumTotal-sumGst)>=0?'green':'red'}">${pesos(sumTotal-sumGst)}</div></div>
       </div>
-      <div class="card">
-        <div class="card-title"><div class="dot"></div>NEGRO POR CAJA</div>
-        <div class="chart-wrap"><canvas id="chartCompNegro"></canvas></div>
-      </div>
+      ${!esDia ? `<div class="grid3 mt16">
+        <div class="stat"><div class="stat-label">Máx. día</div><div class="stat-value" style="color:${color}">${pesos(maxV)}</div></div>
+        <div class="stat"><div class="stat-label">Prom. diario</div><div class="stat-value">${pesos(avgV)}</div></div>
+        <div class="stat"><div class="stat-label">Mín. día</div><div class="stat-value">${pesos(minV)}</div></div>
+      </div>` : ''}
     </div>
+    ${!esDia && range.length<=62 ? `
+    <div class="card mb16">
+      <div class="card-title"><div class="dot" style="background:${color}"></div>VENTAS DIARIAS — ${nombre}</div>
+      <div class="chart-wrap"><canvas id="chartCajaVentas"></canvas></div>
+    </div>
+    <div class="card mb16">
+      <div class="card-title"><div class="dot"></div>TICKETS POR DÍA — ${nombre}</div>
+      <div class="chart-wrap"><canvas id="chartCajaTk"></canvas></div>
+    </div>` : ''}
+    ${renderTablaDiariaCaja(range, cajaIdx, nombre, color)}
   `;
 
-  setTimeout(()=>{
-    makePieChart('chartCompTotal', ['Caja 1','Caja 2'], [cajaStats[0].total,cajaStats[1].total], ['#c5a028','#60a5fa']);
-    makePieChart('chartCompTickets', ['Caja 1','Caja 2'], [cajaStats[0].tickets,cajaStats[1].tickets], ['#22c55e','#f59e0b']);
-    makePieChart('chartCompNegro', ['Caja 1','Caja 2'], [cajaStats[0].negro,cajaStats[1].negro], ['#a855f7','#ef4444']);
-  }, 50);
+  if(!esDia && range.length<=62) {
+    setTimeout(()=>{
+      makeLineChart('chartCajaVentas', chartLabels, [
+        {label:'Total',data:chartTotal,color},
+        {label:'Efectivo',data:chartEf,color:'#22c55e'},
+        {label:'Tarjeta',data:chartTar,color:'#60a5fa'},
+        {label:'Negro',data:chartNeg,color:'#a855f7'}
+      ]);
+      makeBarChart('chartCajaTk', chartLabels, chartTk, color);
+    }, 50);
+  }
+}
+
+function renderTablaDiariaCaja(range, cajaIdx, nombre, color) {
+  const diasConDatos = range.filter(d=>state.dias[d]&&state.dias[d].cajas[cajaIdx]);
+  if(!diasConDatos.length) return '<div class="card" style="text-align:center;color:var(--muted);padding:40px;">Sin datos en este período.</div>';
+
+  const rows = diasConDatos.map(d => {
+    const cs = dayCajaStats(d, cajaIdx);
+    const day = state.dias[d];
+    const c = day.cajas[cajaIdx];
+    const fecha = d.slice(8)+'/'+d.slice(5,7)+'/'+d.slice(0,4);
+    const pctNeg = cs.total>0 ? Math.round(cs.negro/cs.total*100) : 0;
+    // Gastos desglosados
+    const gastosDetalle = (c.gastos||[]).length>0
+      ? (c.gastos||[]).map(g=>`<span style="font-size:10px;color:var(--muted);display:block;">• ${g.concepto||'Gasto'}: ${pesos(parseFloat(g.monto)||0)}</span>`).join('')
+      : '';
+    return `<tr>
+      <td class="yellow" style="font-weight:600;">${fecha}</td>
+      <td style="font-size:12px;color:var(--muted)">${cs.cajero}</td>
+      <td class="num green">${pesos(cs.efectivo)}</td>
+      <td class="num blue">${pesos(cs.tarjeta)}</td>
+      <td class="num purple">${pesos(cs.negro)}</td>
+      <td class="num" style="color:var(--muted)">${pctNeg}%</td>
+      <td class="num" style="color:${color};font-weight:600;">${pesos(cs.total)}</td>
+      <td class="num red">${pesos(cs.gastos)}${gastosDetalle}</td>
+      <td class="num">${cs.tickets}</td>
+    </tr>`;
+  }).join('');
+
+  // Totales
+  let tEf=0,tTar=0,tNeg=0,tTot=0,tGst=0,tTk=0;
+  diasConDatos.forEach(d=>{const cs=dayCajaStats(d,cajaIdx);tEf+=cs.efectivo;tTar+=cs.tarjeta;tNeg+=cs.negro;tTot+=cs.total;tGst+=cs.gastos;tTk+=cs.tickets;});
+
+  return `<div class="card mb16">
+    <div class="card-title"><div class="dot" style="background:${color}"></div>HISTÓRICO DIARIO — ${nombre}</div>
+    <div style="overflow-x:auto;">
+      <table>
+        <thead><tr>
+          <th>Fecha</th><th>Cajero</th>
+          <th class="num green">Efectivo</th>
+          <th class="num blue">Tarjeta</th>
+          <th class="num" style="color:var(--purple)">Negro</th>
+          <th class="num">% Negro</th>
+          <th class="num" style="color:${color}">Total</th>
+          <th class="num red">Gastos</th>
+          <th class="num">Tickets</th>
+        </tr></thead>
+        <tbody>
+          ${rows}
+          <tr style="border-top:2px solid var(--border);font-weight:700;background:rgba(255,255,255,0.03);">
+            <td colspan="2" style="color:var(--muted);font-size:11px;letter-spacing:1px;">TOTALES</td>
+            <td class="num green">${pesos(tEf)}</td>
+            <td class="num blue">${pesos(tTar)}</td>
+            <td class="num purple">${pesos(tNeg)}</td>
+            <td class="num" style="color:var(--muted)">${tTot>0?Math.round(tNeg/tTot*100):0}%</td>
+            <td class="num" style="color:${color}">${pesos(tTot)}</td>
+            <td class="num red">${pesos(tGst)}</td>
+            <td class="num">${tTk}</td>
+          </tr>
+        </tbody>
+      </table>
+    </div>
+  </div>`;
+}
+
+// ══════════════════════════════════════════
+// EXPORTAR EXCEL
+// ══════════════════════════════════════════
+
+function getRangeActual() {
+  const today = todayStr();
+  if(currentPeriod === 'dia') return [today];
+  if(currentPeriod === 'semana') return getDateRange(7);
+  if(currentPeriod === 'mes') return getDateRange(30);
+  if(currentPeriod === 'rango') {
+    const desde = document.getElementById('rangoDesde').value;
+    const hasta = document.getElementById('rangoHasta').value;
+    if(!desde || !hasta) return [];
+    const r = [];
+    let cur = new Date(desde+'T00:00:00');
+    const end = new Date(hasta+'T00:00:00');
+    while(cur<=end){ r.push(cur.toISOString().slice(0,10)); cur.setDate(cur.getDate()+1); }
+    return r;
+  }
+  return [];
+}
+
+function n(v) { return parseFloat(v)||0; }
+
+function exportarExcel() {
+  const range = getRangeActual();
+  if(!range.length) { alert('Seleccioná un período primero.'); return; }
+  const nombres = ['Caja 1','Caja 2','Caja Central','Caja 3','Caja 4'];
+  const wb = XLSX.utils.book_new();
+
+  // ── HOJA 1: Resumen diario (todas las cajas) ──
+  const resumenRows = [
+    ['Fecha','Efectivo Total','Tarjeta Total','Negro Total','% Negro','Venta Total','Gastos Total','Tickets','Resultado Neto']
+  ];
+  range.filter(d=>state.dias[d]).forEach(d=>{
+    const s = dayStats(d);
+    const fecha = d.slice(8)+'/'+d.slice(5,7)+'/'+d.slice(0,4);
+    resumenRows.push([
+      fecha,
+      s.efectivo, s.tarjeta, s.negro,
+      s.total>0?+(s.negro/s.total*100).toFixed(1):0,
+      s.total, s.gastos, s.tickets,
+      s.total-s.gastos
+    ]);
+  });
+  // Fila totales
+  if(resumenRows.length>1){
+    const data = resumenRows.slice(1);
+    resumenRows.push([
+      'TOTALES',
+      data.reduce((a,r)=>a+r[1],0),
+      data.reduce((a,r)=>a+r[2],0),
+      data.reduce((a,r)=>a+r[3],0),
+      '',
+      data.reduce((a,r)=>a+r[5],0),
+      data.reduce((a,r)=>a+r[6],0),
+      data.reduce((a,r)=>a+r[7],0),
+      data.reduce((a,r)=>a+r[8],0),
+    ]);
+  }
+  const wsResumen = XLSX.utils.aoa_to_sheet(resumenRows);
+  wsResumen['!cols'] = [{wch:12},{wch:16},{wch:16},{wch:14},{wch:10},{wch:16},{wch:14},{wch:10},{wch:16}];
+  XLSX.utils.book_append_sheet(wb, wsResumen, 'Resumen Diario');
+
+  // ── HOJAS POR CAJA ──
+  [0,1,3,4].forEach(ci => {
+    const nombre = nombres[ci];
+    const cajaRows = [
+      ['Fecha','Cajero','Efectivo','Tarjeta','Negro','% Negro','Total','Gastos','Tickets']
+    ];
+    range.filter(d=>state.dias[d]&&state.dias[d].cajas[ci]).forEach(d=>{
+      const cs = dayCajaStats(d,ci);
+      const fecha = d.slice(8)+'/'+d.slice(5,7)+'/'+d.slice(0,4);
+      cajaRows.push([
+        fecha, cs.cajero, cs.efectivo, cs.tarjeta, cs.negro,
+        cs.total>0?+(cs.negro/cs.total*100).toFixed(1):0,
+        cs.total, cs.gastos, cs.tickets
+      ]);
+    });
+    // Totales
+    if(cajaRows.length>1){
+      const data = cajaRows.slice(1);
+      cajaRows.push([
+        'TOTALES','',
+        data.reduce((a,r)=>a+r[2],0),
+        data.reduce((a,r)=>a+r[3],0),
+        data.reduce((a,r)=>a+r[4],0),
+        '',
+        data.reduce((a,r)=>a+r[6],0),
+        data.reduce((a,r)=>a+r[7],0),
+        data.reduce((a,r)=>a+r[8],0),
+      ]);
+    }
+    const ws = XLSX.utils.aoa_to_sheet(cajaRows);
+    ws['!cols'] = [{wch:12},{wch:14},{wch:14},{wch:14},{wch:12},{wch:10},{wch:14},{wch:12},{wch:10}];
+    XLSX.utils.book_append_sheet(wb, ws, nombre);
+  });
+
+  // ── HOJA GASTOS del período ──
+  const gastosRows = [['Fecha','Caja','Concepto','Monto']];
+  range.filter(d=>state.dias[d]).forEach(d=>{
+    const day=state.dias[d];
+    const fecha = d.slice(8)+'/'+d.slice(5,7)+'/'+d.slice(0,4);
+    day.cajas.forEach((c,i)=>{
+      (c.gastos||[]).forEach(g=>{
+        gastosRows.push([fecha, nombres[i]||'Caja '+(i+1), g.concepto||'', parseFloat(g.monto)||0]);
+      });
+    });
+  });
+  const wsGastos = XLSX.utils.aoa_to_sheet(gastosRows);
+  wsGastos['!cols'] = [{wch:12},{wch:14},{wch:28},{wch:14}];
+  XLSX.utils.book_append_sheet(wb, wsGastos, 'Gastos');
+
+  const periodo = currentPeriod==='dia'?'hoy':currentPeriod==='semana'?'7dias':currentPeriod==='mes'?'30dias':'rango';
+  const vista = currentCajaVista==='todas'?'todas':nombres[parseInt(currentCajaVista.replace('caja',''))]||'caja';
+  const filename = `SaboresRoyal_${vista}_${periodo}_${todayStr()}.xlsx`;
+  XLSX.writeFile(wb, filename);
+}
+
+function exportarExcelCompleto() {
+  // Exporta TODOS los días registrados, todas las cajas
+  const allDates = Object.keys(state.dias).sort();
+  if(!allDates.length){ alert('No hay datos para exportar.'); return; }
+  const nombres = ['Caja 1','Caja 2','Caja Central','Caja 3','Caja 4'];
+  const wb = XLSX.utils.book_new();
+
+  // Hoja resumen general
+  const resRows = [['Fecha','Efectivo','Tarjeta','Negro','% Negro','Total','Gastos','Tickets','Neto']];
+  allDates.forEach(d=>{
+    const s=dayStats(d);
+    const f=d.slice(8)+'/'+d.slice(5,7)+'/'+d.slice(0,4);
+    resRows.push([f,s.efectivo,s.tarjeta,s.negro,s.total>0?+(s.negro/s.total*100).toFixed(1):0,s.total,s.gastos,s.tickets,s.total-s.gastos]);
+  });
+  const wsR=XLSX.utils.aoa_to_sheet(resRows);
+  wsR['!cols']=[{wch:12},{wch:14},{wch:14},{wch:12},{wch:10},{wch:14},{wch:12},{wch:10},{wch:14}];
+  XLSX.utils.book_append_sheet(wb,wsR,'Resumen General');
+
+  // Hoja detalle completo (una fila por caja por día)
+  const detRows=[['Fecha','Caja','Cajero','Efectivo','Tarjeta','Negro','% Negro','Total','Gastos','Tickets']];
+  allDates.forEach(d=>{
+    const day=state.dias[d];
+    const f=d.slice(8)+'/'+d.slice(5,7)+'/'+d.slice(0,4);
+    day.cajas.forEach((c,i)=>{
+      if(i===2) return; // omitir Central en ventas
+      const cs=dayCajaStats(d,i);
+      detRows.push([f,nombres[i]||'Caja '+(i+1),cs.cajero,cs.efectivo,cs.tarjeta,cs.negro,cs.total>0?+(cs.negro/cs.total*100).toFixed(1):0,cs.total,cs.gastos,cs.tickets]);
+    });
+  });
+  const wsD=XLSX.utils.aoa_to_sheet(detRows);
+  wsD['!cols']=[{wch:12},{wch:12},{wch:14},{wch:14},{wch:14},{wch:12},{wch:10},{wch:14},{wch:12},{wch:10}];
+  XLSX.utils.book_append_sheet(wb,wsD,'Detalle por Caja');
+
+  // Hoja gastos
+  const gRows=[['Fecha','Caja','Concepto','Monto']];
+  allDates.forEach(d=>{
+    const day=state.dias[d];
+    const f=d.slice(8)+'/'+d.slice(5,7)+'/'+d.slice(0,4);
+    day.cajas.forEach((c,i)=>{
+      (c.gastos||[]).forEach(g=>{
+        gRows.push([f,nombres[i]||'Caja '+(i+1),g.concepto||'',parseFloat(g.monto)||0]);
+      });
+    });
+  });
+  const wsG=XLSX.utils.aoa_to_sheet(gRows);
+  wsG['!cols']=[{wch:12},{wch:14},{wch:30},{wch:14}];
+  XLSX.utils.book_append_sheet(wb,wsG,'Gastos');
+
+  // Hojas individuales por caja
+  [0,1,3,4].forEach(ci=>{
+    const nombre=nombres[ci];
+    const cRows=[['Fecha','Cajero','Efectivo','Tarjeta','Negro','% Negro','Total','Gastos','Tickets']];
+    allDates.filter(d=>state.dias[d]&&state.dias[d].cajas[ci]).forEach(d=>{
+      const cs=dayCajaStats(d,ci);
+      const f=d.slice(8)+'/'+d.slice(5,7)+'/'+d.slice(0,4);
+      cRows.push([f,cs.cajero,cs.efectivo,cs.tarjeta,cs.negro,cs.total>0?+(cs.negro/cs.total*100).toFixed(1):0,cs.total,cs.gastos,cs.tickets]);
+    });
+    const ws=XLSX.utils.aoa_to_sheet(cRows);
+    ws['!cols']=[{wch:12},{wch:14},{wch:14},{wch:14},{wch:12},{wch:10},{wch:14},{wch:12},{wch:10}];
+    XLSX.utils.book_append_sheet(wb,ws,nombre);
+  });
+
+  XLSX.writeFile(wb, `SaboresRoyal_backup_completo_${todayStr()}.xlsx`);
 }
 
 // ── CHARTS ──
@@ -1614,12 +1982,17 @@ function pesos(n) {
 // ============================================================
 // INIT
 // ============================================================
-async function boot(){
+async function init() {
   load();
   try{
-    await pullRemoteState();
-    normalizeState();
-    try{ localStorage.setItem('cajasApp_v2', JSON.stringify(state)); }catch(e){}
+    const rows = await cajaFetch('/app_settings?setting_key=eq.'+CAJA_DATA_KEY+'&select=setting_value', 'GET');
+    if(rows && rows[0]){
+      state = JSON.parse(rows[0].setting_value);
+      normalizeState();
+      localStorage.setItem('cajasApp_v2', JSON.stringify(state));
+    } else {
+      await pushRemoteState();
+    }
   }catch(e){
     console.warn('No se pudo sincronizar con el servidor, se usan los datos locales:', e);
   }
@@ -1633,7 +2006,7 @@ async function boot(){
   updateConceptosDatalist();
 }
 
-boot();
+init();
 </script>
 </body>
 </html>
