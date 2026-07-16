@@ -523,7 +523,7 @@ function renderCeliaco(){
       ${products.map(p=>`
         <div class="product-card" onclick="openProduct('${p.id}')">
           <div class="pc-img">
-            ${p.photo ? `<img src="${p.photo}" alt="">` : ic('box')}
+            ${p.photo ? `<img src="${p.photo}" alt="" loading="lazy">` : ic('box')}
           </div>
           <div class="pc-body">
             <h4>${p.name}</h4>
@@ -1732,7 +1732,7 @@ function renderCatalogResults(section){
           <div class="product-card" onclick="openProduct('${p.id}')">
             <div class="pc-img">
               ${(!p.sellByWeight && p.stock<=5 && p.stock>0) ? `<span class="pc-stock-low">¡Últimas ${p.stock}!</span>`:''}
-              ${p.photo ? `<img src="${p.photo}" alt="">` : ic('box')}
+              ${p.photo ? `<img src="${p.photo}" alt="" loading="lazy">` : ic('box')}
             </div>
             <div class="pc-body">
               <h4>${p.name}</h4>
@@ -1790,7 +1790,7 @@ function renderProductDetail(id){
         <button class="back" onclick="nav('catalog',{section:'${p.section}'})">${ic('chevron')}</button>
         <h2>Detalle</h2>
       </div>
-      <div class="pd-img">${p.photo?`<img src="${p.photo}">`:ic('box')}</div>
+      <div class="pd-img">${p.photo?`<img src="${p.photo}" loading="lazy">`:ic('box')}</div>
       <div class="pd-body">
         <h2>${p.name}</h2>
         <div class="pd-price">${pdWeightPriceHtml(p, pricePerKgEff)}</div>
@@ -1824,7 +1824,7 @@ function renderProductDetail(id){
       <button class="back" onclick="nav('catalog',{section:'${p.section}'})">${ic('chevron')}</button>
       <h2>Detalle</h2>
     </div>
-    <div class="pd-img">${p.photo?`<img src="${p.photo}">`:ic('box')}</div>
+    <div class="pd-img">${p.photo?`<img src="${p.photo}" loading="lazy">`:ic('box')}</div>
     <div class="pd-body">
       <h2>${p.name}</h2>
       <div class="pd-price">${pdPriceHtml(p)}</div>
@@ -1960,7 +1960,7 @@ function renderCart(){
         if(item.grams){
           const min = p.minGrams|| 50;
           return `<div class="cart-item">
-            <img src="${p.photo||''}" onerror="this.style.display='none'">
+            <img src="${p.photo||''}" loading="lazy" onerror="this.style.display='none'">
             <div class="cart-item-body">
               <h4>${p.name}</h4>
               <div class="price">${money(effectivePriceForWeight(p))} / kg</div>
@@ -1975,7 +1975,7 @@ function renderCart(){
           </div>`;
         }
         return `<div class="cart-item">
-          <img src="${p.photo||''}" onerror="this.style.display='none'">
+          <img src="${p.photo||''}" loading="lazy" onerror="this.style.display='none'">
           <div class="cart-item-body">
             <h4>${p.name}</h4>
             <div class="price">${money(effectivePrice(p))}</div>
@@ -3813,7 +3813,7 @@ function renderAdminProductos(){
   return productos.map(p=>`
     <div class="prod-row-v2">
       <div class="prod-row-v2-top">
-        <img src="${p.photo||''}" onerror="this.style.opacity=0">
+        <img src="${p.photo||''}" loading="lazy" onerror="this.style.opacity=0">
         <div class="prod-row-v2-info">
           <h4>${p.name}${p.sellByWeight?' <span style="font-size:9px; color:#6db8e8;">(x kg)</span>':''}</h4>
           <p>Stock: ${p.stock} · ${SECTION_META[p.section]?.label||p.section}${p.sub?` · ${p.sub}`:''}</p>
@@ -5200,7 +5200,7 @@ function renderManualSearchResults(){
     <div style="margin:0 16px 12px; border-radius:12px; overflow:hidden; border:1px solid var(--glass-bd);">
       ${matches.map(p=>`
         <button onclick="addManualItemFromSearch('${p.id}')" style="width:100%; display:flex; align-items:center; gap:10px; padding:9px 14px; background:rgba(255,255,255,0.04); border-bottom:1px solid var(--glass-bd); text-align:left;">
-          ${p.photo?`<img src="${p.photo}" style="width:36px; height:36px; border-radius:8px; object-fit:cover; flex:none;" onerror="this.style.visibility='hidden'">`:`<div style="width:36px; height:36px; border-radius:8px; background:var(--glass); flex:none; display:flex; align-items:center; justify-content:center;">${ic('box')}</div>`}
+          ${p.photo?`<img src="${p.photo}" loading="lazy" style="width:36px; height:36px; border-radius:8px; object-fit:cover; flex:none;" onerror="this.style.visibility='hidden'">`:`<div style="width:36px; height:36px; border-radius:8px; background:var(--glass); flex:none; display:flex; align-items:center; justify-content:center;">${ic('box')}</div>`}
           <div style="flex:1; min-width:0;">
             <div style="font-size:13px; color:var(--white); overflow:hidden; text-overflow:ellipsis; white-space:nowrap;">${p.name}</div>
             ${p.desc?`<div style="font-size:11px; color:rgba(255,255,255,0.5); overflow:hidden; text-overflow:ellipsis; white-space:nowrap;">${p.desc}</div>`:''}
