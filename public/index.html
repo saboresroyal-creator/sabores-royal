@@ -4442,10 +4442,11 @@ function renderAdminCategorias(){
         <div class="cat-tree-item">
           <div class="cat-tree-head">
             <span>${cat}</span>
+            <button class="icon-btn" title="Oferta por tiempo limitado para toda la categoría" onclick="openCategoryPromoModal('${section}','${cat}',null)">🏷️</button>
             <button class="icon-btn" onclick="deleteCategory('${section}','${cat}')">${ic('trash')}</button>
           </div>
           <div class="cat-tree-subs">
-            ${(cats[cat]||[]).map(sub=>`<span class="subcat-chip">${sub} <button onclick="deleteSubcat('${section}','${cat}','${sub}')">×</button></span>`).join('')}
+            ${(cats[cat]||[]).map(sub=>`<span class="subcat-chip">${sub} <button title="Oferta por tiempo limitado" onclick="openCategoryPromoModal('${section}','${cat}','${sub}')">🏷️</button> <button onclick="deleteSubcat('${section}','${cat}','${sub}')">×</button></span>`).join('')}
             <button class="subcat-chip" onclick="addSubcat('${section}','${cat}')" style="color:var(--gold2);">${ic('plus')} Agregar</button>
           </div>
         </div>
@@ -4481,6 +4482,74 @@ function deleteSubcat(section, cat, sub){
   state.categories[section][cat] = state.categories[section][cat].filter(s=>s!==sub);
   saveState(); render();
   apiSaveSetting('categories', state.categories);
+}
+
+/* ---------- ADMIN: OFERTA POR CATEGORÍA/SUBCATEGORÍA ---------- */
+// Aplica/quita promoPrice+promoUntil (el mismo mecanismo visible que ya
+// existe por producto individual) a todos los productos de una categoría
+// o, si se pasa sub, solo de esa subcategoría. Cada producto se guarda
+// como si se hubiera editado uno por uno (mismo apiSaveProduct de siempre).
+function productsInCategoryGroup(section, cat, sub){
+  return state.products.filter(p=>p.section===section && p.cat===cat && (sub==null || p.sub===sub));
+}
+function openCategoryPromoModal(section, cat, sub){
+  const overlay = document.createElement("div");
+  overlay.className = "modal-overlay";
+  overlay.id = "category-promo-overlay";
+  overlay.innerHTML = renderCategoryPromoModal(section, cat, sub);
+  document.body.appendChild(overlay);
+}
+function renderCategoryPromoModal(section, cat, sub){
+  const count = productsInCategoryGroup(section, cat, sub).length;
+  const label = sub ? `${cat} → ${sub}` : cat;
+  const today = new Date().toISOString().slice(0,10);
+  return `
+    <div class="modal-sheet">
+      <div class="modal-handle"></div>
+      <h3 class="modal-title">Oferta por tiempo limitado</h3>
+      <p style="padding:0 16px 14px; font-size:13px; color:rgba(255,255,255,0.6);">${label} · ${count} producto${count===1?'':'s'}. Se va a mostrar en el catálogo con precio tachado, igual que una oferta individual.</p>
+      <div class="form-group"><label>Descuento (%)</label><input id="catpromo-pct" type="number" min="1" max="90" placeholder="Ej: 20"></div>
+      <div class="form-group"><label>Válido hasta</label><input id="catpromo-until" type="date" min="${today}" value="${today}"></div>
+      <div style="display:flex; gap:10px; margin-bottom:10px;">
+        <button class="btn-secondary" style="flex:1;" onclick="closeCategoryPromoModal()">Cancelar</button>
+        <button class="btn-primary" style="flex:1;" onclick="applyCategoryPromo('${section}','${cat}',${sub?`'${sub}'`:'null'})">Aplicar a ${count}</button>
+      </div>
+      <button class="btn-secondary" style="width:100%; color:var(--danger);" onclick="clearCategoryPromo('${section}','${cat}',${sub?`'${sub}'`:'null'})">Quitar oferta de este grupo</button>
+    </div>
+  `;
+}
+function closeCategoryPromoModal(){
+  const el = document.getElementById("category-promo-overlay");
+  if(el) el.remove();
+}
+function applyCategoryPromo(section, cat, sub){
+  const pct = Number(document.getElementById("catpromo-pct").value);
+  const until = document.getElementById("catpromo-until").value;
+  if(!pct || pct<=0 || pct>=100){ toast("Ingresá un descuento válido (1-99%)", "err"); return; }
+  if(!until){ toast("Elegí hasta cuándo dura la oferta", "err"); return; }
+  const products = productsInCategoryGroup(section, cat, sub);
+  products.forEach(p=>{
+    p.promoPrice = Math.round(p.price * (1 - pct/100));
+    p.promoUntil = until;
+    apiSaveProduct(p);
+  });
+  saveState();
+  closeCategoryPromoModal();
+  render();
+  toast(`Oferta del ${pct}% aplicada a ${products.length} producto${products.length===1?'':'s'}`, "ok");
+}
+function clearCategoryPromo(section, cat, sub){
+  const products = productsInCategoryGroup(section, cat, sub);
+  if(!confirm(`¿Quitar la oferta de los ${products.length} productos de este grupo?`)) return;
+  products.forEach(p=>{
+    p.promoPrice = null;
+    p.promoUntil = null;
+    apiSaveProduct(p);
+  });
+  saveState();
+  closeCategoryPromoModal();
+  render();
+  toast("Oferta quitada", "ok");
 }
 
 /* ---------- ADMIN: CLIENTES ---------- */
