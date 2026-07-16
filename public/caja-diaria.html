@@ -648,8 +648,9 @@ function normalizeState(){
   if(!state.impuestos) state.impuestos = [];
   if(!state.cajeros) state.cajeros = ['Gastón','Matías','Gabriel','Emanuel'];
   if(!state.dias) state.dias = {};
+  if(!state.updatedAt) state.updatedAt = 0;
 }
-function save() { localStorage.setItem('cajasApp_v2', JSON.stringify(state)); updateBadge(); scheduleRemoteSync(); }
+function save() { state.updatedAt = Date.now(); localStorage.setItem('cajasApp_v2', JSON.stringify(state)); updateBadge(); scheduleRemoteSync(); }
 function load() {
   const s = localStorage.getItem('cajasApp_v2');
   if(s) { try { state = JSON.parse(s); } catch(e){} }
@@ -1875,6 +1876,10 @@ function importData() {
       try {
         state = JSON.parse(ev.target.result);
         normalizeState();
+        // Una importación manual es una decisión explícita del usuario — siempre
+        // debe ganarle a lo que haya en cualquier otro dispositivo, así que se
+        // marca con la fecha más reciente posible en vez de heredar la del backup.
+        state.updatedAt = Date.now();
         localStorage.setItem('cajasApp_v2', JSON.stringify(state));
         await pushRemoteState();
         alert('Datos importados correctamente.'); location.reload();
@@ -1887,8 +1892,8 @@ function importData() {
 
 async function resetData() {
   if(!confirm('¿Borrar TODOS los datos? Esta acción no se puede deshacer.')) return;
-  state = { dias:{}, impuestos:[], cajeros:['Gastón','Matías','Gabriel','Emanuel'] };
-  localStorage.removeItem('cajasApp_v2');
+  state = { dias:{}, impuestos:[], cajeros:['Gastón','Matías','Gabriel','Emanuel'], updatedAt: Date.now() };
+  localStorage.setItem('cajasApp_v2', JSON.stringify(state));
   try{ await pushRemoteState(); }catch(e){}
   location.reload();
 }
@@ -1986,10 +1991,24 @@ async function init() {
   load();
   try{
     const rows = await cajaFetch('/app_settings?setting_key=eq.'+CAJA_DATA_KEY+'&select=setting_value', 'GET');
-    if(rows && rows[0]){
-      state = JSON.parse(rows[0].setting_value);
-      normalizeState();
-      localStorage.setItem('cajasApp_v2', JSON.stringify(state));
+    const row = rows && rows[0];
+    if(row){
+      const remote = JSON.parse(row.setting_value);
+      const remoteUpdatedAt = remote.updatedAt || 0;
+      const localUpdatedAt = state.updatedAt || 0;
+      if(remoteUpdatedAt > localUpdatedAt){
+        // El servidor tiene una versión más nueva que este dispositivo (se cargó
+        // desde otro lado) — la adoptamos acá.
+        state = remote;
+        normalizeState();
+        localStorage.setItem('cajasApp_v2', JSON.stringify(state));
+      } else if(localUpdatedAt > remoteUpdatedAt){
+        // Este dispositivo tiene cambios más nuevos que el servidor (por ejemplo,
+        // se cargó algo estando sin conexión) — los subimos para no perderlos, en
+        // vez de pisarlos acá con la versión vieja del servidor.
+        await pushRemoteState();
+      }
+      // Mismo updatedAt en ambos lados: ya están sincronizados, no hay que hacer nada.
     } else {
       await pushRemoteState();
     }
