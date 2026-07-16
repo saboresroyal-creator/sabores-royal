@@ -4,13 +4,27 @@
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0">
-<title>Sabores Royal</title>
-<link rel="manifest" href="manifest.json">
-<meta name="theme-color" content="#0f1c45">
+<title id="page-title">Sabores Royal</title>
+<link id="manifest-link" rel="manifest" href="manifest.json">
+<meta id="theme-color-meta" name="theme-color" content="#0f1c45">
 <meta name="apple-mobile-web-app-capable" content="yes">
 <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
-<meta name="apple-mobile-web-app-title" content="Sabores Royal">
-<link rel="apple-touch-icon" href="apple-touch-icon.png">
+<meta id="apple-title-meta" name="apple-mobile-web-app-title" content="Sabores Royal">
+<link id="apple-touch-icon-link" rel="apple-touch-icon" href="apple-touch-icon.png">
+<script>
+// Antes de que el navegador evalúe si la página es "instalable" (para
+// anclarla al escritorio con ícono propio), swap del manifest/ícono/
+// título según sea el modo admin o clientes. Se lee la URL cruda acá
+// porque más abajo, ya inicializada la app, se limpia el query string
+// con history.replaceState y esta señal se perdería.
+if(new URLSearchParams(location.search).get('mode')==='admin'){
+  document.getElementById('manifest-link').href = 'manifest-admin.json';
+  document.getElementById('apple-touch-icon-link').href = 'apple-touch-icon-admin.png';
+  document.getElementById('theme-color-meta').content = '#c5a028';
+  document.getElementById('page-title').textContent = 'Sabores Royal Admin';
+  document.getElementById('apple-title-meta').content = 'SR Admin';
+}
+</script>
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link href="https://fonts.googleapis.com/css2?family=Playfair+Display:wght@500;600;700;800&family=DM+Sans:wght@400;500;600;700&display=swap" rel="stylesheet">
 <style>
@@ -893,14 +907,9 @@ async function apiSyncContent(){
         }
         if(row.setting_key==='client_discounts'){
           const discounts = parsed || {};
-          let discountsDirty = false;
           Object.entries(discounts).forEach(([phone, pct])=>{
             if(!state.clients[phone]) state.clients[phone] = {phone, name:'', address:'', doc:'', points:0, orders:[]};
-            if(state.clients[phone].wholesale){
-              discountsDirty = true;
-            } else {
-              state.clients[phone].discountPct = pct;
-            }
+            state.clients[phone].discountPct = pct;
           });
           // Limpiar descuentos de clientes que ya no están en la lista de Supabase
           Object.keys(state.clients).forEach(phone=>{
@@ -908,7 +917,6 @@ async function apiSyncContent(){
               state.clients[phone].discountPct = undefined;
             }
           });
-          if(discountsDirty) setTimeout(apiSaveClientDiscounts, 500);
           changed = true;
         }
         if(row.setting_key==='wholesale_clients'){
@@ -1885,7 +1893,7 @@ function effectivePriceForWeight(product){
 function clientDiscountPct(){
   if(IS_ADMIN_APP) return 0;
   const c = state.currentClientPhone ? state.clients[state.currentClientPhone] : null;
-  if(!c || c.wholesale) return 0;
+  if(!c) return 0;
   return c.discountPct ? Number(c.discountPct) : 0;
 }
 function applyClientDiscount(price){
@@ -1898,16 +1906,20 @@ function discBadge(pct, sm=false){
 }
 function pcPriceHtml(p){
   const client = state.currentClientPhone ? state.clients[state.currentClientPhone] : null;
-  if(client && client.wholesale && p.wholesalePrice){
-    return money(p.wholesalePrice)+'<span style="font-size:9px;color:#6db8e8;font-weight:700;margin-left:5px;">MAYORISTA</span>';
-  }
-  const promo = activePromo(p);
-  const base = promo !== null ? promo : p.price;
+  const isWholesale = !!(client && client.wholesale && p.wholesalePrice);
+  const promo = !isWholesale ? activePromo(p) : null;
+  const base = isWholesale ? p.wholesalePrice : (promo !== null ? promo : p.price);
   const pct = clientDiscountPct();
   const final = pct > 0 ? Math.round(base*(1-pct/100)) : base;
-  if(promo !== null || pct > 0){
-    const badgePct = pct > 0 ? pct : Math.round((1-promo/p.price)*100);
-    return `<span style="text-decoration:line-through;opacity:.4;font-size:10px;">${money(p.price)}</span> ${money(final)}${discBadge(badgePct,true)}`;
+  const mayoristaTag = isWholesale ? '<span style="font-size:9px;color:#6db8e8;font-weight:700;margin-left:5px;">MAYORISTA</span>' : '';
+  if(pct > 0){
+    const badgePct = pct;
+    return `<span style="text-decoration:line-through;opacity:.4;font-size:10px;">${money(base)}</span> ${money(final)}${discBadge(badgePct,true)}${mayoristaTag}`;
+  }
+  if(isWholesale) return money(base)+mayoristaTag;
+  if(promo !== null){
+    const badgePct = Math.round((1-promo/p.price)*100);
+    return `<span style="text-decoration:line-through;opacity:.4;font-size:10px;">${money(p.price)}</span> ${money(promo)}${discBadge(badgePct,true)}`;
   }
   return money(p.price);
 }
@@ -1919,16 +1931,19 @@ function pcWeightPriceHtml(p){
 }
 function pdPriceHtml(p){
   const client = state.currentClientPhone ? state.clients[state.currentClientPhone] : null;
-  if(client && client.wholesale && p.wholesalePrice){
-    return money(p.wholesalePrice)+'<span style="font-size:11px;color:#6db8e8;font-weight:700;margin-left:6px;">PRECIO MAYORISTA</span>';
-  }
-  const promo = activePromo(p);
-  const base = promo !== null ? promo : p.price;
+  const isWholesale = !!(client && client.wholesale && p.wholesalePrice);
+  const promo = !isWholesale ? activePromo(p) : null;
+  const base = isWholesale ? p.wholesalePrice : (promo !== null ? promo : p.price);
   const pct = clientDiscountPct();
   const final = pct > 0 ? Math.round(base*(1-pct/100)) : base;
-  if(promo !== null || pct > 0){
-    const badgePct = pct > 0 ? pct : Math.round((1-promo/p.price)*100);
-    return `<span style="text-decoration:line-through;opacity:.4;font-size:14px;">${money(p.price)}</span> ${money(final)}${discBadge(badgePct)}`;
+  const mayoristaTag = isWholesale ? '<span style="font-size:11px;color:#6db8e8;font-weight:700;margin-left:6px;">PRECIO MAYORISTA</span>' : '';
+  if(pct > 0){
+    return `<span style="text-decoration:line-through;opacity:.4;font-size:14px;">${money(base)}</span> ${money(final)}${discBadge(pct)}${mayoristaTag}`;
+  }
+  if(isWholesale) return money(base)+mayoristaTag;
+  if(promo !== null){
+    const badgePct = Math.round((1-promo/p.price)*100);
+    return `<span style="text-decoration:line-through;opacity:.4;font-size:14px;">${money(p.price)}</span> ${money(promo)}${discBadge(badgePct)}`;
   }
   return money(p.price);
 }
@@ -2383,10 +2398,11 @@ function renderAdmin(){
     {key:"config",        label:"Configuración"},
     {key:"comparador",    label:"Comparador"},
     {key:"alquiler",      label:"Alquiler"},
+    {key:"cajadiaria",    label:"Caja Diaria"},
   ];
   const tabs = state.adminIsSuperAdmin
     ? ALL_TABS
-    : ALL_TABS.filter(t => t.key !== 'config' && t.key !== 'comparador' && t.key !== 'alquiler' && (state.adminLoggedPerms||[]).includes(t.key));
+    : ALL_TABS.filter(t => t.key !== 'config' && t.key !== 'comparador' && t.key !== 'alquiler' && t.key !== 'cajadiaria' && (state.adminLoggedPerms||[]).includes(t.key));
   const tab = tabs.find(t=>t.key===state.adminTab) ? state.adminTab : (tabs[0]?.key||"pedidos");
   return `
   <div class="screen">
@@ -2425,6 +2441,7 @@ function renderAdmin(){
       ${tab==="config" ? renderAdminConfig() : ""}
       ${tab==="comparador" ? renderAdminComparador() : ""}
       ${tab==="alquiler" ? renderAdminAlquiler() : ""}
+      ${tab==="cajadiaria" ? renderAdminCajaDiaria() : ""}
     </div>
     ${tab==="productos" ? `<button class="fab" onclick="openProductModal(null)">${ic('plus')}</button>` : ""}
     ${tab==="comprobantes" ? `<button class="fab" onclick="openManualVoucherModal()">${ic('plus')}</button>` : ""}
@@ -3136,6 +3153,20 @@ async function deleteRentMovement(id){
   state.rentLedger.movements = state.rentLedger.movements.filter(m=>m.id!==id);
   saveState(); render();
   try{ await apiSaveRent(); } catch(e){ toast("Error al guardar: "+e.message, "err"); }
+}
+// Caja Diaria vive en su propio archivo (caja-diaria.html), con su propio
+// estado y sincronización a Supabase (app_settings.caja_diaria_data) — se
+// embebe tal cual en un iframe en vez de fusionar el código para no chocar
+// nombres compartidos (state, render, save, etc.) con el resto del admin,
+// y para no tocar nada de cómo esa página ya guarda y sincroniza sus datos.
+function renderAdminCajaDiaria(){
+  return `
+  <div style="padding:0 0 8px;">
+    <div style="display:flex; justify-content:flex-end; padding:10px 16px 0;">
+      <a href="caja-diaria.html" target="_blank" rel="noopener" style="font-size:12px; color:rgba(255,255,255,0.5); text-decoration:underline;">Abrir en pestaña nueva ↗</a>
+    </div>
+    <iframe src="caja-diaria.html" title="Caja Diaria" style="width:100%; height:calc(100vh - 160px); min-height:500px; border:none; display:block;"></iframe>
+  </div>`;
 }
 function renderAdminAlquiler(){
   if(!rentLoaded){ apiSyncRent(); return `<div style="padding:40px;text-align:center;color:rgba(255,255,255,0.4);">Cargando...</div>`; }
@@ -4513,6 +4544,7 @@ function renderAdminClientDetail(phone){
       <div style="display:flex; align-items:center; gap:5px; margin-bottom:10px;">
         <span class="tier-badge tier-${tier.key}">${tier.label}</span>
         <span style="display:inline-flex; align-items:center; gap:4px; color:var(--gold2); font-size:12.5px;">${c.points} <img src="${CROWN_DATA_URL}" style="width:14px; height:14px; object-fit:contain;"></span>
+        <button onclick="editClientPoints('${c.phone}')" title="Corregir puntos" style="background:none; border:none; color:rgba(255,255,255,0.45); cursor:pointer; padding:2px; display:inline-flex; align-items:center;">${ic('edit')}</button>
         ${c.discountPct?`<span style="color:var(--gold2); font-weight:600; font-size:12.5px;">· ${c.discountPct}% desc. especial</span>`:''}
       </div>
       <div style="font-size:13px; color:rgba(255,255,255,0.75); line-height:1.9;">
@@ -4566,14 +4598,10 @@ function toggleClientWholesale(phone){
   const c = state.clients[phone];
   if(!c) return;
   c.wholesale = !c.wholesale;
-  if(c.wholesale && c.discountPct){
-    c.discountPct = undefined;
-    apiSaveClientDiscounts();
-  }
   saveState();
   apiSaveWholesaleClients();
   render();
-  toast(c.wholesale ? `${c.name} ahora es mayorista (descuento especial quitado)` : `${c.name} ya no es mayorista`, "ok");
+  toast(c.wholesale ? `${c.name} ahora es mayorista` : `${c.name} ya no es mayorista`, "ok");
 }
 function confirmDeleteClient(phone){
   const c = state.clients[phone];
@@ -4585,18 +4613,26 @@ function confirmDeleteClient(phone){
   render();
   toast("Cliente eliminado", "ok");
 }
+function editClientPoints(phone){
+  const c = state.clients[phone];
+  if(!c) return;
+  const input = prompt(`Puntos Royal de ${c.name} (actual: ${c.points})\nIngresá el nuevo total de puntos.`, c.points);
+  if(input === null) return;
+  const points = Math.max(0, Math.floor(Number(input))||0);
+  c.points = points;
+  saveState();
+  render();
+  toast(`${c.name}: ${points} puntos`, "ok");
+}
 function editClientDiscount(phone){
   if(!state.adminIsSuperAdmin){ toast("Solo el admin general puede editar descuentos", "err"); return; }
   const c = state.clients[phone];
   if(!c) return;
   const current = c.discountPct || 0;
-  const input = prompt(`Descuento especial para ${c.name} (%)\nDejá 0 para quitar el descuento.\n(Si tenía precio mayorista, se quitará al poner un descuento especial)`, current);
+  const input = prompt(`Descuento especial para ${c.name} (%)\nDejá 0 para quitar el descuento.\nSe aplica sobre el precio mayorista si el cliente ya es mayorista.`, current);
   if(input === null) return;
   const pct = Math.min(100, Math.max(0, Number(input)||0));
   c.discountPct = pct || undefined;
-  if(pct > 0 && c.wholesale){
-    c.wholesale = false;
-  }
   saveState();
   render();
   apiSaveClientDiscounts();
@@ -5177,9 +5213,13 @@ function renderManualSearchResults(){
   return `
     <div style="margin:0 16px 12px; border-radius:12px; overflow:hidden; border:1px solid var(--glass-bd);">
       ${matches.map(p=>`
-        <button onclick="addManualItemFromSearch('${p.id}')" style="width:100%; display:flex; justify-content:space-between; align-items:center; padding:11px 14px; background:rgba(255,255,255,0.04); border-bottom:1px solid var(--glass-bd); text-align:left;">
-          <span style="font-size:13px; color:var(--white);">${p.name}</span>
-          <span style="font-size:12.5px; color:var(--gold2); font-weight:700; flex:none; margin-left:10px;">${money(p.price)}</span>
+        <button onclick="addManualItemFromSearch('${p.id}')" style="width:100%; display:flex; align-items:center; gap:10px; padding:9px 14px; background:rgba(255,255,255,0.04); border-bottom:1px solid var(--glass-bd); text-align:left;">
+          ${p.photo?`<img src="${p.photo}" style="width:36px; height:36px; border-radius:8px; object-fit:cover; flex:none;" onerror="this.style.visibility='hidden'">`:`<div style="width:36px; height:36px; border-radius:8px; background:var(--glass); flex:none; display:flex; align-items:center; justify-content:center;">${ic('box')}</div>`}
+          <div style="flex:1; min-width:0;">
+            <div style="font-size:13px; color:var(--white); overflow:hidden; text-overflow:ellipsis; white-space:nowrap;">${p.name}</div>
+            ${p.desc?`<div style="font-size:11px; color:rgba(255,255,255,0.5); overflow:hidden; text-overflow:ellipsis; white-space:nowrap;">${p.desc}</div>`:''}
+          </div>
+          <span style="font-size:12.5px; color:var(--gold2); font-weight:700; flex:none; margin-left:6px;">${money(p.price)}</span>
         </button>
       `).join('')}
     </div>
