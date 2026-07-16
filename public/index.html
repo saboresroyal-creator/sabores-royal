@@ -3869,6 +3869,20 @@ function deleteProduct(id){
 }
 
 /* ---------- PRODUCT MODAL (create/edit) ---------- */
+// Recalcula el precio mayorista (unidad o por kilo, según suffix) a partir
+// del precio normal y el % de descuento cargado, cada vez que se toca
+// cualquiera de los dos campos. El campo de precio mayorista queda
+// editable igual, por si se quiere afinar el número a mano.
+function applyWholesalePct(suffix){
+  const priceEl = document.getElementById(suffix==='-kg' ? 'pm-price-per-kg' : 'pm-price');
+  const pctEl = document.getElementById('pm-wholesale-pct'+suffix);
+  const wholesaleEl = document.getElementById('pm-wholesale-price'+(suffix==='-kg'?'-per-kg':''));
+  const price = Number(priceEl.value)||0;
+  const pct = Number(pctEl.value)||0;
+  if(pct>0 && price>0){
+    wholesaleEl.value = Math.round(price*(1-pct/100));
+  }
+}
 function openProductModal(id){
   const p = id ? state.products.find(pr=>pr.id===id) : null;
   adminPhotoDraft = { original: p?p.photo:"", current: p?p.photo:"", filter:"none", bgRemoved:false, bgRemovedImage:"", background:"none", sinTacc:false, brightness:100, contrast:100, saturation:100, rotation:0 };
@@ -3910,16 +3924,22 @@ function openProductModal(id){
       </div>
 
       <div id="pm-normal-price-group" style="display:${p&&p.sellByWeight?'none':'block'};">
-        <div class="form-group"><label>Precio</label><input id="pm-price" type="number" value="${p?p.price:''}" placeholder="0"></div>
-        <div class="form-group"><label>Precio mayorista (opcional)</label><input id="pm-wholesale-price" type="number" value="${p&&p.wholesalePrice?p.wholesalePrice:''}" placeholder="Dejá vacío si no aplica"></div>
+        <div class="form-group"><label>Precio</label><input id="pm-price" type="number" value="${p?p.price:''}" placeholder="0" oninput="applyWholesalePct('')"></div>
+        <div style="display:flex; gap:10px; align-items:flex-end;">
+          <div class="form-group" style="flex:1;"><label>% desc. mayorista</label><input id="pm-wholesale-pct" type="number" min="0" max="99" value="${p&&p.wholesalePrice&&p.price?Math.round((1-p.wholesalePrice/p.price)*100):''}" placeholder="Ej: 30" oninput="applyWholesalePct('')"></div>
+          <div class="form-group" style="flex:1;"><label>Precio mayorista</label><input id="pm-wholesale-price" type="number" value="${p&&p.wholesalePrice?p.wholesalePrice:''}" placeholder="Dejá vacío si no aplica"></div>
+        </div>
         <div style="display:flex;gap:10px;">
           <div class="form-group" style="flex:1;"><label>🏷️ Precio en oferta</label><input id="pm-promo-price" type="number" value="${p&&p.promoPrice?p.promoPrice:''}" placeholder="Vacío = sin oferta"></div>
           <div class="form-group" style="flex:1;"><label>Válido hasta</label><input id="pm-promo-until" type="date" value="${p&&p.promoUntil?p.promoUntil:''}"></div>
         </div>
       </div>
       <div id="pm-weight-price-group" style="display:${p&&p.sellByWeight?'block':'none'};">
-        <div class="form-group"><label>Precio por kilo</label><input id="pm-price-per-kg" type="number" value="${p&&p.pricePerKg?p.pricePerKg:''}" placeholder="Ej: 8000"></div>
-        <div class="form-group"><label>Precio mayorista por kilo (opcional)</label><input id="pm-wholesale-price-per-kg" type="number" value="${p&&p.wholesalePricePerKg?p.wholesalePricePerKg:''}" placeholder="Dejá vacío si no aplica"></div>
+        <div class="form-group"><label>Precio por kilo</label><input id="pm-price-per-kg" type="number" value="${p&&p.pricePerKg?p.pricePerKg:''}" placeholder="Ej: 8000" oninput="applyWholesalePct('-kg')"></div>
+        <div style="display:flex; gap:10px; align-items:flex-end;">
+          <div class="form-group" style="flex:1;"><label>% desc. mayorista</label><input id="pm-wholesale-pct-kg" type="number" min="0" max="99" value="${p&&p.wholesalePricePerKg&&p.pricePerKg?Math.round((1-p.wholesalePricePerKg/p.pricePerKg)*100):''}" placeholder="Ej: 30" oninput="applyWholesalePct('-kg')"></div>
+          <div class="form-group" style="flex:1;"><label>Precio mayorista por kilo</label><input id="pm-wholesale-price-per-kg" type="number" value="${p&&p.wholesalePricePerKg?p.wholesalePricePerKg:''}" placeholder="Dejá vacío si no aplica"></div>
+        </div>
         <div class="form-group"><label>Cantidad mínima a vender (gramos)</label><input id="pm-min-grams" type="number" value="${p&&p.minGrams?p.minGrams:50}" placeholder="50"></div>
       </div>
 
