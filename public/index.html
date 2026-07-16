@@ -4,27 +4,13 @@
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0">
-<title id="page-title">Sabores Royal</title>
-<link id="manifest-link" rel="manifest" href="manifest.json">
-<meta id="theme-color-meta" name="theme-color" content="#0f1c45">
+<title>Sabores Royal</title>
+<link rel="manifest" href="manifest.json">
+<meta name="theme-color" content="#0f1c45">
 <meta name="apple-mobile-web-app-capable" content="yes">
 <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
-<meta id="apple-title-meta" name="apple-mobile-web-app-title" content="Sabores Royal">
-<link id="apple-touch-icon-link" rel="apple-touch-icon" href="apple-touch-icon.png">
-<script>
-// Antes de que el navegador evalúe si la página es "instalable" (para
-// anclarla al escritorio con ícono propio), swap del manifest/ícono/
-// título según sea el modo admin o clientes. Se lee la URL cruda acá
-// porque más abajo, ya inicializada la app, se limpia el query string
-// con history.replaceState y esta señal se perdería.
-if(new URLSearchParams(location.search).get('mode')==='admin'){
-  document.getElementById('manifest-link').href = 'manifest-admin.json';
-  document.getElementById('apple-touch-icon-link').href = 'apple-touch-icon-admin.png';
-  document.getElementById('theme-color-meta').content = '#c5a028';
-  document.getElementById('page-title').textContent = 'Sabores Royal Admin';
-  document.getElementById('apple-title-meta').content = 'SR Admin';
-}
-</script>
+<meta name="apple-mobile-web-app-title" content="Sabores Royal">
+<link rel="apple-touch-icon" href="apple-touch-icon.png">
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link href="https://fonts.googleapis.com/css2?family=Playfair+Display:wght@500;600;700;800&family=DM+Sans:wght@400;500;600;700&display=swap" rel="stylesheet">
 <style>
@@ -3161,11 +3147,11 @@ async function deleteRentMovement(id){
 // y para no tocar nada de cómo esa página ya guarda y sincroniza sus datos.
 function renderAdminCajaDiaria(){
   return `
-  <div style="padding:0 0 8px;">
-    <div style="display:flex; justify-content:flex-end; padding:10px 16px 0;">
-      <a href="caja-diaria.html" target="_blank" rel="noopener" style="font-size:12px; color:rgba(255,255,255,0.5); text-decoration:underline;">Abrir en pestaña nueva ↗</a>
-    </div>
-    <iframe src="caja-diaria.html" title="Caja Diaria" style="width:100%; height:calc(100vh - 160px); min-height:500px; border:none; display:block;"></iframe>
+  <div style="padding:40px 24px; text-align:center;">
+    <div style="width:64px; height:64px; margin:0 auto 18px; border-radius:16px; background:var(--glass); border:1px solid var(--glass-bd); display:flex; align-items:center; justify-content:center; color:var(--gold2);">${ic('receipt')}</div>
+    <h3 style="color:var(--white); font-size:16px; margin-bottom:8px;">Caja Diaria</h3>
+    <p style="font-size:13px; color:rgba(255,255,255,0.55); max-width:320px; margin:0 auto 22px; line-height:1.5;">Se abre en una pestaña aparte — es la misma app de siempre, con los mismos datos, sincronizada con el servidor.</p>
+    <a href="caja-diaria.html" target="_blank" rel="noopener" class="btn-primary" style="display:inline-flex; align-items:center; justify-content:center; gap:8px; max-width:280px; text-decoration:none;">${ic('receipt')} Abrir Caja Diaria ↗</a>
   </div>`;
 }
 function renderAdminAlquiler(){
