@@ -603,8 +603,12 @@ let charts = {};
 // para contenido no sensible. Este archivo sigue siendo un HTML
 // suelto e independiente: solo comparte la base de datos.
 // ============================================================
-const SUPABASE_URL = 'https://topgunweqztedhhhthbl.supabase.co';
 const SUPABASE_KEY = 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6InRvcGd1bndlcWV6dGVkaGh0aGJsIiwicm9sZSI6ImFub24iLCJpYXQiOjE3ODI3NDczMjgsImV4cCI6MjA5ODMyMzMyOH0.KfZ8f8GlKoQoRxdPk-lrNDSTRcjd21z6d8CgITHf3WU';
+// El dominio se decodifica del propio token en vez de escribirlo a mano —
+// una URL tipeada a mano tuvo un typo (weqztedhhhthbl en vez de
+// weqeztedhhthbl) que hizo que la sincronización fallara en silencio
+// durante días, sin que nadie lo notara hasta que faltaron datos.
+const SUPABASE_URL = (()=>{ try{ const r=JSON.parse(atob(SUPABASE_KEY.split('.')[1])).ref; return 'https://'+r+'.supabase.co'; }catch(e){ return 'https://topgunweqeztedhhthbl.supabase.co'; } })();
 const CAJA_DATA_KEY = 'caja_diaria_data';
 let _remoteSyncTimer = null;
 
