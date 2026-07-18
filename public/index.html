@@ -2553,8 +2553,25 @@ function cmpTokSim(a,b){
   ba.forEach(g=>{ for(let i=0;i<bb.length;i++){if(!used[i]&&bb[i]===g){inter++;used[i]=1;break;}} });
   return 2*inter/(ba.length+bb.length);
 }
+// Palabras de cantidad/unidad ("x38g", "40u", "500", "kg") — se ignoran al
+// comparar productos entre proveedores porque cada uno las escribe distinto
+// (x38g vs 38grs vs 38 gr) y eso le baja el puntaje a productos que en
+// realidad son el mismo. La cantidad ya se calcula aparte con
+// cmpParseUnitQty/cmpInferQtyFromName para el precio por unidad.
+const CMP_UNIT_WORDS = new Set(['gr','grs','gramos','kg','kgs','mg','ml','mls','lt','lts','litros','cc','cm','u','un','und','unid','unidades','uds','pack','cja','caja','cajas','docena','display','bulto','fardo','kilo','kilos','x']);
+function cmpIsNoiseToken(t){
+  if(/^x?\d+[a-z]{0,4}$/.test(t)) return true; // 38g, x38g, 40u, 500, 1kg...
+  return CMP_UNIT_WORDS.has(t);
+}
+// Sinónimos entre proveedores para la misma variante de producto — cada uno
+// le dice distinto a lo mismo (blanco/simple, negro/chocolate). Se puede ir
+// agregando más pares acá a medida que aparezcan casos reales.
+const CMP_SYNONYMS = {blanco:'simple', blanca:'simple', negro:'chocolate', negra:'chocolate'};
+function cmpMatchTokens(s){
+  return cmpTokenize(s).filter(t=>!cmpIsNoiseToken(t)).map(t=>CMP_SYNONYMS[t]||t);
+}
 function cmpProdSim(a,b){
-  const ta=cmpTokenize(a),tb=cmpTokenize(b);
+  const ta=cmpMatchTokens(a),tb=cmpMatchTokens(b);
   if(!ta.length||!tb.length) return 0;
   let matched=0; const usedB={};
   ta.forEach(wa=>{
