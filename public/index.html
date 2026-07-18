@@ -825,6 +825,7 @@ async function apiSyncProducts(){
       wholesalePrice: p.wholesale_price ? Number(p.wholesale_price) : null,
       stock: p.stock||0,
       photo: p.photo_url || (local?local.photo:"") || "",
+      photoClean: p.photo_clean_url || (local?local.photoClean:null) || null,
       section: p.section||"market",
       cat: p.cat||"General",
       sub: p.sub||"",
@@ -1034,6 +1035,19 @@ async function apiSaveProduct(product){
         saveState();
       }catch(pe){ console.warn('No se pudo subir foto:', pe); toast('La foto no se pudo subir: '+pe.message, 'err'); }
     }
+    // photoClean es la versión sin el sello Sin TACC, guardada aparte para
+    // que se pueda apagar el sello más adelante sin perder la edición. null
+    // = sin sello (limpia la columna); undefined = no tocar (falló la subida).
+    let photoCleanUrl;
+    if(product.photoClean && product.photoClean.startsWith('data:')){
+      try{
+        photoCleanUrl = await uploadProductPhoto(product.photoClean, (product._apiId||product.id)+'_clean');
+        product.photoClean = photoCleanUrl;
+        saveState();
+      }catch(pe){ console.warn('No se pudo subir foto sin sello:', pe); }
+    } else {
+      photoCleanUrl = product.photoClean || null;
+    }
     const body = {
       name: product.name,
       description: product.desc||"",
@@ -1041,6 +1055,7 @@ async function apiSaveProduct(product){
       wholesale_price: product.wholesalePrice||null,
       stock: product.stock||0,
       ...(photoUrl !== null ? {photo_url: photoUrl} : {}),
+      ...(photoCleanUrl !== undefined ? {photo_clean_url: photoCleanUrl} : {}),
       section: product.section,
       cat: product.cat,
       sub: product.sub||null,
@@ -2352,7 +2367,7 @@ function bindDynamic(){
 /* =========================================================
    ADMIN PANEL
    ========================================================= */
-let adminPhotoDraft = { original:"", current:"", filter:"none", bgRemoved:false, bgRemovedImage:"", background:"none", sinTacc:false, brightness:100, contrast:100, saturation:100, rotation:0 };
+let adminPhotoDraft = { original:"", current:"", currentClean:"", filter:"none", bgRemoved:false, bgRemovedImage:"", background:"none", sinTacc:false, brightness:100, contrast:100, saturation:100, rotation:0 };
 let aiProcessing = false;
 
 function openAdmin(){ nav("admin"); }
@@ -3893,7 +3908,14 @@ function applyWholesalePct(suffix){
 }
 function openProductModal(id){
   const p = id ? state.products.find(pr=>pr.id===id) : null;
-  adminPhotoDraft = { original: p?p.photo:"", current: p?p.photo:"", filter:"none", bgRemoved:false, bgRemovedImage:"", background:"none", sinTacc:false, brightness:100, contrast:100, saturation:100, rotation:0 };
+  // Si la foto guardada tiene el sello Sin TACC puesto, arrancamos la edición
+  // desde photoClean (la versión sin sello guardada aparte) en vez de la foto
+  // final — así el toggle puede apagar el sello sin perder el resto de la
+  // edición. p.photoClean solo existe si la foto se procesó con este sistema;
+  // fotos viejas (de antes de este cambio) no lo tienen y siguen sin poder
+  // sacarse el sello hasta volver a subir la foto una vez.
+  const cleanBase = p ? (p.photoClean || p.photo) : "";
+  adminPhotoDraft = { original: cleanBase, current: p?p.photo:"", currentClean: cleanBase, filter:"none", bgRemoved:false, bgRemovedImage:"", background:"none", sinTacc: p?!!p.photoClean:false, brightness:100, contrast:100, saturation:100, rotation:0 };
   const overlay = document.createElement("div");
   overlay.className = "modal-overlay";
   overlay.id = "product-modal-overlay";
@@ -4061,16 +4083,22 @@ function saveProductModal(id){
     const dup = state.products.find(pr=>pr.name.toLowerCase().trim()===name.toLowerCase().trim());
     if(dup && !confirm(`Ya existe un producto llamado "${dup.name}" en ${SECTION_META[dup.section]?.label||dup.section}. ¿Guardarlo igual?`)) return;
   }
+  // El sello Sin TACC se estampa directo en los píxeles de la foto final:
+  // photoClean es la versión de abajo, sin el sello, guardada aparte para
+  // que el toggle del editor de fotos se pueda apagar más adelante sin
+  // perder la edición. Si el toggle de la foto está apagado, no hace
+  // falta guardar una versión "limpia" separada (la foto final ya lo es).
+  const photoClean = adminPhotoDraft.sinTacc ? (adminPhotoDraft.currentClean||null) : null;
   let savedProduct;
   if(id){
     const p = state.products.find(pr=>pr.id===id);
-    Object.assign(p, {name, section, cat, sub, price, wholesalePrice, stock, desc, sellByWeight, pricePerKg, wholesalePricePerKg, minGrams, sinTacc, sinAzucar, displayQty, displayDiscount, promoPrice, promoUntil, photo:adminPhotoDraft.current||p.photo});
+    Object.assign(p, {name, section, cat, sub, price, wholesalePrice, stock, desc, sellByWeight, pricePerKg, wholesalePricePerKg, minGrams, sinTacc, sinAzucar, displayQty, displayDiscount, promoPrice, promoUntil, photo:adminPhotoDraft.current||p.photo, photoClean});
     savedProduct = p;
   }else{
     savedProduct = {
       id: "p"+Date.now(), section, cat, sub, name, price, wholesalePrice, stock, desc,
       sellByWeight, pricePerKg, wholesalePricePerKg, minGrams, sinTacc, sinAzucar, displayQty, displayDiscount, promoPrice, promoUntil,
-      photo: adminPhotoDraft.current||""
+      photo: adminPhotoDraft.current||"", photoClean
     };
     state.products.push(savedProduct);
   }
@@ -4386,8 +4414,13 @@ function recomposePhotoDraft(){
       ctx.drawImage(img, 0, 0);
     }
     ctx.filter = "none";
+    const needsAlpha = d.bgRemoved && (d.background||"none")==="none";
+    // Snapshot ANTES de estampar el sello: es la versión "limpia" que se
+    // guarda aparte (product.photoClean), para poder sacar el sello más
+    // adelante sin perder el resto de la edición (fondo/filtros/rotación),
+    // incluso después de haber guardado el producto con el sello puesto.
+    d.currentClean = needsAlpha ? canvas.toDataURL("image/png") : canvas.toDataURL("image/jpeg", 0.85);
     const finalize = ()=>{
-      const needsAlpha = d.bgRemoved && (d.background||"none")==="none";
       d.current = needsAlpha ? canvas.toDataURL("image/png") : canvas.toDataURL("image/jpeg", 0.85);
       const container = document.getElementById("photo-preview-container");
       if(container){
