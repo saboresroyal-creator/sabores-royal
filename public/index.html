@@ -3695,7 +3695,7 @@ function renderAdminPedidos(){
       <div class="oc-actions" style="margin-top:8px;">
         ${existingVoucher
           ? `<button class="btn-secondary" style="flex:1; padding:9px; font-size:12px;" onclick="viewVoucher('${existingVoucher.id}')">${ic('receipt')} Ver comprobante #${existingVoucher.number}</button>`
-          : `<button class="btn-outline-gold" style="flex:0 0 auto; width:50%; padding:5px; font-size:10px;" onclick="openOrderVoucherPicker('${o.id}')">${ic('receipt')} Generar comprobante</button>`
+          : `<button class="btn-outline-gold" style="flex:0 0 auto; width:40%; padding:3px; font-size:9px;" onclick="openOrderVoucherPicker('${o.id}')">${ic('receipt')} Generar comprobante</button>`
         }
       </div>
       <div class="oc-actions" style="margin-top:8px; gap:8px;">
@@ -3703,7 +3703,7 @@ function renderAdminPedidos(){
         <button style="flex:1; padding:9px; font-size:12px; background:var(--glass); border:1px solid var(--glass-bd); border-radius:10px; color:var(--white); cursor:pointer;" onclick="shareOrder('${o.id}')">📤 Compartir</button>
       </div>
       <div class="oc-actions" style="margin-top:8px;">
-        <button style="flex:1; padding:9px; font-size:12px; background:rgba(231,76,60,0.12); border:1px solid rgba(231,76,60,0.4); border-radius:10px; color:#e74c3c; cursor:pointer;" onclick="deleteOrder('${o.id}')">${ic('trash')} Borrar pedido</button>
+        <button style="flex:0 0 auto; width:40%; margin-left:auto; padding:4px; font-size:10px; background:rgba(231,76,60,0.12); border:1px solid rgba(231,76,60,0.4); border-radius:10px; color:#e74c3c; cursor:pointer;" onclick="deleteOrder('${o.id}')">${ic('trash')} Borrar pedido</button>
       </div>
     </div>
   `;}).join('');
