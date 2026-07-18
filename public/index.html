@@ -1470,8 +1470,10 @@ function tierFor(points){
 /* =========================================================
    WHATSAPP MESSAGE BUILDERS
    ========================================================= */
-function buildOrderWAMessage(order){
-  let msg = `¡Hola! Quiero confirmar mi pedido #${order.id}\n\n`;
+function buildOrderWAMessage(order, unsaved){
+  let msg = unsaved
+    ? `⚠️ ESTE PEDIDO NO QUEDÓ GUARDADO EN EL SISTEMA (falló la conexión) — cargalo a mano en el panel ⚠️\n\n¡Hola! Quiero confirmar mi pedido #${order.id}\n\n`
+    : `¡Hola! Quiero confirmar mi pedido #${order.id}\n\n`;
   order.items.forEach(it=>{
     const label = it.grams ? `${it.grams}g de` : `${it.qty}x`;
     msg += `• ${label} ${it.name} — ${money(it.lineTotal!=null?it.lineTotal:it.price*it.qty)}\n`;
@@ -2076,7 +2078,7 @@ async function submitOrder(){
     // no perder la venta, avisando que puede no llegar solo al panel.
     console.warn('No se pudo guardar el pedido en el servidor, se manda igual por WhatsApp:', e);
     const order = placeOrderLocalFallback({name, phone, address}, discPct);
-    const msg = buildOrderWAMessage(order);
+    const msg = buildOrderWAMessage(order, true);
     window.open(waLink(msg), "_blank");
     toast('⚠️ Tu pedido se envió por WhatsApp pero no se guardó automáticamente. Asegurate de que te confirmen por ese medio.', 'err');
     nav("success", {order});
