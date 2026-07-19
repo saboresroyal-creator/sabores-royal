@@ -4752,7 +4752,19 @@ function confirmDeleteClient(phone){
   if(state.currentClientPhone === phone) state.currentClientPhone = null;
   saveState();
   render();
+  apiDeleteClient(phone);
   toast("Cliente eliminado", "ok");
+}
+// Sin esto, el cliente borrado volvía a aparecer solo con la próxima
+// sincronización (apiSyncClients solo agrega lo que ve en el servidor, y
+// el servidor todavía lo tenía).
+async function apiDeleteClient(phone){
+  try{
+    await adminFetch('/clients?phone=eq.'+encodeURIComponent(phone), 'DELETE');
+  }catch(e){
+    console.warn('Error eliminando cliente:', e);
+    toast('El cliente se borró acá pero no en el servidor: '+e.message, 'err');
+  }
 }
 function editClientPoints(phone){
   const c = state.clients[phone];
