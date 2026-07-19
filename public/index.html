@@ -1422,7 +1422,30 @@ async function placeOrder(customer, clientDiscountPct=0){
   creditPointsToClient(customer, order.total, order.id);
   state.cart = [];
   saveState();
+  notifyNewOrderPush(order);
   return order;
+}
+// Aviso push del pedido mandado directo desde el navegador del cliente en
+// vez de por un trigger de la base de datos — se intentó con un trigger de
+// Postgres (pg_net) pero no disparaba cuando el pedido se creaba a través
+// de PostgREST (sí andaba llamando la misma función desde el SQL Editor,
+// nunca se pudo determinar la diferencia). Esto es más simple: mismo lugar
+// de código que ya manda el WhatsApp del pedido, fire-and-forget, nunca
+// bloquea ni rompe el checkout si falla.
+function notifyNewOrderPush(order){
+  try{
+    const itemsQty = order.items.reduce((s,it)=>s+(it.grams?1:(it.qty||1)),0);
+    fetch('https://ntfy.sh/sabores-royal-pedidos-13f559350aa4', {
+      method:'POST',
+      headers:{
+        'Title':'Nuevo pedido - Sabores Royal',
+        'Message': order.customer.name+' - '+money(order.total)+' ('+itemsQty+' items)',
+        'Priority':'urgent',
+        'Tags':'shopping_cart',
+      },
+      body:'',
+    }).catch(e=>console.warn('No se pudo mandar la notificación push:', e));
+  }catch(e){ console.warn('No se pudo mandar la notificación push:', e); }
 }
 // Si el servidor no responde (caída de red o de Supabase, no falta de
 // stock) igual armamos el pedido localmente para no perder la venta —
