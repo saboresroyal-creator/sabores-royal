@@ -23,6 +23,7 @@
   --radius:18px;
 }
 *{box-sizing:border-box; margin:0; padding:0;}
+svg{width:16px; height:16px; flex-shrink:0; vertical-align:middle;}
 html,body{
   font-family:'DM Sans',sans-serif; background:var(--navy);
   color:var(--cream); min-height:100vh; -webkit-tap-highlight-color:transparent;
@@ -189,7 +190,8 @@ img{display:block; max-width:100%;}
   font-weight:700; font-size:13px; display:flex; align-items:center; justify-content:center; gap:6px;}
 .btn-primary svg{width:15px; height:15px; flex-shrink:0;}
 .btn-secondary{width:100%; padding:14px; border-radius:14px; background:var(--glass); color:var(--white);
-  font-weight:600; font-size:14px; border:1px solid var(--glass-bd);}
+  font-weight:600; font-size:14px; border:1px solid var(--glass-bd);
+  display:flex; align-items:center; justify-content:center; gap:8px;}
 /* ---------- NOVEDADES / OFERTAS ---------- */
 .home-sec-header{display:flex; align-items:center; justify-content:space-between; padding:22px 16px 10px;}
 .home-sec-label{
@@ -224,7 +226,8 @@ img{display:block; max-width:100%;}
 .ofer-card-title{font-size:13px; font-weight:700; color:var(--white);}
 .ofer-card-text{font-size:11px; color:rgba(255,255,255,0.6); margin-top:3px; line-height:1.4;}
 .btn-outline-gold{width:100%; padding:14px; border-radius:14px; background:transparent; color:var(--gold2);
-  font-weight:700; font-size:14px; border:1.5px solid var(--gold);}
+  font-weight:700; font-size:14px; border:1.5px solid var(--gold);
+  display:flex; align-items:center; justify-content:center; gap:8px;}
 
 /* ---------- CART ---------- */
 .cart-item{display:flex; gap:12px; padding:14px 16px; border-bottom:1px solid var(--glass-bd);}
@@ -2064,7 +2067,7 @@ function renderCart(){
 /* ---------- CHECKOUT ---------- */
 function renderCheckout(){
   const saved = state.currentClientPhone ? state.clients[state.currentClientPhone] : null;
-  const savedPhoneDigits = saved ? saved.phone.replace(/^\+?54/,'') : '';
+  const savedPhoneDigits = saved ? saved.phone.replace(/^\+?549?/,'') : '';
   const base = cartTotal();
   const discPct = clientDiscountPct();
   const discAmount = discPct > 0 ? Math.round(base * discPct / 100) : 0;
@@ -2171,7 +2174,7 @@ function renderOrdersLookup(){
     <div class="topbar"><button class="back" onclick="nav('home')">${ic('chevron')}</button><h2>Mis Pedidos</h2></div>
     <div class="form-group"><label>Buscar por teléfono</label><div style="display:flex; gap:8px;">
       <div style="padding:13px 14px; border-radius:12px; background:var(--glass); border:1px solid var(--glass-bd); color:var(--cream); font-weight:700;">+54</div>
-      <input id="lookup-phone" value="${phone.replace(/^\+?54/,'')}" placeholder="11 1234 5678" style="flex:1;">
+      <input id="lookup-phone" value="${phone.replace(/^\+?549?/,'')}" placeholder="11 1234 5678" style="flex:1;">
     </div></div>
     <div style="padding:0 16px 16px;"><button class="btn-outline-gold" onclick="lookupOrders()">Buscar pedidos</button></div>
     ${state.lookupOrdersLoading ? `<div class="empty-state">${ic('package')}<p>Buscando…</p></div>` :
@@ -2209,7 +2212,7 @@ function renderAccount(){
         <div class="form-group"><label>Nombre y apellido</label><input id="reg-name" placeholder="Tu nombre completo"></div>
         <div class="form-group"><label>Teléfono</label><div style="display:flex; gap:8px;">
           <div style="padding:13px 14px; border-radius:12px; background:var(--glass); border:1px solid var(--glass-bd); color:var(--cream); font-weight:700;">+54</div>
-          <input id="reg-phone" placeholder="11 1234 5678" value="${(state.route.accPhone||'').replace(/^\+?54/,'')}" style="flex:1;">
+          <input id="reg-phone" placeholder="11 1234 5678" value="${(state.route.accPhone||'').replace(/^\+?549?/,'')}" style="flex:1;">
         </div></div>
         <div class="form-group"><label>DNI / CUIT</label><input id="reg-doc" placeholder="Ej: 12345678 o 30-71234567-8"></div>
         <div class="form-group"><label>Dirección</label><input id="reg-address" placeholder="Calle y número"></div>
@@ -2293,10 +2296,16 @@ async function loginAccount(){
   state.route.accPhone = phone;
   render();
 }
+// Los celulares argentinos necesitan el "9" después del 54 en formato
+// internacional (+549341... en vez de +54341...) para que WhatsApp los
+// reconozca — sin esto, el mismo número real podía normalizarse distinto
+// según cómo se haya tipeado, y terminaba creando un cliente duplicado
+// cada vez.
 function normalizePhone(raw){
   const digits = raw.replace(/\D/g,'');
-  if(digits.startsWith("54")) return "+"+digits;
-  return "+54"+digits;
+  if(digits.startsWith("549")) return "+"+digits;
+  if(digits.startsWith("54")) return "+549"+digits.slice(2);
+  return "+549"+digits;
 }
 async function completeRegistration(){
   const name = document.getElementById("reg-name").value.trim();
@@ -4752,7 +4761,7 @@ function renderAdminClientDetail(phone){
         ${c.discountPct?`<span style="color:var(--gold2); font-weight:600; font-size:12.5px;">· ${c.discountPct}% desc. especial</span>`:''}
       </div>
       <div style="font-size:13px; color:rgba(255,255,255,0.75); line-height:1.9;">
-        <div>${ic('phone')} ${escapeHtml(c.phone)}</div>
+        <div style="display:flex; align-items:center; gap:6px;">${ic('phone')} ${escapeHtml(c.phone)}</div>
         ${c.email?`<div>✉️ ${escapeHtml(c.email)}</div>`:''}
         ${c.address?`<div>📍 ${escapeHtml(c.address)}${c.city?`, ${escapeHtml(c.city)}`:''}</div>`:''}
         ${c.doc?`<div>🪪 DNI/CUIT ${escapeHtml(c.doc)}</div>`:''}
