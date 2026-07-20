@@ -13,3 +13,7 @@ node_modules/
 
 # Supabase local files
 .supabase/
+
+# Archivos de datos locales (ventas, exports, etc.)
+*.xlsx
+*.xls

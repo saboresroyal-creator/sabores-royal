@@ -644,12 +644,18 @@ let state = {
   adminBannerSub: 'banners',
   cmpTab: 'comparar',
   rentLedger: {monthlyAmount:1500000, movements:[]},
+  supplierDebts: {movements:[]},
+  supplierChecks: {movements:[]},
+  adminPagosSub: 'deudas',
+  adminPagosProveedor: null,
 };
 
 let cmpDB = {proveedores:[], listas:[]};
 let cmpLoaded = false;
 let _cmpImpData = null;
 let rentLoaded = false;
+let supplierDebtsLoaded = false;
+let supplierChecksLoaded = false;
 
 function saveState(){
   try{ localStorage.setItem(STORAGE_KEY, JSON.stringify(state)); }catch(e){}
@@ -2449,6 +2455,7 @@ function renderAdmin(){
   const chatUnreadTotal = Object.values(state.adminChatUnread||{}).reduce((s,n)=>s+n,0);
   const lowStockCount = state.products.filter(isLowStock).length;
   const pendingOrdersCount = state.orders.filter(o=>o.status==="Pendiente").length;
+  const checksDueSoon = checksDueSoonCount(7);
   const ALL_TABS = [
     {key:"pedidos",       label:"Pedidos", badge:pendingOrdersCount},
     {key:"productos",     label:"Productos", badge:lowStockCount},
@@ -2464,10 +2471,11 @@ function renderAdmin(){
     {key:"comparador",    label:"Comparador"},
     {key:"alquiler",      label:"Alquiler"},
     {key:"cajadiaria",    label:"Caja Diaria"},
+    {key:"pagos",         label:"Pagos", badge:checksDueSoon},
   ];
   const tabs = state.adminIsSuperAdmin
     ? ALL_TABS
-    : ALL_TABS.filter(t => t.key !== 'config' && t.key !== 'comparador' && t.key !== 'alquiler' && t.key !== 'cajadiaria' && (state.adminLoggedPerms||[]).includes(t.key));
+    : ALL_TABS.filter(t => t.key !== 'config' && t.key !== 'comparador' && t.key !== 'alquiler' && t.key !== 'cajadiaria' && t.key !== 'pagos' && (state.adminLoggedPerms||[]).includes(t.key));
   const tab = tabs.find(t=>t.key===state.adminTab) ? state.adminTab : (tabs[0]?.key||"pedidos");
   return `
   <div class="screen">
@@ -2512,6 +2520,7 @@ function renderAdmin(){
       ${tab==="comparador" ? renderAdminComparador() : ""}
       ${tab==="alquiler" ? renderAdminAlquiler() : ""}
       ${tab==="cajadiaria" ? renderAdminCajaDiaria() : ""}
+      ${tab==="pagos" ? renderAdminPagos() : ""}
     </div>
     ${tab==="productos" ? `<button class="fab" onclick="openProductModal(null)">${ic('plus')}</button>` : ""}
     ${tab==="comprobantes" ? `<button class="fab" onclick="openManualVoucherModal()">${ic('plus')}</button>` : ""}
@@ -3241,6 +3250,334 @@ async function deleteRentMovement(id){
   saveState(); render();
   try{ await apiSaveRent(); } catch(e){ toast("Error al guardar: "+e.message, "err"); }
 }
+
+/* ---------- ADMIN: PAGOS A PROVEEDORES (deudas + cheques) ----------
+   Mismo patrón que Alquiler: todo el ledger vive en un registro de
+   app_settings por clave (supplier_debts / supplier_checks), leído y
+   escrito entero. Ver supabase-migration-payments-dashboard.sql. */
+function paymentsId(prefix){ return prefix+Date.now().toString(36)+Math.random().toString(36).slice(2,8); }
+
+function supplierBalances(){
+  const balances = {};
+  (state.supplierDebts.movements||[]).forEach(m=>{
+    balances[m.proveedor] = (balances[m.proveedor]||0) + (m.type==='pago' ? -m.amount : m.amount);
+  });
+  return balances;
+}
+function supplierBalance(proveedor){
+  return (state.supplierDebts.movements||[]).filter(m=>m.proveedor===proveedor)
+    .reduce((sum,m)=> sum + (m.type==='pago' ? -m.amount : m.amount), 0);
+}
+function supplierDebtTotal(){
+  return Object.values(supplierBalances()).reduce((s,n)=>s+n, 0);
+}
+function checksDueSoonCount(days){
+  const today = new Date().toISOString().slice(0,10);
+  const limit = new Date(Date.now()+days*86400000).toISOString().slice(0,10);
+  return (state.supplierChecks.movements||[]).filter(c=>
+    c.estado!=='cobrado' && c.fechaVencimiento && c.fechaVencimiento>=today && c.fechaVencimiento<=limit
+  ).length;
+}
+
+async function apiSyncSupplierDebts(){
+  try{
+    const rows = await adminFetch('/app_settings?setting_key=eq.supplier_debts&select=setting_value', 'GET');
+    const row = rows && rows[0];
+    if(row){
+      const parsed = JSON.parse(row.setting_value);
+      state.supplierDebts = Object.assign({movements:[]}, parsed);
+    }
+    supplierDebtsLoaded = true;
+    saveState(); render();
+  }catch(e){
+    supplierDebtsLoaded = true;
+    toast('Error cargando deudas: '+e.message, 'err');
+    render();
+  }
+}
+async function apiSaveSupplierDebts(){
+  try{
+    const val = JSON.stringify(state.supplierDebts);
+    const existing = await adminFetch('/app_settings?setting_key=eq.supplier_debts&select=id', 'GET');
+    if(existing && existing.length>0){
+      await adminFetch('/app_settings?setting_key=eq.supplier_debts', 'PATCH', {setting_value: val});
+    }else{
+      await adminFetch('/app_settings', 'POST', {setting_key:'supplier_debts', setting_value: val});
+    }
+  }catch(e){ toast('Error guardando deudas: '+e.message, 'err'); }
+}
+async function apiSyncSupplierChecks(){
+  try{
+    const rows = await adminFetch('/app_settings?setting_key=eq.supplier_checks&select=setting_value', 'GET');
+    const row = rows && rows[0];
+    if(row){
+      const parsed = JSON.parse(row.setting_value);
+      state.supplierChecks = Object.assign({movements:[]}, parsed);
+    }
+    supplierChecksLoaded = true;
+    saveState(); render();
+  }catch(e){
+    supplierChecksLoaded = true;
+    toast('Error cargando cheques: '+e.message, 'err');
+    render();
+  }
+}
+async function apiSaveSupplierChecks(){
+  try{
+    const val = JSON.stringify(state.supplierChecks);
+    const existing = await adminFetch('/app_settings?setting_key=eq.supplier_checks&select=id', 'GET');
+    if(existing && existing.length>0){
+      await adminFetch('/app_settings?setting_key=eq.supplier_checks', 'PATCH', {setting_value: val});
+    }else{
+      await adminFetch('/app_settings', 'POST', {setting_key:'supplier_checks', setting_value: val});
+    }
+  }catch(e){ toast('Error guardando cheques: '+e.message, 'err'); }
+}
+
+function openSupplierDebtModal(proveedorPrefill){
+  const overlay = document.createElement("div");
+  overlay.className = "modal-overlay";
+  overlay.id = "supplier-debt-modal-overlay";
+  const today = new Date().toISOString().slice(0,10);
+  overlay.innerHTML = `
+    <div class="modal-sheet">
+      <div class="modal-handle"></div>
+      <h3 class="modal-title">Registrar factura de proveedor</h3>
+      <div class="form-group"><label>Proveedor</label><input id="sd-proveedor" value="${escapeHtml(proveedorPrefill||'')}" placeholder="Ej: EMPORIO"></div>
+      <div class="form-group"><label>Monto</label><input id="sd-amount" type="number" placeholder="Ej: 150000"></div>
+      <div class="form-group"><label>Fecha</label><input id="sd-date" type="date" value="${today}"></div>
+      <div class="form-group"><label>Nota (opcional)</label><input id="sd-note" placeholder="Ej: Nro de factura"></div>
+      <div style="display:flex; gap:10px; margin-top:6px;">
+        <button class="btn-secondary" style="flex:1;" onclick="closeSupplierDebtModal()">Cancelar</button>
+        <button class="btn-primary" style="flex:1;" onclick="saveSupplierDebt()">Guardar</button>
+      </div>
+    </div>`;
+  document.body.appendChild(overlay);
+}
+function closeSupplierDebtModal(){ const el=document.getElementById("supplier-debt-modal-overlay"); if(el) el.remove(); }
+async function saveSupplierDebt(){
+  const proveedor = document.getElementById("sd-proveedor").value.trim();
+  const amount = Number(document.getElementById("sd-amount").value);
+  const date = document.getElementById("sd-date").value;
+  const note = document.getElementById("sd-note").value.trim();
+  if(!proveedor){ toast("Ingresá el proveedor", "err"); return; }
+  if(!amount || amount<=0){ toast("Ingresá un monto válido", "err"); return; }
+  if(!date){ toast("Ingresá una fecha", "err"); return; }
+  state.supplierDebts.movements.push({id:paymentsId('sd'), proveedor, date, type:'factura', amount, note});
+  closeSupplierDebtModal();
+  saveState(); render();
+  try{ await apiSaveSupplierDebts(); toast("Factura registrada", "ok"); }
+  catch(e){ toast("Error al guardar: "+e.message, "err"); }
+}
+
+function openSupplierPaymentModal(proveedorPrefill){
+  const overlay = document.createElement("div");
+  overlay.className = "modal-overlay";
+  overlay.id = "supplier-payment-modal-overlay";
+  const today = new Date().toISOString().slice(0,10);
+  overlay.innerHTML = `
+    <div class="modal-sheet">
+      <div class="modal-handle"></div>
+      <h3 class="modal-title">Registrar pago a proveedor</h3>
+      <div class="form-group"><label>Proveedor</label><input id="sp-proveedor" value="${escapeHtml(proveedorPrefill||'')}" placeholder="Ej: EMPORIO"></div>
+      <div class="form-group"><label>Monto</label><input id="sp-amount" type="number" placeholder="Ej: 150000"></div>
+      <div class="form-group"><label>Fecha</label><input id="sp-date" type="date" value="${today}"></div>
+      <div class="form-group"><label>Nota (opcional)</label><input id="sp-note" placeholder="Ej: Transferencia"></div>
+      <div style="display:flex; gap:10px; margin-top:6px;">
+        <button class="btn-secondary" style="flex:1;" onclick="closeSupplierPaymentModal()">Cancelar</button>
+        <button class="btn-primary" style="flex:1;" onclick="saveSupplierPayment()">Guardar</button>
+      </div>
+    </div>`;
+  document.body.appendChild(overlay);
+}
+function closeSupplierPaymentModal(){ const el=document.getElementById("supplier-payment-modal-overlay"); if(el) el.remove(); }
+async function saveSupplierPayment(){
+  const proveedor = document.getElementById("sp-proveedor").value.trim();
+  const amount = Number(document.getElementById("sp-amount").value);
+  const date = document.getElementById("sp-date").value;
+  const note = document.getElementById("sp-note").value.trim();
+  if(!proveedor){ toast("Ingresá el proveedor", "err"); return; }
+  if(!amount || amount<=0){ toast("Ingresá un monto válido", "err"); return; }
+  if(!date){ toast("Ingresá una fecha", "err"); return; }
+  state.supplierDebts.movements.push({id:paymentsId('sd'), proveedor, date, type:'pago', amount, note});
+  closeSupplierPaymentModal();
+  saveState(); render();
+  try{ await apiSaveSupplierDebts(); toast("Pago registrado", "ok"); }
+  catch(e){ toast("Error al guardar: "+e.message, "err"); }
+}
+async function deleteSupplierDebtMovement(id){
+  if(!confirm("¿Eliminar este movimiento?")) return;
+  state.supplierDebts.movements = state.supplierDebts.movements.filter(m=>m.id!==id);
+  saveState(); render();
+  try{ await apiSaveSupplierDebts(); } catch(e){ toast("Error al guardar: "+e.message, "err"); }
+}
+
+function openSupplierCheckModal(){
+  const overlay = document.createElement("div");
+  overlay.className = "modal-overlay";
+  overlay.id = "supplier-check-modal-overlay";
+  const today = new Date().toISOString().slice(0,10);
+  overlay.innerHTML = `
+    <div class="modal-sheet">
+      <div class="modal-handle"></div>
+      <h3 class="modal-title">Registrar cheque</h3>
+      <div class="form-group"><label>Nro de cheque</label><input id="sc-nro" placeholder="Ej: 2037"></div>
+      <div class="form-group"><label>Proveedor</label><input id="sc-proveedor" placeholder="Ej: EMPORIO"></div>
+      <div class="form-group"><label>Monto</label><input id="sc-amount" type="number" placeholder="Ej: 150000"></div>
+      <div class="form-group"><label>Fecha de emisión</label><input id="sc-emision" type="date" value="${today}"></div>
+      <div class="form-group"><label>Fecha de vencimiento</label><input id="sc-vencimiento" type="date"></div>
+      <div style="display:flex; gap:10px; margin-top:6px;">
+        <button class="btn-secondary" style="flex:1;" onclick="closeSupplierCheckModal()">Cancelar</button>
+        <button class="btn-primary" style="flex:1;" onclick="saveSupplierCheck()">Guardar</button>
+      </div>
+    </div>`;
+  document.body.appendChild(overlay);
+}
+function closeSupplierCheckModal(){ const el=document.getElementById("supplier-check-modal-overlay"); if(el) el.remove(); }
+async function saveSupplierCheck(){
+  const nroCheque = document.getElementById("sc-nro").value.trim();
+  const proveedor = document.getElementById("sc-proveedor").value.trim();
+  const amount = Number(document.getElementById("sc-amount").value);
+  const fechaEmision = document.getElementById("sc-emision").value;
+  const fechaVencimiento = document.getElementById("sc-vencimiento").value;
+  if(!proveedor){ toast("Ingresá el proveedor", "err"); return; }
+  if(!amount || amount<=0){ toast("Ingresá un monto válido", "err"); return; }
+  if(!fechaVencimiento){ toast("Ingresá la fecha de vencimiento", "err"); return; }
+  state.supplierChecks.movements.push({id:paymentsId('sc'), nroCheque, proveedor, amount, fechaEmision, fechaVencimiento, estado:'pendiente'});
+  closeSupplierCheckModal();
+  saveState(); render();
+  try{ await apiSaveSupplierChecks(); toast("Cheque registrado", "ok"); }
+  catch(e){ toast("Error al guardar: "+e.message, "err"); }
+}
+async function setCheckEstado(id, estado){
+  const c = state.supplierChecks.movements.find(c=>c.id===id);
+  if(!c) return;
+  c.estado = estado;
+  saveState(); render();
+  try{ await apiSaveSupplierChecks(); } catch(e){ toast("Error al guardar: "+e.message, "err"); }
+}
+async function deleteSupplierCheck(id){
+  if(!confirm("¿Eliminar este cheque?")) return;
+  state.supplierChecks.movements = state.supplierChecks.movements.filter(c=>c.id!==id);
+  saveState(); render();
+  try{ await apiSaveSupplierChecks(); } catch(e){ toast("Error al guardar: "+e.message, "err"); }
+}
+function openSupplierProveedor(proveedor){ state.adminPagosProveedor = proveedor; render(); }
+function closeSupplierProveedor(){ state.adminPagosProveedor = null; render(); }
+
+function renderAdminPagos(){
+  if(!supplierDebtsLoaded){ apiSyncSupplierDebts(); }
+  if(!supplierChecksLoaded){ apiSyncSupplierChecks(); }
+  if(!supplierDebtsLoaded || !supplierChecksLoaded){ return `<div style="padding:40px;text-align:center;color:rgba(255,255,255,0.4);">Cargando...</div>`; }
+  const sub = state.adminPagosSub||'deudas';
+  return `
+  <div style="padding:12px 16px 0; display:flex; gap:8px;">
+    <button class="chip ${sub==='deudas'?'active':''}" onclick="state.adminPagosSub='deudas'; state.adminPagosProveedor=null; render()">Deudas</button>
+    <button class="chip ${sub==='cheques'?'active':''}" onclick="state.adminPagosSub='cheques'; render()">Cheques</button>
+  </div>
+  ${sub==='deudas' ? renderAdminPagosDeudas() : renderAdminPagosCheques()}`;
+}
+
+function renderAdminPagosDeudas(){
+  if(state.adminPagosProveedor) return renderAdminPagosProveedorDetail(state.adminPagosProveedor);
+  const balances = supplierBalances();
+  const total = Object.values(balances).reduce((s,n)=>s+n, 0);
+  const proveedores = Object.keys(balances).sort((a,b)=> balances[b]-balances[a]);
+  return `
+  <div style="padding:16px;">
+    <div style="background:var(--glass); border:1px solid var(--glass-bd); border-radius:16px; padding:20px; text-align:center; margin-bottom:16px;">
+      <div style="font-size:12px; color:rgba(255,255,255,0.5); text-transform:uppercase; letter-spacing:.5px;">Deuda total a proveedores</div>
+      <div style="font-size:32px; font-weight:800; color:${total>0?'var(--danger)':'var(--ok)'}; margin:8px 0;">${money(total)}</div>
+    </div>
+    <button class="btn-primary" style="width:100%; margin-bottom:16px;" onclick="openSupplierDebtModal('')">+ Registrar factura</button>
+    <div style="font-size:13px; font-weight:700; color:rgba(255,255,255,0.6); margin-bottom:8px; text-transform:uppercase; letter-spacing:.4px;">Proveedores</div>
+    ${proveedores.length===0 ? `<div style="padding:30px; text-align:center; color:rgba(255,255,255,0.4);">Sin proveedores cargados todavía.</div>` : proveedores.map(p=>`
+      <div style="display:flex; justify-content:space-between; align-items:center; gap:10px; padding:14px; background:var(--glass); border:1px solid var(--glass-bd); border-radius:12px; margin-bottom:8px; cursor:pointer;" onclick="openSupplierProveedor('${escapeHtml(p)}')">
+        <div style="font-size:13.5px; font-weight:600; color:var(--white);">${escapeHtml(p)}</div>
+        <div style="font-size:14px; font-weight:700; color:${balances[p]>0?'var(--danger)':'var(--ok)'};">${money(balances[p])}</div>
+      </div>`).join('')}
+  </div>`;
+}
+
+function renderAdminPagosProveedorDetail(proveedor){
+  const balance = supplierBalance(proveedor);
+  const movs = (state.supplierDebts.movements||[]).filter(m=>m.proveedor===proveedor).sort((a,b)=> (a.date||'').localeCompare(b.date||''));
+  let running = 0;
+  const rows = movs.map(m=>{ running += (m.type==='pago' ? -m.amount : m.amount); return Object.assign({}, m, {running}); });
+  return `
+  <div style="padding:16px;">
+    <div style="display:flex; align-items:center; gap:8px; margin-bottom:12px;">
+      <button onclick="closeSupplierProveedor()" style="background:none; border:none; color:var(--white); cursor:pointer; padding:4px 8px; font-size:18px;">←</button>
+      <h3 style="font-size:15px; color:var(--white);">${escapeHtml(proveedor)}</h3>
+    </div>
+    <div style="background:var(--glass); border:1px solid var(--glass-bd); border-radius:16px; padding:20px; text-align:center; margin-bottom:16px;">
+      <div style="font-size:12px; color:rgba(255,255,255,0.5); text-transform:uppercase; letter-spacing:.5px;">Saldo</div>
+      <div style="font-size:28px; font-weight:800; color:${balance>0?'var(--danger)':'var(--ok)'}; margin:8px 0;">${money(balance)}</div>
+    </div>
+    <div style="display:flex; gap:10px; margin-bottom:16px;">
+      <button class="btn-secondary" style="flex:1;" onclick="openSupplierDebtModal('${escapeHtml(proveedor)}')">+ Factura</button>
+      <button class="btn-primary" style="flex:1;" onclick="openSupplierPaymentModal('${escapeHtml(proveedor)}')">+ Pago</button>
+    </div>
+    <div style="font-size:13px; font-weight:700; color:rgba(255,255,255,0.6); margin-bottom:8px; text-transform:uppercase; letter-spacing:.4px;">Movimientos</div>
+    ${rows.length===0 ? `<div style="padding:30px; text-align:center; color:rgba(255,255,255,0.4);">Sin movimientos todavía.</div>` : rows.slice().reverse().map(m=>`
+      <div style="display:flex; justify-content:space-between; align-items:center; gap:10px; padding:12px 14px; background:var(--glass); border:1px solid var(--glass-bd); border-radius:12px; margin-bottom:8px;">
+        <div style="flex:1; min-width:0;">
+          <div style="font-size:13px; font-weight:600;">${escapeHtml(m.note||(m.type==='pago'?'Pago':'Factura'))}</div>
+          <div style="font-size:11px; color:rgba(255,255,255,0.4);">${m.date||'—'}</div>
+        </div>
+        <div style="text-align:right;">
+          <div style="font-size:14px; font-weight:700; color:${m.type==='pago'?'var(--ok)':'var(--danger)'};">${m.type==='pago'?'-':'+'}${money(m.amount)}</div>
+          <div style="font-size:11px; color:rgba(255,255,255,0.35);">Saldo: ${money(m.running)}</div>
+        </div>
+        <button class="icon-btn" onclick="deleteSupplierDebtMovement('${m.id}')">${ic('trash')}</button>
+      </div>`).join('')}
+  </div>`;
+}
+
+function renderAdminPagosCheques(){
+  const today = new Date().toISOString().slice(0,10);
+  const checks = [...(state.supplierChecks.movements||[])].sort((a,b)=> (a.fechaVencimiento||'').localeCompare(b.fechaVencimiento||''));
+  const pendientes = checks.filter(c=>c.estado==='pendiente');
+  const vencidos = checks.filter(c=>c.estado==='vencido');
+  const totalPendiente = pendientes.reduce((s,c)=>s+c.amount, 0);
+  return `
+  <div style="padding:16px;">
+    <div style="display:flex; gap:10px; margin-bottom:16px;">
+      <div style="flex:1; background:var(--glass); border:1px solid var(--glass-bd); border-radius:14px; padding:14px; text-align:center;">
+        <div style="font-size:11px; color:rgba(255,255,255,0.5); text-transform:uppercase;">Pendientes</div>
+        <div style="font-size:18px; font-weight:800; color:var(--white);">${money(totalPendiente)}</div>
+        <div style="font-size:11px; color:rgba(255,255,255,0.4);">${pendientes.length} cheques</div>
+      </div>
+      <div style="flex:1; background:var(--glass); border:1px solid var(--glass-bd); border-radius:14px; padding:14px; text-align:center;">
+        <div style="font-size:11px; color:rgba(255,255,255,0.5); text-transform:uppercase;">Vencidos</div>
+        <div style="font-size:18px; font-weight:800; color:var(--danger);">${vencidos.length}</div>
+        <div style="font-size:11px; color:rgba(255,255,255,0.4);">sin marcar cobrados</div>
+      </div>
+    </div>
+    <button class="btn-primary" style="width:100%; margin-bottom:16px;" onclick="openSupplierCheckModal()">+ Registrar cheque</button>
+    ${checks.length===0 ? `<div style="padding:30px; text-align:center; color:rgba(255,255,255,0.4);">Sin cheques cargados todavía.</div>` : checks.map(c=>{
+      const dueSoon = c.estado==='pendiente' && c.fechaVencimiento && c.fechaVencimiento<=new Date(Date.now()+7*86400000).toISOString().slice(0,10);
+      const color = c.estado==='cobrado' ? 'var(--ok)' : c.estado==='vencido' ? 'var(--danger)' : dueSoon ? 'var(--warn)' : 'rgba(255,255,255,0.7)';
+      return `
+      <div style="padding:12px 14px; background:var(--glass); border:1px solid var(--glass-bd); border-radius:12px; margin-bottom:8px;">
+        <div style="display:flex; justify-content:space-between; align-items:flex-start; gap:10px; margin-bottom:8px;">
+          <div style="flex:1; min-width:0;">
+            <div style="font-size:13px; font-weight:600; color:var(--white);">${escapeHtml(c.proveedor)}${c.nroCheque?` · Nro ${escapeHtml(c.nroCheque)}`:''}</div>
+            <div style="font-size:11px; color:${color};">Vence ${c.fechaVencimiento||'—'}</div>
+          </div>
+          <div style="text-align:right;">
+            <div style="font-size:14px; font-weight:700; color:var(--white);">${money(c.amount)}</div>
+          </div>
+          <button class="icon-btn" onclick="deleteSupplierCheck('${c.id}')">${ic('trash')}</button>
+        </div>
+        <div style="display:flex; gap:6px;">
+          ${['pendiente','vencido','cobrado'].map(e=>`<button class="chip ${c.estado===e?'active':''}" style="padding:5px 12px; font-size:11px;" onclick="setCheckEstado('${c.id}','${e}')">${e==='pendiente'?'Pendiente':e==='vencido'?'Vencido':'Cobrado'}</button>`).join('')}
+        </div>
+      </div>`;
+    }).join('')}
+  </div>`;
+}
+
 // Caja Diaria vive en su propio archivo (caja-diaria.html), con su propio
 // estado y sincronización a Supabase (app_settings.caja_diaria_data) — se
 // embebe tal cual en un iframe en vez de fusionar el código para no chocar
