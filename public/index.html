@@ -529,11 +529,19 @@ function renderCeliaco(){
       ${products.map(p=>`
         <div class="product-card" onclick="openProduct('${p.id}')">
           <div class="pc-img">
+            ${(!p.sellByWeight && p.stock<=5 && p.stock>0) ? `<span class="pc-stock-low">¡Últimas ${p.stock}!</span>`:''}
             ${p.photo ? `<img src="${p.photo}" alt="" loading="lazy">` : ic('box')}
           </div>
           <div class="pc-body">
             <h4>${p.name}</h4>
-            <div class="pc-price">${p.sellByWeight ? pcWeightPriceHtml(p) : pcPriceHtml(p)}</div>
+            ${p.sellByWeight ? `
+              <div class="pc-price">${pcWeightPriceHtml(p)}</div>
+              <button class="pc-add" onclick="event.stopPropagation(); openProduct('${p.id}')">Elegir cantidad</button>
+            ` : `
+              <div class="pc-price">${pcPriceHtml(p)}</div>
+              ${p.displayQty && p.displayDiscount && !(state.currentClientPhone && state.clients[state.currentClientPhone] && state.clients[state.currentClientPhone].wholesale) ? `<div style="font-size:10px;color:#5dade2;margin-top:2px;">Caja x${p.displayQty}: <b>-${p.displayDiscount}%</b></div>` : ''}
+              <button class="pc-add" onclick="event.stopPropagation(); addToCart('${p.id}',1)">Agregar</button>
+            `}
           </div>
         </div>`).join('')}
     </div>
