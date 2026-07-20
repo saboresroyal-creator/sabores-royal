@@ -284,6 +284,7 @@ img{display:block; max-width:100%;}
 .status-pendiente{background:rgba(224,168,60,0.25); color:var(--warn);}
 .status-listo{background:rgba(60,150,220,0.25); color:#6db8e8;}
 .status-entregado{background:rgba(62,207,142,0.25); color:var(--ok);}
+.status-cancelado{background:rgba(231,76,60,0.25); color:#e74c3c;}
 .oc-items{font-size:12.5px; color:rgba(255,255,255,0.6); margin-bottom:8px; line-height:1.5;}
 .oc-actions{display:flex; gap:8px;}
 .oc-actions button{flex:1; padding:9px; border-radius:10px; font-size:12px; font-weight:700;}
@@ -3718,7 +3719,8 @@ function renderAdminPedidos(){
       <div class="oc-items">${o.items.map(it=>formatOrderItemLabel(it)).join(', ')}</div>
       <div style="font-weight:700; color:var(--gold2); margin-bottom:10px;">${money(o.total)}</div>
       <div class="oc-actions">
-        ${o.status!=="Entregado" ? `<button class="btn-advance" onclick="advanceOrderStatus('${o.id}')">Marcar ${order[order.indexOf(o.status)+1]}</button>` : `<button class="btn-secondary" style="flex:1; padding:9px;" disabled>Completado</button>`}
+        ${o.status==="Cancelado" ? `<button class="btn-secondary" style="flex:1; padding:9px;" disabled>Anulado</button>`
+          : o.status!=="Entregado" ? `<button class="btn-advance" onclick="advanceOrderStatus('${o.id}')">Marcar ${order[order.indexOf(o.status)+1]}</button>` : `<button class="btn-secondary" style="flex:1; padding:9px;" disabled>Completado</button>`}
         <button class="btn-wa-notify" onclick="notifyOrderWA('${o.id}')">${ic('wa')} Notificar</button>
       </div>
       <div class="oc-actions" style="margin-top:8px;">
@@ -3731,7 +3733,8 @@ function renderAdminPedidos(){
         <button style="flex:1; padding:9px; font-size:12px; background:var(--glass); border:1px solid var(--glass-bd); border-radius:10px; color:var(--white); cursor:pointer;" onclick="printOrder('${o.id}')">🖨️ Imprimir / PDF</button>
         <button style="flex:1; padding:9px; font-size:12px; background:var(--glass); border:1px solid var(--glass-bd); border-radius:10px; color:var(--white); cursor:pointer;" onclick="shareOrder('${o.id}')">📤 Compartir</button>
       </div>
-      <div class="oc-actions" style="margin-top:8px;">
+      <div class="oc-actions" style="margin-top:8px; gap:8px;">
+        ${o.status!=="Cancelado" ? `<button style="flex:0 0 auto; width:40%; padding:4px; font-size:10px; background:rgba(224,168,60,0.12); border:1px solid rgba(224,168,60,0.4); border-radius:10px; color:var(--warn); cursor:pointer;" onclick="confirmCancelOrder('${o.id}')">↩️ Anular pedido</button>` : ''}
         <button style="flex:0 0 auto; width:40%; margin-left:auto; padding:4px; font-size:10px; background:rgba(231,76,60,0.12); border:1px solid rgba(231,76,60,0.4); border-radius:10px; color:#e74c3c; cursor:pointer;" onclick="deleteOrder('${o.id}')">${ic('trash')} Borrar pedido</button>
       </div>
     </div>
@@ -3743,6 +3746,35 @@ function advanceOrderStatus(orderId){
   const flow = ["Pendiente","Listo","Entregado"];
   const idx = flow.indexOf(order.status);
   if(idx < flow.length-1){ order.status = flow[idx+1]; saveState(); render(); apiUpdateOrderStatus(orderId, order.status); }
+}
+// Anular un pedido: a diferencia de borrarlo, el pedido queda visible con
+// estado "Cancelado" y el stock que create_order() había descontado se
+// devuelve (solo para ítems vendidos por unidad — los vendidos por peso
+// nunca descontaron stock). El descuento/devolución real y atómica pasa en
+// el servidor vía el RPC cancel_order; acá solo se refleja al toque en la
+// pantalla para no esperar a la próxima sincronización.
+function confirmCancelOrder(orderId){
+  const order = state.orders.find(o=>o.id===orderId);
+  if(!order) return;
+  if(!confirm(`¿Anular el pedido #${order.id} de ${order.customer.name}? El stock descontado se va a devolver.`)) return;
+  order.items.forEach(it=>{
+    if(it.grams) return;
+    const p = state.products.find(pr=>pr.id===String(it.id));
+    if(p) p.stock = (p.stock||0) + (it.qty||1);
+  });
+  order.status = "Cancelado";
+  saveState(); render();
+  apiCancelOrder(orderId);
+  toast("Pedido anulado, stock devuelto", "ok");
+}
+async function apiCancelOrder(orderId){
+  try{
+    await adminFetch('/rpc/cancel_order', 'POST', {p_order_id: orderId});
+    apiSyncProducts();
+  }catch(e){
+    console.warn('Error anulando pedido:', e);
+    toast('Se anuló acá pero no en el servidor: '+e.message, 'err');
+  }
 }
 function deleteOrder(orderId){
   const order = state.orders.find(o=>o.id===orderId);
