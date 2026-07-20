@@ -3256,6 +3256,25 @@ async function deleteRentMovement(id){
    app_settings por clave (supplier_debts / supplier_checks), leído y
    escrito entero. Ver supabase-migration-payments-dashboard.sql. */
 function paymentsId(prefix){ return prefix+Date.now().toString(36)+Math.random().toString(36).slice(2,8); }
+// Formatea "YYYY-MM-DD" a "DD/MM/YYYY" con split de string, no con Date():
+// un Date() de una fecha sin hora se interpreta en UTC y en Argentina
+// (UTC-3) puede mostrar el día anterior.
+function fmtDateAR(iso){
+  if(!iso) return '—';
+  const [y,m,d] = iso.split('-');
+  return `${d}/${m}/${y}`;
+}
+// Las notas de facturas importadas traen fechas ISO embebidas (ej. "Vence
+// 2026-06-22"); esto las reescribe a DD/MM/YYYY sin tocar lo ya guardado.
+function fmtDatesInText(text){
+  return (text||'').replace(/\d{4}-\d{2}-\d{2}/g, iso => fmtDateAR(iso));
+}
+const MONTH_ABBR_ES = ['ENE','FEB','MAR','ABR','MAY','JUN','JUL','AGO','SEP','OCT','NOV','DIC'];
+function dateBadgeParts(iso){
+  if(!iso) return {day:'—', month:''};
+  const [y,m,d] = iso.split('-');
+  return {day:d, month:MONTH_ABBR_ES[Number(m)-1]||''};
+}
 
 function supplierBalances(){
   const balances = {};
@@ -3420,33 +3439,71 @@ function openSupplierCheckModal(){
   overlay.innerHTML = `
     <div class="modal-sheet">
       <div class="modal-handle"></div>
-      <h3 class="modal-title">Registrar cheque</h3>
-      <div class="form-group"><label>Nro de cheque</label><input id="sc-nro" placeholder="Ej: 2037"></div>
+      <h3 class="modal-title">Registrar cheque(s)</h3>
+      <p style="font-size:12px; color:rgba(255,255,255,0.5); margin:-4px 0 10px;">Podés repartir un pago en varios cheques con distinta fecha — ej: $1.000.000 en 4 cheques.</p>
       <div class="form-group"><label>Proveedor</label><input id="sc-proveedor" placeholder="Ej: EMPORIO"></div>
-      <div class="form-group"><label>Monto</label><input id="sc-amount" type="number" placeholder="Ej: 150000"></div>
-      <div class="form-group"><label>Fecha de emisión</label><input id="sc-emision" type="date" value="${today}"></div>
-      <div class="form-group"><label>Fecha de vencimiento</label><input id="sc-vencimiento" type="date"></div>
+      <div class="form-group"><label>Fecha de emisión</label><input id="sc-emision" type="date" value="${today}" onchange="rebuildCheckSplitRows()"></div>
+      <div style="display:flex; gap:10px;">
+        <div class="form-group" style="flex:1;"><label>Monto total a pagar</label><input id="sc-total" type="number" placeholder="Ej: 1000000" oninput="rebuildCheckSplitRows()"></div>
+        <div class="form-group" style="flex:1;"><label>Repartir en</label><input id="sc-cantidad" type="number" min="1" max="24" value="1" oninput="rebuildCheckSplitRows()"></div>
+      </div>
+      <div id="sc-rows"></div>
       <div style="display:flex; gap:10px; margin-top:6px;">
         <button class="btn-secondary" style="flex:1;" onclick="closeSupplierCheckModal()">Cancelar</button>
-        <button class="btn-primary" style="flex:1;" onclick="saveSupplierCheck()">Guardar</button>
+        <button class="btn-primary" style="flex:1;" onclick="saveSupplierChecks()">Guardar</button>
       </div>
     </div>`;
   document.body.appendChild(overlay);
+  rebuildCheckSplitRows();
 }
 function closeSupplierCheckModal(){ const el=document.getElementById("supplier-check-modal-overlay"); if(el) el.remove(); }
-async function saveSupplierCheck(){
-  const nroCheque = document.getElementById("sc-nro").value.trim();
+// Redibuja las filas de cheques según "monto total" / "cantidad", sin pisar
+// lo que el usuario ya haya tocado a mano en filas que sigan existiendo.
+function rebuildCheckSplitRows(){
+  const rowsEl = document.getElementById('sc-rows');
+  if(!rowsEl) return;
+  const total = Number(document.getElementById('sc-total')?.value) || 0;
+  const n = Math.max(1, Math.min(24, Number(document.getElementById('sc-cantidad')?.value) || 1));
+  const emision = document.getElementById('sc-emision')?.value || new Date().toISOString().slice(0,10);
+  const per = n>0 ? Math.round((total/n)*100)/100 : 0;
+  const prevRows = [...rowsEl.querySelectorAll('[data-row]')].map(row=>({
+    nro: row.querySelector('.sc-row-nro')?.value || '',
+    monto: row.querySelector('.sc-row-monto')?.value || '',
+    vto: row.querySelector('.sc-row-vto')?.value || '',
+  }));
+  let html = '';
+  for(let i=0;i<n;i++){
+    const prev = prevRows[i];
+    const defaultVto = new Date(new Date(emision+'T00:00:00').getTime() + (i+1)*30*86400000).toISOString().slice(0,10);
+    html += `
+      <div data-row style="display:flex; gap:8px; margin-bottom:10px;">
+        <div style="flex:1;"><label style="font-size:11px; color:rgba(255,255,255,0.5); display:block; margin-bottom:4px;">Cheque ${i+1} · Nro</label>
+          <input class="sc-row-nro" value="${prev?escapeHtml(prev.nro):''}" placeholder="Opcional" style="width:100%; padding:10px; border-radius:10px; background:var(--glass); border:1px solid var(--glass-bd); color:var(--cream);"></div>
+        <div style="flex:1;"><label style="font-size:11px; color:rgba(255,255,255,0.5); display:block; margin-bottom:4px;">Monto</label>
+          <input class="sc-row-monto" type="number" value="${prev&&prev.monto!==''?prev.monto:(per||'')}" style="width:100%; padding:10px; border-radius:10px; background:var(--glass); border:1px solid var(--glass-bd); color:var(--cream);"></div>
+        <div style="flex:1;"><label style="font-size:11px; color:rgba(255,255,255,0.5); display:block; margin-bottom:4px;">Vencimiento</label>
+          <input class="sc-row-vto" type="date" value="${prev&&prev.vto?prev.vto:defaultVto}" style="width:100%; padding:10px; border-radius:10px; background:var(--glass); border:1px solid var(--glass-bd); color:var(--cream);"></div>
+      </div>`;
+  }
+  rowsEl.innerHTML = html;
+}
+async function saveSupplierChecks(){
   const proveedor = document.getElementById("sc-proveedor").value.trim();
-  const amount = Number(document.getElementById("sc-amount").value);
   const fechaEmision = document.getElementById("sc-emision").value;
-  const fechaVencimiento = document.getElementById("sc-vencimiento").value;
   if(!proveedor){ toast("Ingresá el proveedor", "err"); return; }
-  if(!amount || amount<=0){ toast("Ingresá un monto válido", "err"); return; }
-  if(!fechaVencimiento){ toast("Ingresá la fecha de vencimiento", "err"); return; }
-  state.supplierChecks.movements.push({id:paymentsId('sc'), nroCheque, proveedor, amount, fechaEmision, fechaVencimiento, estado:'pendiente'});
+  const nuevos = [...document.querySelectorAll('#sc-rows [data-row]')].map(row=>({
+    nroCheque: row.querySelector('.sc-row-nro').value.trim(),
+    amount: Number(row.querySelector('.sc-row-monto').value),
+    fechaVencimiento: row.querySelector('.sc-row-vto').value,
+  })).filter(r=>r.amount>0 && r.fechaVencimiento).map(r=>({
+    id:paymentsId('sc'), nroCheque:r.nroCheque, proveedor, amount:r.amount,
+    fechaEmision, fechaVencimiento:r.fechaVencimiento, estado:'pendiente',
+  }));
+  if(nuevos.length===0){ toast("Completá monto y vencimiento de al menos un cheque", "err"); return; }
+  state.supplierChecks.movements.push(...nuevos);
   closeSupplierCheckModal();
   saveState(); render();
-  try{ await apiSaveSupplierChecks(); toast("Cheque registrado", "ok"); }
+  try{ await apiSaveSupplierChecks(); toast(nuevos.length>1 ? `${nuevos.length} cheques registrados` : "Cheque registrado", "ok"); }
   catch(e){ toast("Error al guardar: "+e.message, "err"); }
 }
 async function setCheckEstado(id, estado){
@@ -3474,8 +3531,9 @@ function renderAdminPagos(){
   <div style="padding:12px 16px 0; display:flex; gap:8px;">
     <button class="chip ${sub==='deudas'?'active':''}" onclick="state.adminPagosSub='deudas'; state.adminPagosProveedor=null; render()">Deudas</button>
     <button class="chip ${sub==='cheques'?'active':''}" onclick="state.adminPagosSub='cheques'; render()">Cheques</button>
+    <button class="chip ${sub==='calendario'?'active':''}" onclick="state.adminPagosSub='calendario'; render()">Calendario</button>
   </div>
-  ${sub==='deudas' ? renderAdminPagosDeudas() : renderAdminPagosCheques()}`;
+  ${sub==='deudas' ? renderAdminPagosDeudas() : sub==='calendario' ? renderAdminPagosCalendario() : renderAdminPagosCheques()}`;
 }
 
 function renderAdminPagosDeudas(){
@@ -3522,8 +3580,8 @@ function renderAdminPagosProveedorDetail(proveedor){
     ${rows.length===0 ? `<div style="padding:30px; text-align:center; color:rgba(255,255,255,0.4);">Sin movimientos todavía.</div>` : rows.slice().reverse().map(m=>`
       <div style="display:flex; justify-content:space-between; align-items:center; gap:10px; padding:12px 14px; background:var(--glass); border:1px solid var(--glass-bd); border-radius:12px; margin-bottom:8px;">
         <div style="flex:1; min-width:0;">
-          <div style="font-size:13px; font-weight:600;">${escapeHtml(m.note||(m.type==='pago'?'Pago':'Factura'))}</div>
-          <div style="font-size:11px; color:rgba(255,255,255,0.4);">${m.date||'—'}</div>
+          <div style="font-size:13px; font-weight:600;">${escapeHtml(fmtDatesInText(m.note)||(m.type==='pago'?'Pago':'Factura'))}</div>
+          <div style="font-size:12px; font-weight:700; color:var(--gold2);">${fmtDateAR(m.date)}</div>
         </div>
         <div style="text-align:right;">
           <div style="font-size:14px; font-weight:700; color:${m.type==='pago'?'var(--ok)':'var(--danger)'};">${m.type==='pago'?'-':'+'}${money(m.amount)}</div>
@@ -3557,22 +3615,62 @@ function renderAdminPagosCheques(){
     <button class="btn-primary" style="width:100%; margin-bottom:16px;" onclick="openSupplierCheckModal()">+ Registrar cheque</button>
     ${checks.length===0 ? `<div style="padding:30px; text-align:center; color:rgba(255,255,255,0.4);">Sin cheques cargados todavía.</div>` : checks.map(c=>{
       const dueSoon = c.estado==='pendiente' && c.fechaVencimiento && c.fechaVencimiento<=new Date(Date.now()+7*86400000).toISOString().slice(0,10);
-      const color = c.estado==='cobrado' ? 'var(--ok)' : c.estado==='vencido' ? 'var(--danger)' : dueSoon ? 'var(--warn)' : 'rgba(255,255,255,0.7)';
+      const color = c.estado==='cobrado' ? 'var(--ok)' : c.estado==='vencido' ? 'var(--danger)' : dueSoon ? 'var(--warn)' : 'rgba(255,255,255,0.6)';
+      const badge = dateBadgeParts(c.fechaVencimiento);
       return `
       <div style="padding:12px 14px; background:var(--glass); border:1px solid var(--glass-bd); border-radius:12px; margin-bottom:8px;">
-        <div style="display:flex; justify-content:space-between; align-items:flex-start; gap:10px; margin-bottom:8px;">
+        <div style="display:flex; align-items:center; gap:12px; margin-bottom:8px;">
+          <div style="flex:none; width:46px; padding:5px 2px; border-radius:10px; background:rgba(255,255,255,0.06); border:1.5px solid ${color}; color:${color}; text-align:center;">
+            <div style="font-size:18px; font-weight:800; line-height:1.1;">${badge.day}</div>
+            <div style="font-size:9px; font-weight:700; letter-spacing:.5px;">${badge.month}</div>
+          </div>
           <div style="flex:1; min-width:0;">
             <div style="font-size:13px; font-weight:600; color:var(--white);">${escapeHtml(c.proveedor)}${c.nroCheque?` · Nro ${escapeHtml(c.nroCheque)}`:''}</div>
-            <div style="font-size:11px; color:${color};">Vence ${c.fechaVencimiento||'—'}</div>
+            <div style="font-size:11px; color:rgba(255,255,255,0.4);">Vencimiento</div>
           </div>
-          <div style="text-align:right;">
-            <div style="font-size:14px; font-weight:700; color:var(--white);">${money(c.amount)}</div>
-          </div>
+          <div style="font-size:14px; font-weight:700; color:var(--white);">${money(c.amount)}</div>
           <button class="icon-btn" onclick="deleteSupplierCheck('${c.id}')">${ic('trash')}</button>
         </div>
         <div style="display:flex; gap:6px;">
           ${['pendiente','vencido','cobrado'].map(e=>`<button class="chip ${c.estado===e?'active':''}" style="padding:5px 12px; font-size:11px;" onclick="setCheckEstado('${c.id}','${e}')">${e==='pendiente'?'Pendiente':e==='vencido'?'Vencido':'Cobrado'}</button>`).join('')}
         </div>
+      </div>`;
+    }).join('')}
+  </div>`;
+}
+
+function renderAdminPagosCalendario(){
+  const today = new Date().toISOString().slice(0,10);
+  const checks = (state.supplierChecks.movements||[]).filter(c=>c.estado!=='cobrado' && c.fechaVencimiento);
+  const byDate = {};
+  checks.forEach(c=>{ (byDate[c.fechaVencimiento] = byDate[c.fechaVencimiento]||[]).push(c); });
+  const dates = Object.keys(byDate).sort();
+  if(dates.length===0){
+    return `<div class="empty-state">${ic('receipt')}<p>No hay cheques pendientes o vencidos para mostrar en el calendario.</p></div>`;
+  }
+  return `
+  <div style="padding:16px;">
+    ${dates.map(date=>{
+      const items = byDate[date].sort((a,b)=> b.amount-a.amount);
+      const total = items.reduce((s,c)=>s+c.amount, 0);
+      const isPast = date < today;
+      const badge = dateBadgeParts(date);
+      const color = isPast ? 'var(--danger)' : (date <= new Date(Date.now()+7*86400000).toISOString().slice(0,10) ? 'var(--warn)' : 'rgba(255,255,255,0.6)');
+      return `
+      <div style="margin-bottom:14px;">
+        <div style="display:flex; align-items:center; gap:12px; margin-bottom:8px;">
+          <div style="flex:none; width:46px; padding:5px 2px; border-radius:10px; background:rgba(255,255,255,0.06); border:1.5px solid ${color}; color:${color}; text-align:center;">
+            <div style="font-size:18px; font-weight:800; line-height:1.1;">${badge.day}</div>
+            <div style="font-size:9px; font-weight:700; letter-spacing:.5px;">${badge.month}</div>
+          </div>
+          <div style="flex:1; font-size:13px; font-weight:700; color:${isPast?'var(--danger)':'var(--white)'};">${fmtDateAR(date)}${isPast?' · vencido':''}</div>
+          <div style="font-size:15px; font-weight:800; color:var(--gold2);">${money(total)}</div>
+        </div>
+        ${items.map(c=>`
+          <div style="display:flex; justify-content:space-between; align-items:center; gap:10px; padding:9px 12px 9px 58px; font-size:12.5px; color:rgba(255,255,255,0.75);">
+            <span>${escapeHtml(c.proveedor)}${c.nroCheque?` · Nro ${escapeHtml(c.nroCheque)}`:''}</span>
+            <span style="font-weight:700; color:var(--white); flex:none;">${money(c.amount)}</span>
+          </div>`).join('')}
       </div>`;
     }).join('')}
   </div>`;
