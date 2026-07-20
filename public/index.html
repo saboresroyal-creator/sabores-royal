@@ -277,7 +277,9 @@ img{display:block; max-width:100%;}
 
 /* ---------- ADMIN ---------- */
 .admin-tabs{display:flex; flex-wrap:wrap; gap:8px; padding:14px 16px; background:rgba(255,255,255,0.03); border-bottom:1px solid var(--glass-bd);}
-.admin-tab{flex:none; padding:9px 16px; border-radius:20px; font-size:12.5px; font-weight:600; color:rgba(255,255,255,0.6); background:var(--glass); border:1px solid var(--glass-bd); transition:background .15s ease, color .15s ease, border-color .15s ease;}
+.admin-tab{position:relative; flex:none; padding:9px 16px; border-radius:20px; font-size:12.5px; font-weight:600; color:rgba(255,255,255,0.6); background:var(--glass); border:1px solid var(--glass-bd); transition:background .15s ease, color .15s ease, border-color .15s ease;}
+.admin-tab-badge{position:absolute; top:-6px; right:-6px; min-width:18px; height:18px; padding:0 4px; border-radius:9px;
+  background:var(--danger); color:#fff; font-size:10px; font-weight:800; display:flex; align-items:center; justify-content:center; line-height:1; box-shadow:0 0 0 2px var(--navy2);}
 .admin-tab:hover{background:rgba(255,255,255,0.1); color:rgba(255,255,255,0.9); border-color:rgba(255,255,255,0.2);}
 .admin-tab.active{background:var(--gold); color:var(--navy); border-color:var(--gold);}
 .order-card{margin:12px 16px; padding:14px; border-radius:14px; background:var(--glass); border:1px solid var(--glass-bd);}
@@ -532,7 +534,7 @@ function renderCeliaco(){
       ${products.map(p=>`
         <div class="product-card" onclick="openProduct('${p.id}')">
           <div class="pc-img">
-            ${(!p.sellByWeight && p.stock<=5 && p.stock>0) ? `<span class="pc-stock-low">¡Últimas ${p.stock}!</span>`:''}
+            ${(isLowStock(p) && p.stock>0) ? `<span class="pc-stock-low">¡Últimas ${p.stock}!</span>`:''}
             ${p.photo ? `<img src="${p.photo}" alt="" loading="lazy">` : ic('box')}
           </div>
           <div class="pc-body">
@@ -552,6 +554,8 @@ function renderCeliaco(){
 }
 
 /* ---------- SECTION META ---------- */
+const LOW_STOCK_THRESHOLD = 5;
+function isLowStock(p){ return !p.sellByWeight && p.stock<=LOW_STOCK_THRESHOLD; }
 const SECTION_META = {
   natural:{label:"Tienda Natural", sub:"Frutos secos, dietética y más", icon:"leaf", cls:"natural"},
   golosinas:{label:"Golosinas", sub:"Chocolates, caramelos y chicles", icon:"candy", cls:"golosinas"},
@@ -614,6 +618,7 @@ let state = {
   adminLoggedPerms: [],
   subAdmins: [],
   adminTab: "pedidos",
+  adminProductLowStockOnly: false,
   config:{storeName:"Sabores Royal", address:"Maipú 734, Rosario", waNumber:WA_NUMBER},
   fiscal:{
     cuit:"30-71698572-1",
@@ -1794,7 +1799,7 @@ function renderCatalogResults(section){
         ${products.map(p=>`
           <div class="product-card" onclick="openProduct('${p.id}')">
             <div class="pc-img">
-              ${(!p.sellByWeight && p.stock<=5 && p.stock>0) ? `<span class="pc-stock-low">¡Últimas ${p.stock}!</span>`:''}
+              ${(isLowStock(p) && p.stock>0) ? `<span class="pc-stock-low">¡Últimas ${p.stock}!</span>`:''}
               ${p.photo ? `<img src="${p.photo}" alt="" loading="lazy">` : ic('box')}
             </div>
             <div class="pc-body">
@@ -2442,17 +2447,19 @@ function renderAdmin(){
   }
   const unreadCount = state.suggestions.filter(s=>!s.read).length;
   const chatUnreadTotal = Object.values(state.adminChatUnread||{}).reduce((s,n)=>s+n,0);
+  const lowStockCount = state.products.filter(isLowStock).length;
+  const pendingOrdersCount = state.orders.filter(o=>o.status==="Pendiente").length;
   const ALL_TABS = [
-    {key:"pedidos",       label:"Pedidos"},
-    {key:"productos",     label:"Productos"},
+    {key:"pedidos",       label:"Pedidos", badge:pendingOrdersCount},
+    {key:"productos",     label:"Productos", badge:lowStockCount},
     {key:"categorias",    label:"Categorías"},
     {key:"clientes",      label:"Clientes"},
     {key:"estadisticas",  label:"Estadísticas"},
-    {key:"chats",         label:"Chats"+(chatUnreadTotal>0?` (${chatUnreadTotal})`:'')},
+    {key:"chats",         label:"Chats", badge:chatUnreadTotal},
     {key:"comprobantes",  label:"Comprobantes"},
     {key:"listaprecios",  label:"Listas de Precios"},
     {key:"banners",       label:"Novedades/Ofertas"},
-    {key:"sugerencias",   label:"Sugerencias"+(unreadCount>0?` (${unreadCount})`:'')},
+    {key:"sugerencias",   label:"Sugerencias", badge:unreadCount},
     {key:"config",        label:"Configuración"},
     {key:"comparador",    label:"Comparador"},
     {key:"alquiler",      label:"Alquiler"},
@@ -2473,7 +2480,7 @@ function renderAdmin(){
       <button onclick="adminLogout()" style="color:var(--danger);">${ic('logout')}</button>
     </div>
     <div class="admin-tabs">
-      ${tabs.map(t=>`<button class="admin-tab ${tab===t.key?'active':''}" onclick="setAdminTab('${t.key}')">${t.label}</button>`).join('')}
+      ${tabs.map(t=>`<button class="admin-tab ${tab===t.key?'active':''}" onclick="setAdminTab('${t.key}')">${t.label}${t.badge>0?`<span class="admin-tab-badge">${t.badge>99?'99+':t.badge}</span>`:''}</button>`).join('')}
     </div>
     <div style="flex:1; padding-bottom:30px;">
       ${tab==="pedidos" ? renderAdminPedidos() : ""}
@@ -2485,6 +2492,11 @@ function renderAdmin(){
               oninput="state.adminProductQ=this.value; renderAdminProductosInPlace()"
               style="flex:1; background:none; border:none; outline:none; color:var(--white); font-size:14px; padding:10px 0;">
           </div>
+          ${lowStockCount>0 ? `
+          <button class="chip ${state.adminProductLowStockOnly?'active':''}" style="margin-top:8px; ${state.adminProductLowStockOnly?'':'color:var(--warn); border-color:var(--warn);'}"
+            onclick="state.adminProductLowStockOnly=!state.adminProductLowStockOnly; render()">
+            ⚠ Stock bajo (${lowStockCount})
+          </button>` : ''}
         </div>
         <div id="admin-productos-list">${renderAdminProductos()}</div>
       ` : ""}
@@ -3924,11 +3936,12 @@ function shareOrder(orderId){
 /* ---------- ADMIN: PRODUCTOS ---------- */
 function renderAdminProductos(){
   const q = (state.adminProductQ||'').toLowerCase().trim();
-  const productos = q
+  let productos = q
     ? state.products.filter(p=>p.name.toLowerCase().includes(q))
     : state.products;
+  if(state.adminProductLowStockOnly) productos = productos.filter(isLowStock);
   if(productos.length===0){
-    return `<div class="empty-state">${ic('box')}<p>${q?`Sin resultados para "${q}"`:'No hay productos cargados.'}</p></div>`;
+    return `<div class="empty-state">${ic('box')}<p>${state.adminProductLowStockOnly?'Ningún producto con stock bajo.':(q?`Sin resultados para "${q}"`:'No hay productos cargados.')}</p></div>`;
   }
   return productos.map(p=>`
     <div class="prod-row-v2">
@@ -3936,7 +3949,7 @@ function renderAdminProductos(){
         <img src="${p.photo||''}" loading="lazy" onerror="this.style.opacity=0">
         <div class="prod-row-v2-info">
           <h4>${p.name}${p.sellByWeight?' <span style="font-size:9px; color:#6db8e8;">(x kg)</span>':''}</h4>
-          <p>Stock: ${p.stock} · ${SECTION_META[p.section]?.label||p.section}${p.sub?` · ${p.sub}`:''}</p>
+          <p>Stock: ${p.stock} · ${SECTION_META[p.section]?.label||p.section}${p.sub?` · ${p.sub}`:''} ${isLowStock(p)?`<span style="color:${p.stock===0?'var(--danger)':'var(--warn)'}; font-weight:700;">· ${p.stock===0?'Sin stock':'Stock bajo'}</span>`:''}</p>
         </div>
       </div>
       <div class="prod-row-v2-bottom">
