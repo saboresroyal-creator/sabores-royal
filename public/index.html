@@ -422,6 +422,12 @@ img{display:block; max-width:100%;}
 .cmp-tab-btn{flex:none;padding:7px 16px;border-radius:20px;border:1px solid var(--glass-bd);background:none;color:rgba(255,255,255,0.55);font-size:13px;cursor:pointer;white-space:nowrap;}
 .cmp-tab-btn.active{background:var(--gold);color:#000;border-color:var(--gold);font-weight:700;}
 .cmp-wrap{overflow-x:auto;border-radius:12px;border:1px solid var(--glass-bd);margin:0 16px 16px;}
+@media (min-width:700px){
+  .cmp-wrap{
+    max-width:1100px; width:calc(100vw - 32px);
+    margin-left:calc(50% - 50vw + 16px); margin-right:calc(50% - 50vw + 16px);
+  }
+}
 .cmp-table{border-collapse:collapse;min-width:100%;font-size:13px;}
 .cmp-table th{background:var(--navy2);padding:10px 12px;white-space:nowrap;border-bottom:1px solid var(--glass-bd);border-right:1px solid var(--glass-bd);text-align:center;font-size:11px;text-transform:uppercase;letter-spacing:.4px;color:var(--gold2);}
 .cmp-table th:first-child{text-align:left;min-width:140px;position:sticky;left:0;z-index:2;background:var(--navy2);}
@@ -459,6 +465,13 @@ img{display:block; max-width:100%;}
 .cmp-tbl-wrap th{background:var(--navy2);color:var(--gold2);padding:8px;text-align:left;font-size:11px;text-transform:uppercase;white-space:nowrap;border-bottom:1px solid var(--glass-bd);}
 .cmp-tbl-wrap td{padding:7px 8px;border-bottom:1px solid rgba(255,255,255,0.06);font-size:12px;}
 .cmp-note{background:rgba(197,160,40,0.08);border:1px solid rgba(197,160,40,0.25);border-radius:8px;padding:8px 10px;font-size:12px;color:rgba(255,255,255,0.55);margin:4px 0 10px;}
+.cmp-add-btn{margin-top:6px;width:22px;height:22px;border-radius:50%;border:1px solid var(--gold);background:none;color:var(--gold);font-size:14px;font-weight:700;line-height:1;cursor:pointer;display:inline-flex;align-items:center;justify-content:center;}
+.cmp-add-btn:active{background:var(--gold);color:#000;}
+.cmp-qty-btn{width:24px;height:24px;border-radius:50%;border:1px solid var(--glass-bd);background:var(--glass);color:var(--white);font-size:15px;font-weight:700;cursor:pointer;line-height:1;}
+.cmp-status-badge{font-size:10px;font-weight:700;border-radius:6px;padding:2px 7px;display:inline-block;margin-top:3px;text-transform:uppercase;letter-spacing:.3px;}
+.cmp-status-pendiente{background:rgba(197,160,40,0.15);color:var(--gold2);}
+.cmp-status-enviado{background:rgba(90,140,255,0.15);color:#7ea6ff;}
+.cmp-status-recibido{background:rgba(62,207,142,.15);color:var(--ok);}
 </style>
 </head>
 <body>
@@ -654,6 +667,7 @@ let state = {
   homeBackgroundActiveId: null,
   adminBannerSub: 'banners',
   cmpTab: 'comparar',
+  cmpCart: {},
   rentLedger: {monthlyAmount:1500000, movements:[]},
   supplierDebts: {movements:[]},
   supplierChecks: {movements:[]},
@@ -661,7 +675,8 @@ let state = {
   adminPagosProveedor: null,
 };
 
-let cmpDB = {proveedores:[], listas:[]};
+let cmpDB = {proveedores:[], listas:[], pedidos:[]};
+let _cmpRowIdx = [];
 let cmpLoaded = false;
 let _cmpImpData = null;
 let rentLoaded = false;
@@ -2756,15 +2771,22 @@ async function cmpLoadData(){
       cmpFetch('/cmp_proveedores?select=*&order=name'),
       cmpFetch('/cmp_listas?select=prov_id,at,rows')
     ]);
-    cmpDB.proveedores=(provs||[]).map(p=>({id:p.id,name:p.name,lastImport:p.last_import,mapping:p.mapping}));
+    cmpDB.proveedores=(provs||[]).map(p=>({id:p.id,name:p.name,phone:p.phone||'',lastImport:p.last_import,mapping:p.mapping}));
     cmpDB.listas=(listas||[]).map(l=>({provId:l.prov_id,at:l.at,rows:l.rows||[]}));
     cmpLoaded=true;
+    // Los pedidos viven en una tabla aparte (cmp_pedidos) agregada después;
+    // si todavía no se corrió esa migración, que falle en silencio y no
+    // rompa el resto del comparador (proveedores/listas/comparar siguen andando).
+    try{
+      const pedidos=await cmpFetch('/cmp_pedidos?select=*&order=created_at.desc');
+      cmpDB.pedidos=(pedidos||[]).map(p=>({id:p.id,provId:p.prov_id,items:p.items||[],total:Number(p.total)||0,status:p.status||'pendiente',note:p.note||'',createdAt:p.created_at,updatedAt:p.updated_at}));
+    }catch(pe){ cmpDB.pedidos=cmpDB.pedidos||[]; }
     render();
   }catch(e){ toast('Error cargando comparador: '+e.message,'err'); }
 }
 
 async function cmpSaveProvSupa(prov){
-  await cmpFetch('/cmp_proveedores','POST',{id:prov.id,name:prov.name,last_import:prov.lastImport||null,mapping:prov.mapping||null},'resolution=merge-duplicates');
+  await cmpFetch('/cmp_proveedores','POST',{id:prov.id,name:prov.name,phone:prov.phone||null,last_import:prov.lastImport||null,mapping:prov.mapping||null},'resolution=merge-duplicates');
 }
 async function cmpDelProvSupa(id){
   await Promise.all([
@@ -2775,15 +2797,26 @@ async function cmpDelProvSupa(id){
 async function cmpSaveListaSupa(lista){
   await cmpFetch('/cmp_listas','POST',{prov_id:lista.provId,rows:lista.rows,at:lista.at},'resolution=merge-duplicates');
 }
+async function cmpSavePedidoSupa(pedido){
+  await cmpFetch('/cmp_pedidos','POST',{id:pedido.id,prov_id:pedido.provId,items:pedido.items,total:pedido.total,status:pedido.status,note:pedido.note||null,created_at:pedido.createdAt,updated_at:pedido.updatedAt},'resolution=merge-duplicates');
+}
+async function cmpUpdatePedidoSupa(id,patch){
+  await cmpFetch('/cmp_pedidos?id=eq.'+encodeURIComponent(id),'PATCH',patch);
+}
+async function cmpDelPedidoSupa(id){
+  await cmpFetch('/cmp_pedidos?id=eq.'+encodeURIComponent(id),'DELETE');
+}
 
 // ── RENDER PRINCIPAL ────────────────────────────────────
 function renderAdminComparador(){
   if(!cmpLoaded){ cmpLoadData(); return `<div style="padding:40px;text-align:center;color:rgba(255,255,255,0.4);">Cargando...</div>`; }
   const tab=state.cmpTab||'comparar';
-  const tabs=[{k:'comparar',l:'Comparar'},{k:'importar',l:'Importar'},{k:'proveedores',l:'Proveedores'}];
+  const cartCount=Object.values(state.cmpCart||{}).reduce((s,arr)=>s+(arr?arr.length:0),0);
+  const tabs=[{k:'comparar',l:'Comparar'},{k:'importar',l:'Importar'},{k:'proveedores',l:'Proveedores'},{k:'pedidos',l:'Pedidos'+(cartCount?' ('+cartCount+')':'')}];
   let html=`<div class="cmp-tabs-bar">${tabs.map(t=>`<button class="cmp-tab-btn${tab===t.k?' active':''}" onclick="state.cmpTab='${t.k}';render()">${t.l}</button>`).join('')}</div>`;
   if(tab==='proveedores') html+=cmpHtmlProveedores();
   else if(tab==='importar') html+=cmpHtmlImportar();
+  else if(tab==='pedidos') html+=cmpHtmlPedidos();
   else html+=cmpHtmlComparar();
   return html;
 }
@@ -2827,6 +2860,7 @@ function cmpModalProv(id){
   const p=id?cmpDB.proveedores.find(x=>x.id===id):null;
   cmpOpenModal(`<div class="cmp-modal-title">${p?'Editar':'Nuevo'} Proveedor</div>
     <div class="cmp-field"><label>Nombre</label><input class="cmp-inp" id="cpn" value="${p?cmpEsc(p.name):''}" placeholder="Ej: Distribuidora Lopez"></div>
+    <div class="cmp-field"><label>WhatsApp (opcional)</label><input class="cmp-inp" id="cpph" value="${p&&p.phone?cmpEsc(p.phone):''}" placeholder="Ej: 5493411234567"></div>
     ${p?`<input type="hidden" id="cpid" value="${cmpEsc(id)}">`:''}
     <div style="display:flex;gap:10px;margin-top:8px;">
       <button class="btn-secondary" style="flex:1;" onclick="cmpCloseModal()">Cancelar</button>
@@ -2837,14 +2871,15 @@ function cmpModalProv(id){
 
 async function cmpSaveProv(){
   const name=(document.getElementById('cpn').value||'').trim();
+  const phone=(document.getElementById('cpph').value||'').trim();
   const idEl=document.getElementById('cpid');
   const id=idEl?idEl.value:'';
   if(!name){ toast('Ingresá un nombre','err'); return; }
   let prov;
   if(id){
-    prov=cmpDB.proveedores.find(x=>x.id===id); if(prov) prov.name=name;
+    prov=cmpDB.proveedores.find(x=>x.id===id); if(prov){ prov.name=name; prov.phone=phone; }
   } else {
-    prov={id:'p'+Date.now(),name,lastImport:null,mapping:null};
+    prov={id:'p'+Date.now(),name,phone,lastImport:null,mapping:null};
     cmpDB.proveedores.push(prov);
   }
   cmpCloseModal();
@@ -3012,7 +3047,14 @@ function cmpShowMapper(){
   const h=_cmpImpData.headers;
   function opts(sel){ let o='<option value="">-- No usar --</option>'; h.forEach((hh,i)=>{ o+=`<option value="${i}"${sel==i?' selected':''}>${cmpEsc(hh)}</option>`; }); return o; }
   let an=-1,ap=-1,au=-1,ac=-1,ab=-1;
-  if(!prov||!prov.mapping){
+  // Solo reusar el mapeo guardado si el archivo tiene EXACTAMENTE las mismas
+  // columnas que la última vez. Si cambió la forma del archivo (por ejemplo
+  // se sacó la columna de bulto), los índices viejos apuntan a otra
+  // columna distinta y arman un mapeo sin sentido (se vio con Milenium:
+  // terminó usando "Precio" como columna de bulto, dividiendo el precio
+  // por sí mismo). Mejor volver a detectar todo por palabra clave.
+  const savedMatchesFile = prov && prov.mapping && Array.isArray(prov.mapping.headers) && JSON.stringify(prov.mapping.headers)===JSON.stringify(h);
+  if(!savedMatchesFile){
     const nKw=['descripcion','descripci','producto','nombre','articulo','item','detalle'];
     const pKw=['precio','price','importe','costo','valor'];
     const uKw=['unidad','presentacion','medida','unit','contenido'];
@@ -3078,7 +3120,7 @@ async function cmpDoImport(){
   if(idx>=0) cmpDB.listas[idx]=lista; else cmpDB.listas.push(lista);
   const prov=cmpDB.proveedores.find(p=>p.id===provId);
   if(prov){
-    prov.mapping={nameCol:+cn,priceCol:+cp,unitCol:cu!==''?+cu:null,codeCol:cc!==''?+cc:null,bultoCol:cb!==''?+cb:null};
+    prov.mapping={nameCol:+cn,priceCol:+cp,unitCol:cu!==''?+cu:null,codeCol:cc!==''?+cc:null,bultoCol:cb!==''?+cb:null,headers:_cmpImpData.headers};
     prov.lastImport=now;
   }
   _cmpImpData=null;
@@ -3116,6 +3158,7 @@ function cmpDoSearch(){
     return;
   }
   allHits.sort((a,b)=>b.sc-a.sc);
+  _cmpRowIdx=[];
   const groups=[],used={};
   allHits.forEach(h=>{
     const key=h.prov.id+'|'+h.row.norm;
@@ -3160,6 +3203,7 @@ function cmpDoSearch(){
       const qInfo=provQtys[pl.prov.id],qty=qInfo.qty,uPrice=r.price/qty;
       const isBest=minU!==null&&Math.abs(uPrice-minU)<0.01&&unitPrices.length>1;
       const diffPct=(minU&&uPrice>minU)?Math.round((uPrice-minU)/minU*100):0;
+      const rowIdx=_cmpRowIdx.push({provId:pl.prov.id,name:r.name,price:r.price,unit:r.unit,unitQty:qty,code:r.code})-1;
       html+=`<td${isBest?' class="cmp-cell-best"':''}>`;
       if(hasBulto){
         html+=`<span class="cmp-cell-price">${cmpMoney(uPrice)}<span style="font-size:10px;font-weight:400;color:rgba(255,255,255,0.4)">/u</span></span>`;
@@ -3171,12 +3215,218 @@ function cmpDoSearch(){
       }
       if(isBest&&unitPrices.length>1) html+=`<span class="cmp-best-tag">MEJOR PRECIO</span>`;
       else if(diffPct>0) html+=`<span class="cmp-cell-diff" style="color:var(--warn)">+${diffPct}% m&aacute;s caro</span>`;
+      html+=`<button class="cmp-add-btn" onclick="cmpCartAdd(${rowIdx})" title="Agregar al pedido">+</button>`;
       html+=`</td>`;
     });
     html+=`</tr>`;
   });
   html+=`</tbody></table></div>`;
   el.innerHTML=html;
+}
+
+// ── PEDIDOS A PROVEEDORES ───────────────────────────────
+// El pedido en curso (carrito) vive en state.cmpCart -> {provId: [items]}
+// y se persiste solo localmente (localStorage vía saveState) hasta que se
+// "genera": ahí se guarda en cmp_pedidos y se vacía el carrito de ese
+// proveedor. No se llama render() al agregar desde la tabla de Comparar
+// para no perder la búsqueda en curso — un toast alcanza como feedback.
+function cmpCartAdd(idx){
+  const ctx=_cmpRowIdx[idx]; if(!ctx) return;
+  const key=(ctx.code||ctx.name).toLowerCase();
+  const arr=state.cmpCart[ctx.provId]=state.cmpCart[ctx.provId]||[];
+  const existing=arr.find(it=>it.key===key);
+  if(existing) existing.qty+=1;
+  else arr.push({key,name:ctx.name,price:ctx.price,unit:ctx.unit,unitQty:ctx.unitQty,code:ctx.code,qty:1});
+  saveState();
+  const prov=cmpDB.proveedores.find(p=>p.id===ctx.provId);
+  toast('Agregado al pedido de '+(prov?prov.name:'proveedor'));
+}
+function cmpCartQty(pid,key,delta){
+  const arr=state.cmpCart[pid]; if(!arr) return;
+  const it=arr.find(x=>x.key===key); if(!it) return;
+  it.qty+=delta;
+  if(it.qty<=0) state.cmpCart[pid]=arr.filter(x=>x.key!==key);
+  saveState(); render();
+}
+function cmpCartClearProv(pid){
+  if(!confirm('¿Vaciar el pedido en curso de este proveedor?')) return;
+  delete state.cmpCart[pid];
+  saveState(); render();
+}
+function cmpCartTotal(items){ return (items||[]).reduce((s,it)=>s+it.price*it.qty,0); }
+function cmpStatusLabel(s){ return {pendiente:'Pendiente',enviado:'Enviado',recibido:'Recibido'}[s]||s; }
+function cmpPedidoId(){ return 'ped'+Date.now().toString(36)+Math.random().toString(36).slice(2,8); }
+
+async function cmpGeneratePedido(pid){
+  const items=state.cmpCart[pid];
+  if(!items||!items.length){ toast('No hay productos para este proveedor','err'); return; }
+  const total=cmpCartTotal(items);
+  const now=new Date().toISOString();
+  const pedido={id:cmpPedidoId(),provId:pid,items:items.map(it=>Object.assign({},it)),total,status:'pendiente',note:'',createdAt:now,updatedAt:now};
+  try{
+    await cmpSavePedidoSupa(pedido);
+    cmpDB.pedidos.unshift(pedido);
+    delete state.cmpCart[pid];
+    saveState();
+    toast('Pedido generado');
+    render();
+    cmpOpenPedidoDetail(pedido.id);
+  }catch(e){ toast('Error al generar pedido: '+e.message,'err'); }
+}
+
+function cmpHtmlPedidos(){
+  let h='';
+  const cartProvIds=Object.keys(state.cmpCart||{}).filter(pid=>(state.cmpCart[pid]||[]).length>0);
+  h+=`<div style="padding:14px 16px 0;font-size:16px;font-weight:700;">Pedido en curso</div>`;
+  if(!cartProvIds.length){
+    h+=`<div style="padding:24px 20px 8px;text-align:center;color:rgba(255,255,255,0.4);">Todav&iacute;a no agregaste productos. And&aacute; a <b>Comparar</b> y toc&aacute; el &#43; sobre el precio que quer&eacute;s pedir.</div>`;
+  } else {
+    cartProvIds.forEach(pid=>{
+      const prov=cmpDB.proveedores.find(p=>p.id===pid);
+      const items=state.cmpCart[pid];
+      const total=cmpCartTotal(items);
+      h+=`<div style="margin:12px 16px;background:var(--glass);border:1px solid var(--glass-bd);border-radius:14px;padding:14px;">
+        <div style="display:flex;align-items:center;gap:10px;margin-bottom:10px;">
+          <div class="cmp-avatar" style="background:${cmpColor(pid)};width:34px;height:34px;font-size:14px;">${cmpInitial(prov?prov.name:'?')}</div>
+          <div style="flex:1;font-weight:700;">${cmpEsc(prov?prov.name:'Proveedor eliminado')}</div>
+          <button style="background:none;border:none;color:rgba(255,255,255,0.35);font-size:12px;cursor:pointer;" onclick="cmpCartClearProv('${cmpEsc(pid)}')">Vaciar</button>
+        </div>
+        ${items.map(it=>`
+          <div style="display:flex;align-items:center;gap:8px;padding:6px 0;border-bottom:1px solid rgba(255,255,255,0.06);">
+            <div style="flex:1;min-width:0;">
+              <div style="font-size:13px;font-weight:600;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;">${cmpEsc(it.name)}</div>
+              <div style="font-size:11px;color:rgba(255,255,255,0.4);">${cmpMoney(it.price)}${it.unit?' &middot; '+cmpEsc(it.unit):''}</div>
+            </div>
+            <div style="display:flex;align-items:center;gap:6px;">
+              <button class="cmp-qty-btn" onclick="cmpCartQty('${cmpEsc(pid)}','${cmpEsc(it.key)}',-1)">&minus;</button>
+              <span style="min-width:18px;text-align:center;font-size:13px;font-weight:700;">${it.qty}</span>
+              <button class="cmp-qty-btn" onclick="cmpCartQty('${cmpEsc(pid)}','${cmpEsc(it.key)}',1)">+</button>
+            </div>
+            <div style="width:76px;text-align:right;font-size:13px;font-weight:700;">${cmpMoney(it.price*it.qty)}</div>
+          </div>
+        `).join('')}
+        <div style="display:flex;justify-content:space-between;align-items:center;margin-top:10px;padding-top:10px;border-top:1px solid var(--glass-bd);">
+          <div style="font-size:13px;color:rgba(255,255,255,0.5);">Total</div>
+          <div style="font-size:16px;font-weight:800;color:var(--gold2);">${cmpMoney(total)}</div>
+        </div>
+        <button class="btn-primary" style="width:100%;margin-top:12px;" onclick="cmpGeneratePedido('${cmpEsc(pid)}')">Generar pedido</button>
+      </div>`;
+    });
+  }
+  h+=`<div style="padding:18px 16px 8px;font-size:16px;font-weight:700;">Historial</div>`;
+  if(!cmpDB.pedidos.length){
+    h+=`<div style="padding:8px 20px 30px;text-align:center;color:rgba(255,255,255,0.4);">Todav&iacute;a no generaste ning&uacute;n pedido.</div>`;
+  } else {
+    h+=`<div style="margin:0 16px 24px;background:var(--glass);border:1px solid var(--glass-bd);border-radius:14px;">`;
+    cmpDB.pedidos.slice().sort((a,b)=>(b.createdAt||'').localeCompare(a.createdAt||'')).forEach(ped=>{
+      const prov=cmpDB.proveedores.find(p=>p.id===ped.provId);
+      h+=`<div class="cmp-prov-item" style="cursor:pointer;" onclick="cmpOpenPedidoDetail('${cmpEsc(ped.id)}')">
+        <div class="cmp-avatar" style="background:${cmpColor(ped.provId)}">${cmpInitial(prov?prov.name:'?')}</div>
+        <div style="flex:1;">
+          <div style="font-weight:700;">${cmpEsc(prov?prov.name:'Proveedor eliminado')}</div>
+          <div style="font-size:12px;color:rgba(255,255,255,0.4);margin-top:2px;">${cmpFmtDate(ped.createdAt)} &middot; ${ped.items.length} producto(s)</div>
+        </div>
+        <div style="text-align:right;">
+          <div style="font-weight:700;">${cmpMoney(ped.total)}</div>
+          <span class="cmp-status-badge cmp-status-${ped.status}">${cmpStatusLabel(ped.status)}</span>
+        </div>
+      </div>`;
+    });
+    h+=`</div>`;
+  }
+  return h;
+}
+
+function cmpOpenPedidoDetail(id){
+  const ped=cmpDB.pedidos.find(p=>p.id===id); if(!ped) return;
+  const prov=cmpDB.proveedores.find(p=>p.id===ped.provId);
+  const statusOpts=['pendiente','enviado','recibido'];
+  cmpOpenModal(`
+    <div class="cmp-modal-title">Pedido &mdash; ${cmpEsc(prov?prov.name:'Proveedor eliminado')}</div>
+    <div style="font-size:12px;color:rgba(255,255,255,0.4);margin-bottom:12px;">${cmpFmtDate(ped.createdAt)}</div>
+    <div class="cmp-tbl-wrap"><table>
+      <tr><th>Producto</th><th>Cant.</th><th>Precio</th><th>Subtotal</th></tr>
+      ${ped.items.map(it=>`<tr><td>${cmpEsc(it.name)}</td><td>${it.qty}</td><td>${cmpMoney(it.price)}</td><td>${cmpMoney(it.price*it.qty)}</td></tr>`).join('')}
+    </table></div>
+    <div style="display:flex;justify-content:space-between;align-items:center;margin:10px 0 16px;">
+      <span style="font-weight:700;">Total</span>
+      <span style="font-size:18px;font-weight:800;color:var(--gold2);">${cmpMoney(ped.total)}</span>
+    </div>
+    <div class="cmp-field"><label>Estado</label>
+      <select class="cmp-inp" onchange="cmpSetPedidoStatus('${cmpEsc(id)}', this.value)">
+        ${statusOpts.map(s=>`<option value="${s}" ${ped.status===s?'selected':''}>${cmpStatusLabel(s)}</option>`).join('')}
+      </select>
+    </div>
+    <div style="display:flex;gap:8px;margin-bottom:8px;">
+      <button class="btn-primary" style="flex:1;" onclick="cmpSendPedidoWA('${cmpEsc(id)}')">${ic('wa')} WhatsApp</button>
+      <button class="btn-secondary" style="flex:1;" onclick="cmpPrintPedido('${cmpEsc(id)}')">Imprimir</button>
+    </div>
+    <button style="width:100%;background:var(--danger);color:#fff;border-radius:10px;padding:10px;font-weight:700;" onclick="cmpConfirmDelPedido('${cmpEsc(id)}')">Eliminar pedido</button>
+  `);
+}
+async function cmpSetPedidoStatus(id,status){
+  const ped=cmpDB.pedidos.find(p=>p.id===id); if(!ped) return;
+  const prevStatus=ped.status, prevUpdated=ped.updatedAt;
+  ped.status=status; ped.updatedAt=new Date().toISOString();
+  try{ await cmpUpdatePedidoSupa(id,{status,updated_at:ped.updatedAt}); toast('Estado actualizado'); render(); }
+  catch(e){ ped.status=prevStatus; ped.updatedAt=prevUpdated; toast('Error: '+e.message,'err'); }
+}
+function cmpConfirmDelPedido(id){
+  cmpCloseModal();
+  const ped=cmpDB.pedidos.find(p=>p.id===id); if(!ped) return;
+  cmpOpenModal(`<div class="cmp-modal-title">Eliminar pedido</div>
+    <p style="color:rgba(255,255,255,0.5);margin-bottom:16px;">&iquest;Eliminar este pedido? Esta acci&oacute;n no se puede deshacer.</p>
+    <div style="display:flex;gap:10px;">
+      <button class="btn-secondary" style="flex:1;" onclick="cmpCloseModal()">Cancelar</button>
+      <button style="flex:1;background:var(--danger);color:#fff;border-radius:10px;padding:10px;font-weight:700;" onclick="cmpDelPedido('${cmpEsc(id)}')">Eliminar</button>
+    </div>`);
+}
+async function cmpDelPedido(id){
+  const backup=cmpDB.pedidos;
+  cmpDB.pedidos=cmpDB.pedidos.filter(p=>p.id!==id);
+  cmpCloseModal();
+  try{ await cmpDelPedidoSupa(id); toast('Pedido eliminado'); render(); }
+  catch(e){ cmpDB.pedidos=backup; toast('Error: '+e.message,'err'); }
+}
+function cmpPedidoWAText(ped,prov){
+  let msg=`Pedido${prov?' para '+prov.name:''} — Sabores Royal\n`;
+  msg+=`Fecha: ${cmpFmtDate(ped.createdAt)}\n\n`;
+  ped.items.forEach(it=>{ msg+=`• ${it.qty} x ${it.name} — ${cmpMoney(it.price)} = ${cmpMoney(it.price*it.qty)}\n`; });
+  msg+=`\nTOTAL: ${cmpMoney(ped.total)}`;
+  return msg;
+}
+function cmpSendPedidoWA(id){
+  const ped=cmpDB.pedidos.find(p=>p.id===id); if(!ped) return;
+  const prov=cmpDB.proveedores.find(p=>p.id===ped.provId);
+  const msg=cmpPedidoWAText(ped,prov);
+  const phone=(prov&&prov.phone)?prov.phone.replace(/\D/g,''):WA_NUMBER;
+  window.open('https://wa.me/'+phone+'?text='+encodeURIComponent(msg),'_blank');
+}
+function cmpPrintPedido(id){
+  const ped=cmpDB.pedidos.find(p=>p.id===id); if(!ped) return;
+  const prov=cmpDB.proveedores.find(p=>p.id===ped.provId);
+  const rows=ped.items.map(it=>`<tr><td>${cmpEsc(it.name)}</td><td style="text-align:center;">${it.qty}</td><td style="text-align:right;">${cmpMoney(it.price)}</td><td style="text-align:right;">${cmpMoney(it.price*it.qty)}</td></tr>`).join('');
+  const win=window.open("","_blank");
+  win.document.write(`
+    <html><head><title>Pedido — ${cmpEsc(prov?prov.name:'')}</title>
+    <style>
+      body{font-family:'DM Sans',Arial,sans-serif; color:#1a1a1a; padding:24px; font-size:13px;}
+      h2{margin:0 0 2px;}
+      p{margin:0 0 14px;color:#555;font-size:12px;}
+      table{width:100%;border-collapse:collapse;margin-bottom:14px;}
+      th{text-align:left;font-size:11px;text-transform:uppercase;color:#666;border-bottom:1px solid #ccc;padding:6px 4px;}
+      td{font-size:13px;padding:6px 4px;border-bottom:1px solid #eee;}
+      .tot{display:flex;justify-content:flex-end;font-size:15px;font-weight:800;padding-top:8px;}
+    </style>
+    </head><body>
+      <h2>Pedido a ${cmpEsc(prov?prov.name:'Proveedor')}</h2>
+      <p>Sabores Royal &middot; ${cmpFmtDate(ped.createdAt)}</p>
+      <table><tr><th>Producto</th><th style="text-align:center;">Cant.</th><th style="text-align:right;">Precio</th><th style="text-align:right;">Subtotal</th></tr>${rows}</table>
+      <div class="tot">TOTAL: ${cmpMoney(ped.total)}</div>
+    </body></html>
+  `);
+  win.document.close();
+  setTimeout(()=>{ win.print(); },300);
 }
 
 // ── BACKUP / RESTORE ────────────────────────────────────
