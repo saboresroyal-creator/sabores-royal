@@ -557,10 +557,10 @@ function renderCeliaco(){
 const LOW_STOCK_THRESHOLD = 5;
 function isLowStock(p){ return !p.sellByWeight && p.stock<=LOW_STOCK_THRESHOLD; }
 function productCategoriesInUse(){
-  return [...new Set(state.products.map(p=>p.cat).filter(Boolean))].sort((a,b)=>a.localeCompare(b));
+  return [...new Set(state.products.map(p=>p.cat).filter(Boolean))].sort((a,b)=>a.localeCompare(b,'es'));
 }
 function productSubcatsInUse(cat){
-  return [...new Set(state.products.filter(p=>!cat || p.cat===cat).map(p=>p.sub).filter(Boolean))].sort((a,b)=>a.localeCompare(b));
+  return [...new Set(state.products.filter(p=>!cat || p.cat===cat).map(p=>p.sub).filter(Boolean))].sort((a,b)=>a.localeCompare(b,'es'));
 }
 const SECTION_META = {
   natural:{label:"Tienda Natural", sub:"Frutos secos, dietética y más", icon:"leaf", cls:"natural"},
@@ -1786,7 +1786,7 @@ function renderCatalogResults(section){
   const activeCat = state.route.cat || null;
   const sinTaccOnly = !!state.route.sinTaccOnly;
   const sinAzucarOnly = !!state.route.sinAzucarOnly;
-  const cats = Object.keys(state.categories[section]||{});
+  const cats = Object.keys(state.categories[section]||{}).sort((a,b)=>a.localeCompare(b,'es'));
   // La tarjeta "Sin Azúcar" muestra todo producto marcado sin azúcar, esté
   // filado en la sección "sinazucar" o en cualquier otra (natural, market, etc).
   const baseProducts = section==="sinazucar"
@@ -4584,11 +4584,11 @@ function openProductModal(id){
   document.body.appendChild(overlay);
 }
 function renderCatOptions(section, selectedCat){
-  const cats = Object.keys(state.categories[section]||{});
+  const cats = Object.keys(state.categories[section]||{}).sort((a,b)=>a.localeCompare(b,'es'));
   return cats.map(c=>`<option value="${c}" ${selectedCat===c?'selected':''}>${c}</option>`).join('');
 }
 function renderSubcatOptions(section, cat, selectedSub){
-  const subs = (state.categories[section]&&state.categories[section][cat]) || [];
+  const subs = ((state.categories[section]&&state.categories[section][cat]) || []).slice().sort((a,b)=>a.localeCompare(b,'es'));
   return `<option value="">Sin subcategoría</option>` + subs.map(s=>`<option value="${s}" ${selectedSub===s?'selected':''}>${s}</option>`).join('');
 }
 function onModalSectionChange(){
@@ -5066,7 +5066,7 @@ function renderAdminCategorias(){
     return `
     <div style="padding:12px 16px 0;">
       <h3 style="color:var(--gold2); font-size:14px; margin-bottom:8px;">${SECTION_META[section].label}</h3>
-      ${Object.keys(cats).map(cat=>`
+      ${Object.keys(cats).sort((a,b)=>a.localeCompare(b,'es')).map(cat=>`
         <div class="cat-tree-item">
           <div class="cat-tree-head">
             <span>${cat}</span>
@@ -5074,7 +5074,7 @@ function renderAdminCategorias(){
             <button class="icon-btn" onclick="deleteCategory('${section}','${cat}')">${ic('trash')}</button>
           </div>
           <div class="cat-tree-subs">
-            ${(cats[cat]||[]).map(sub=>`<span class="subcat-chip">${sub} <button title="Oferta por tiempo limitado" onclick="openCategoryPromoModal('${section}','${cat}','${sub}')">🏷️</button> <button onclick="deleteSubcat('${section}','${cat}','${sub}')">×</button></span>`).join('')}
+            ${(cats[cat]||[]).slice().sort((a,b)=>a.localeCompare(b,'es')).map(sub=>`<span class="subcat-chip">${sub} <button title="Oferta por tiempo limitado" onclick="openCategoryPromoModal('${section}','${cat}','${sub}')">🏷️</button> <button onclick="deleteSubcat('${section}','${cat}','${sub}')">×</button></span>`).join('')}
             <button class="subcat-chip" onclick="addSubcat('${section}','${cat}')" style="color:var(--gold2);">${ic('plus')} Agregar</button>
           </div>
         </div>
@@ -6701,7 +6701,7 @@ function renderPriceListScopeTreeHTML(){
             ${SECTION_META[section].label}
           </label>
         </div>
-        ${Object.keys(cats).map(cat=>{
+        ${Object.keys(cats).sort((a,b)=>a.localeCompare(b,'es')).map(cat=>{
           const catProducts = sectionProducts.filter(p=>p.cat===cat);
           if(catProducts.length===0) return "";
           return `
@@ -6761,7 +6761,7 @@ function buildPriceListDocHTML(productIds, priceMode){
     const sectionProducts = products.filter(p=>p.section===section);
     if(sectionProducts.length===0) return;
     rows += `<tr><td colspan="${1+(showNormal?1:0)+(showWholesale?1:0)}" style="padding-top:14px; font-weight:800; font-size:13px; border-bottom:1.5px solid #1a1a1a;">${SECTION_META[section].label}</td></tr>`;
-    const cats = [...new Set(sectionProducts.map(p=>p.cat))];
+    const cats = [...new Set(sectionProducts.map(p=>p.cat))].sort((a,b)=>a.localeCompare(b,'es'));
     cats.forEach(cat=>{
       const catProducts = sectionProducts.filter(p=>p.cat===cat);
       rows += `<tr><td colspan="${1+(showNormal?1:0)+(showWholesale?1:0)}" style="padding-top:8px; font-weight:600; font-size:11.5px; color:#666;">${cat}</td></tr>`;
