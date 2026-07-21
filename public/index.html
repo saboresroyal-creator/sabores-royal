@@ -556,6 +556,12 @@ function renderCeliaco(){
 /* ---------- SECTION META ---------- */
 const LOW_STOCK_THRESHOLD = 5;
 function isLowStock(p){ return !p.sellByWeight && p.stock<=LOW_STOCK_THRESHOLD; }
+function productCategoriesInUse(){
+  return [...new Set(state.products.map(p=>p.cat).filter(Boolean))].sort((a,b)=>a.localeCompare(b));
+}
+function productSubcatsInUse(cat){
+  return [...new Set(state.products.filter(p=>!cat || p.cat===cat).map(p=>p.sub).filter(Boolean))].sort((a,b)=>a.localeCompare(b));
+}
 const SECTION_META = {
   natural:{label:"Tienda Natural", sub:"Frutos secos, dietética y más", icon:"leaf", cls:"natural"},
   golosinas:{label:"Golosinas", sub:"Chocolates, caramelos y chicles", icon:"candy", cls:"golosinas"},
@@ -619,6 +625,8 @@ let state = {
   subAdmins: [],
   adminTab: "pedidos",
   adminProductLowStockOnly: false,
+  adminProductCatFilter: null,
+  adminProductSubFilter: null,
   config:{storeName:"Sabores Royal", address:"Maipú 734, Rosario", waNumber:WA_NUMBER},
   fiscal:{
     cuit:"30-71698572-1",
@@ -2500,6 +2508,18 @@ function renderAdmin(){
               oninput="state.adminProductQ=this.value; renderAdminProductosInPlace()"
               style="flex:1; background:none; border:none; outline:none; color:var(--white); font-size:14px; padding:10px 0;">
           </div>
+          <div style="display:flex; gap:8px; margin-top:8px;">
+            <select onchange="state.adminProductCatFilter=this.value||null; state.adminProductSubFilter=null; render()"
+              style="flex:1; padding:9px 10px; border-radius:10px; background:var(--glass); border:1px solid var(--glass-bd); color:var(--white); font-size:12.5px;">
+              <option value="">Todas las categorías</option>
+              ${productCategoriesInUse().map(c=>`<option value="${escapeHtml(c)}" ${state.adminProductCatFilter===c?'selected':''}>${escapeHtml(c)}</option>`).join('')}
+            </select>
+            <select onchange="state.adminProductSubFilter=this.value||null; render()"
+              style="flex:1; padding:9px 10px; border-radius:10px; background:var(--glass); border:1px solid var(--glass-bd); color:var(--white); font-size:12.5px;">
+              <option value="">Todas las subcategorías</option>
+              ${productSubcatsInUse(state.adminProductCatFilter).map(s=>`<option value="${escapeHtml(s)}" ${state.adminProductSubFilter===s?'selected':''}>${escapeHtml(s)}</option>`).join('')}
+            </select>
+          </div>
           ${lowStockCount>0 ? `
           <button class="chip ${state.adminProductLowStockOnly?'active':''}" style="margin-top:8px; ${state.adminProductLowStockOnly?'':'color:var(--warn); border-color:var(--warn);'}"
             onclick="state.adminProductLowStockOnly=!state.adminProductLowStockOnly; render()">
@@ -4375,8 +4395,10 @@ function renderAdminProductos(){
     ? state.products.filter(p=>p.name.toLowerCase().includes(q))
     : state.products;
   if(state.adminProductLowStockOnly) productos = productos.filter(isLowStock);
+  if(state.adminProductCatFilter) productos = productos.filter(p=>p.cat===state.adminProductCatFilter);
+  if(state.adminProductSubFilter) productos = productos.filter(p=>p.sub===state.adminProductSubFilter);
   if(productos.length===0){
-    return `<div class="empty-state">${ic('box')}<p>${state.adminProductLowStockOnly?'Ningún producto con stock bajo.':(q?`Sin resultados para "${q}"`:'No hay productos cargados.')}</p></div>`;
+    return `<div class="empty-state">${ic('box')}<p>${state.adminProductLowStockOnly?'Ningún producto con stock bajo.':(q?`Sin resultados para "${q}"`:'No hay productos que coincidan con el filtro.')}</p></div>`;
   }
   return productos.map(p=>`
     <div class="prod-row-v2">
