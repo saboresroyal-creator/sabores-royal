@@ -3481,7 +3481,7 @@ function rebuildCheckSplitRows(){
           <input class="sc-row-nro" value="${prev?escapeHtml(prev.nro):''}" placeholder="Opcional" style="width:100%; padding:10px; border-radius:10px; background:var(--glass); border:1px solid var(--glass-bd); color:var(--cream);"></div>
         <div style="flex:1;"><label style="font-size:11px; color:rgba(255,255,255,0.5); display:block; margin-bottom:4px;">Monto</label>
           <input class="sc-row-monto" type="number" value="${prev&&prev.monto!==''?prev.monto:(per||'')}" style="width:100%; padding:10px; border-radius:10px; background:var(--glass); border:1px solid var(--glass-bd); color:var(--cream);"></div>
-        <div style="flex:1;"><label style="font-size:11px; color:rgba(255,255,255,0.5); display:block; margin-bottom:4px;">Vencimiento</label>
+        <div style="flex:1;"><label style="font-size:11px; color:rgba(255,255,255,0.5); display:block; margin-bottom:4px;">Fecha de cobro</label>
           <input class="sc-row-vto" type="date" value="${prev&&prev.vto?prev.vto:defaultVto}" style="width:100%; padding:10px; border-radius:10px; background:var(--glass); border:1px solid var(--glass-bd); color:var(--cream);"></div>
       </div>`;
   }
@@ -3626,7 +3626,7 @@ function renderAdminPagosCheques(){
           </div>
           <div style="flex:1; min-width:0;">
             <div style="font-size:13px; font-weight:600; color:var(--white);">${escapeHtml(c.proveedor)}${c.nroCheque?` · Nro ${escapeHtml(c.nroCheque)}`:''}</div>
-            <div style="font-size:11px; color:rgba(255,255,255,0.4);">Vencimiento</div>
+            <div style="font-size:11px; color:rgba(255,255,255,0.4);">Emisión: ${fmtDateAR(c.fechaEmision)} · Cobro: ${fmtDateAR(c.fechaVencimiento)}</div>
           </div>
           <div style="font-size:14px; font-weight:700; color:var(--white);">${money(c.amount)}</div>
           <button class="icon-btn" onclick="deleteSupplierCheck('${c.id}')">${ic('trash')}</button>
