@@ -650,6 +650,7 @@ let state = {
   ofertas: [],
   bannerNovedades: null,
   bannerOfertas: null,
+  homeBackground: null,
   adminBannerSub: 'banners',
   cmpTab: 'comparar',
   rentLedger: {monthlyAmount:1500000, movements:[]},
@@ -903,7 +904,7 @@ async function uploadProductPhoto(base64, productId){
 
 async function apiSyncContent(){
   try{
-    const data = await supaFetch('/app_settings?setting_key=in.(novedades,ofertas,banner_novedades,banner_ofertas,client_discounts,wholesale_clients,categories,store_config,fiscal_config,banners)&select=setting_key,setting_value', 'GET');
+    const data = await supaFetch('/app_settings?setting_key=in.(novedades,ofertas,banner_novedades,banner_ofertas,home_background,client_discounts,wholesale_clients,categories,store_config,fiscal_config,banners)&select=setting_key,setting_value', 'GET');
     if(!data || data.length===0) return;
     let changed = false;
     data.forEach(row=>{
@@ -920,6 +921,9 @@ async function apiSyncContent(){
         }
         if(row.setting_key==='banner_ofertas' && JSON.stringify(parsed)!==JSON.stringify(state.bannerOfertas)){
           state.bannerOfertas = parsed; changed = true;
+        }
+        if(row.setting_key==='home_background' && JSON.stringify(parsed)!==JSON.stringify(state.homeBackground)){
+          state.homeBackground = parsed; changed = true;
         }
         if(row.setting_key==='categories' && parsed && JSON.stringify(parsed)!==JSON.stringify(state.categories)){
           state.categories = parsed; changed = true;
@@ -1047,8 +1051,8 @@ async function apiSyncClients(){
 
 async function apiSaveSectionBanner(type){
   try{
-    const key = type==='novedad' ? 'banner_novedades' : 'banner_ofertas';
-    const obj = type==='novedad' ? state.bannerNovedades : state.bannerOfertas;
+    const key = type==='novedad' ? 'banner_novedades' : type==='oferta' ? 'banner_ofertas' : 'home_background';
+    const obj = type==='novedad' ? state.bannerNovedades : type==='oferta' ? state.bannerOfertas : state.homeBackground;
     const val = JSON.stringify(obj);
     const existing = await adminFetch('/app_settings?setting_key=eq.'+key+'&select=id', 'GET');
     if(existing && existing.length>0){
@@ -1662,9 +1666,11 @@ function renderClientWelcome(){
 
 /* ---------- HOME ---------- */
 function renderHome(){
+  const hb = state.homeBackground;
+  const hasCustomBg = hb && hb.active && hb.image;
   return `
   <div class="screen">
-    <div class="home-header">
+    <div class="home-header" ${hasCustomBg ? `style="background:linear-gradient(rgba(15,28,69,0.45),rgba(15,28,69,0.8)), url('${hb.image}') center top/cover no-repeat;"` : ''}>
       <img src="${LOGO_DATA_URL}" class="home-logo" alt="Sabores Royal">
       <h1>Sabores Royal</h1>
       <p>Maipú 734 · Rosario</p>
@@ -2545,7 +2551,7 @@ function renderAdmin(){
     </div>
     ${tab==="productos" ? `<button class="fab" onclick="openProductModal(null)">${ic('plus')}</button>` : ""}
     ${tab==="comprobantes" ? `<button class="fab" onclick="openManualVoucherModal()">${ic('plus')}</button>` : ""}
-    ${tab==="banners" ? `<button class="fab" onclick="${(state.adminBannerSub||'banners')==='novedades'?'openContentModal(\'novedad\',null)':(state.adminBannerSub||'banners')==='ofertas'?'openContentModal(\'oferta\',null)':'openBannerModal(null)'}">${ic('plus')}</button>` : ""}
+    ${tab==="banners" && (state.adminBannerSub||'banners')!=='fondo' ? `<button class="fab" onclick="${(state.adminBannerSub||'banners')==='novedades'?'openContentModal(\'novedad\',null)':(state.adminBannerSub||'banners')==='ofertas'?'openContentModal(\'oferta\',null)':'openBannerModal(null)'}">${ic('plus')}</button>` : ""}
     ${tab==="chats" && !state.adminChatPhone ? `<button class="fab" onclick="openNewChatPicker()">${ic('plus')}</button>` : ""}
   </div>`;
 }
@@ -6327,10 +6333,29 @@ function renderAdminBanners(){
       <button class="chip ${sub==='banners'?'active':''}" onclick="setAdminBannerSub('banners')">Banners</button>
       <button class="chip ${sub==='novedades'?'active':''}" onclick="setAdminBannerSub('novedades')">Novedades</button>
       <button class="chip ${sub==='ofertas'?'active':''}" onclick="setAdminBannerSub('ofertas')">Ofertas</button>
+      <button class="chip ${sub==='fondo'?'active':''}" onclick="setAdminBannerSub('fondo')">Fondo</button>
     </div>
     ${sub==='banners' ? renderBannersList() : ''}
     ${sub==='novedades' ? renderNovedadesList() : ''}
     ${sub==='ofertas' ? renderOfertasList() : ''}
+    ${sub==='fondo' ? renderHomeBackgroundSection() : ''}
+  `;
+}
+function renderHomeBackgroundSection(){
+  const hb = state.homeBackground;
+  return `
+    <div style="margin:12px 16px 6px; border-radius:14px; background:var(--glass); border:1px solid var(--glass-bd); overflow:hidden;">
+      <div style="padding:10px 14px 6px; font-size:11px; font-weight:700; letter-spacing:.06em; opacity:.55; text-transform:uppercase;">Fondo del header de inicio</div>
+      <div style="display:flex; align-items:center; gap:12px; padding:4px 14px 12px;">
+        ${hb && hb.image ? `<img src="${hb.image}" style="width:42px; height:52px; border-radius:8px; object-fit:cover; flex-shrink:0;">` : `<div style="width:42px; height:52px; border-radius:8px; background:radial-gradient(circle at 50% 0%, rgba(197,160,40,0.35), #0f1c45 70%); flex-shrink:0; display:flex; align-items:center; justify-content:center; font-size:18px;">🖼️</div>`}
+        <div style="flex:1; min-width:0;">
+          <div style="font-weight:600; font-size:13px;">${hb && hb.image ? 'Fondo personalizado' : 'Fondo por defecto'}</div>
+          <div style="font-size:11.5px; opacity:.65; margin-top:2px;">${hb ? (hb.active ? '✓ Visible en el inicio' : '✗ Oculto (queda el de siempre)') : 'Tocá editar para subir uno'}</div>
+        </div>
+        <button class="icon-btn" onclick="openSectionBannerModal('fondo')">${ic('edit')}</button>
+      </div>
+    </div>
+    <p style="margin:0 16px 12px; font-size:12px; color:rgba(255,255,255,0.5); line-height:1.5;">Usalo para cambiar el fondo del inicio en fechas especiales (Navidad, Día de la Madre, lanzamientos, etc). El detalle de tamaño de imagen recomendado está dentro de "Editar".</p>
   `;
 }
 function setAdminBannerSub(sub){ state.adminBannerSub = sub; render(); }
@@ -6582,13 +6607,18 @@ function deleteContentItem(type, idx){
   apiSaveContent(type==='novedad'?'novedades':'ofertas');
 }
 
-/* ---------- ADMIN: BANNER DE SECCIÓN (novedades / ofertas) ---------- */
+/* ---------- ADMIN: BANNER DE SECCIÓN (novedades / ofertas / fondo del inicio) ---------- */
 let sectionBannerDraft = { image:"", title:"", subtitle:"", active:true };
 let sectionBannerType = 'novedad';
+const SECTION_BANNER_META = {
+  novedad: { label:'Novedades', aspect:'16/7', hasText:true },
+  oferta:  { label:'Ofertas', aspect:'16/7', hasText:true },
+  fondo:   { label:'Fondo del inicio', aspect:'4/5', hasText:false },
+};
 
 function openSectionBannerModal(type){
   sectionBannerType = type;
-  const existing = type==='novedad' ? state.bannerNovedades : state.bannerOfertas;
+  const existing = type==='novedad' ? state.bannerNovedades : type==='oferta' ? state.bannerOfertas : state.homeBackground;
   sectionBannerDraft = existing ? Object.assign({}, existing) : { image:"", title:"", subtitle:"", active:true };
   const overlay = document.createElement("div");
   overlay.className = "modal-overlay";
@@ -6597,28 +6627,31 @@ function openSectionBannerModal(type){
   document.body.appendChild(overlay);
 }
 function renderSectionBannerModalHTML(type){
-  const label = type==='novedad' ? 'Novedades' : 'Ofertas';
+  const meta = SECTION_BANNER_META[type];
   const d = sectionBannerDraft;
   return `
     <div class="modal-sheet">
       <div class="modal-handle"></div>
-      <h3 class="modal-title">Banner de ${label}</h3>
+      <h3 class="modal-title">Banner de ${meta.label}</h3>
+      ${!meta.hasText ? `<p style="font-size:12px; color:rgba(255,255,255,0.55); margin:-6px 0 12px; line-height:1.5;">Se usa como fondo del logo y el título en el inicio — cambialo para fechas especiales (Navidad, Día de la Madre, un lanzamiento, etc).<br><b style="color:var(--gold2);">Imagen recomendada:</b> foto vertical (relación 4:5, ej. 1080×1350px), formato JPG o PNG. Dejá el centro y la parte de arriba despejados de texto importante — ahí va el logo encima, y los bordes se recortan según el ancho de pantalla. La app la comprime sola al subirla.</p>` : ''}
       <div id="secbanner-photo-preview">
-        ${d.image ? `<div class="photo-preview-wrap" style="aspect-ratio:16/7;"><img src="${d.image}" style="width:100%; height:100%; object-fit:cover; border-radius:12px;"></div>` : ''}
+        ${d.image ? `<div class="photo-preview-wrap" style="aspect-ratio:${meta.aspect};"><img src="${d.image}" style="width:100%; height:100%; object-fit:cover; border-radius:12px;"></div>` : ''}
       </div>
       <div class="photo-upload-row">
-        <div class="photo-upload-box" style="aspect-ratio:16/7; flex:2;">
+        <div class="photo-upload-box" style="aspect-ratio:${meta.aspect}; flex:2;">
           ${ic('upload')}<span>Galería</span>
           <input type="file" accept="image/*" onchange="onSectionBannerPhotoSelected(event)">
         </div>
-        <div class="photo-upload-box" style="aspect-ratio:16/7; flex:2;">
+        <div class="photo-upload-box" style="aspect-ratio:${meta.aspect}; flex:2;">
           ${ic('camera')}<span>Cámara</span>
           <input type="file" accept="image/*" capture="environment" onchange="onSectionBannerPhotoSelected(event)">
         </div>
       </div>
       ${d.image ? `<button class="btn-secondary" style="margin-bottom:4px; width:100%; font-size:12.5px;" onclick="removeSectionBannerPhoto()">Quitar imagen</button>` : ''}
+      ${meta.hasText ? `
       <div class="form-group"><label>Título</label><input id="sb-title" value="${d.title||''}" placeholder="Ej: Temporada de verano"></div>
       <div class="form-group"><label>Subtítulo (opcional)</label><input id="sb-subtitle" value="${d.subtitle||''}" placeholder="Ej: Productos frescos todos los días"></div>
+      ` : ''}
       <div class="form-group" style="display:flex; align-items:center; justify-content:space-between;">
         <label style="margin:0;">Mostrar en el inicio</label>
         <label style="display:flex; align-items:center; gap:8px; cursor:pointer;">
@@ -6637,10 +6670,11 @@ function onSectionBannerPhotoSelected(event){
   const file = event.target.files[0];
   if(!file) return;
   const reader = new FileReader();
-  reader.onload = (e)=>{
-    sectionBannerDraft.image = e.target.result;
+  reader.onload = async (e)=>{
+    sectionBannerDraft.image = await downscaleImageDataUrl(e.target.result);
     const preview = document.getElementById("secbanner-photo-preview");
-    if(preview) preview.innerHTML = `<div class="photo-preview-wrap" style="aspect-ratio:16/7;"><img src="${sectionBannerDraft.image}" style="width:100%; height:100%; object-fit:cover; border-radius:12px;"></div>`;
+    const aspect = SECTION_BANNER_META[sectionBannerType].aspect;
+    if(preview) preview.innerHTML = `<div class="photo-preview-wrap" style="aspect-ratio:${aspect};"><img src="${sectionBannerDraft.image}" style="width:100%; height:100%; object-fit:cover; border-radius:12px;"></div>`;
   };
   reader.readAsDataURL(file);
 }
@@ -6654,18 +6688,20 @@ function closeSectionBannerModal(){
   if(el) el.remove();
 }
 async function saveSectionBannerModal(type){
-  const title = document.getElementById("sb-title").value.trim();
-  const subtitle = document.getElementById("sb-subtitle").value.trim();
+  const meta = SECTION_BANNER_META[type];
+  const title = meta.hasText ? document.getElementById("sb-title").value.trim() : "";
+  const subtitle = meta.hasText ? document.getElementById("sb-subtitle").value.trim() : "";
   const active = document.getElementById("sb-active").checked;
   let image = sectionBannerDraft.image || "";
-  if(!title && !image){ toast("Agregá al menos un título o una imagen","err"); return; }
+  if(!title && !image){ toast("Agregá al menos "+(meta.hasText?"un título o ":"")+"una imagen","err"); return; }
   if(image && image.startsWith('data:')){
     try{ image = await uploadPhoto(image, 'secbanner_'+type+'_'+Date.now()); }
     catch(pe){ toast('Foto no se pudo subir: '+pe.message,'err'); }
   }
-  const banner = { image, title, subtitle, active };
+  const banner = meta.hasText ? { image, title, subtitle, active } : { image, active };
   if(type==='novedad'){ state.bannerNovedades = banner; }
-  else{ state.bannerOfertas = banner; }
+  else if(type==='oferta'){ state.bannerOfertas = banner; }
+  else{ state.homeBackground = banner; }
   saveState();
   closeSectionBannerModal();
   render();
