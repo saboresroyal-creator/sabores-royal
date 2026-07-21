@@ -959,32 +959,36 @@ async function apiSyncContent(){
         }
         if(row.setting_key==='client_discounts'){
           const discounts = parsed || {};
+          let blockChanged = false;
           Object.entries(discounts).forEach(([phone, pct])=>{
             if(!state.clients[phone]) state.clients[phone] = {phone, name:'', address:'', doc:'', points:0, orders:[]};
-            state.clients[phone].discountPct = pct;
+            if(state.clients[phone].discountPct !== pct){ state.clients[phone].discountPct = pct; blockChanged = true; }
           });
           // Limpiar descuentos de clientes que ya no están en la lista de Supabase
           Object.keys(state.clients).forEach(phone=>{
             if(!discounts[phone] && state.clients[phone].discountPct){
               state.clients[phone].discountPct = undefined;
+              blockChanged = true;
             }
           });
-          changed = true;
+          if(blockChanged) changed = true;
         }
         if(row.setting_key==='wholesale_clients'){
           const list = parsed || [];
+          let blockChanged = false;
           // Aplicar flag wholesale a los clientes en la lista
           list.forEach(phone=>{
             if(!state.clients[phone]) state.clients[phone] = {phone, name:'', address:'', doc:'', points:0, orders:[]};
-            state.clients[phone].wholesale = true;
+            if(!state.clients[phone].wholesale){ state.clients[phone].wholesale = true; blockChanged = true; }
           });
           // Quitar flag a clientes que ya no son mayoristas
           Object.keys(state.clients).forEach(phone=>{
             if(!list.includes(phone) && state.clients[phone].wholesale){
               state.clients[phone].wholesale = false;
+              blockChanged = true;
             }
           });
-          changed = true;
+          if(blockChanged) changed = true;
         }
       }catch(e){}
     });
@@ -2551,7 +2555,7 @@ function renderAdmin(){
       <button onclick="adminLogout()" style="color:var(--danger);">${ic('logout')}</button>
     </div>
     <div class="admin-tabs">
-      ${tabs.map(t=>`<button class="admin-tab ${tab===t.key?'active':''}" onclick="setAdminTab('${t.key}')">${t.label}${t.badge>0?`<span class="admin-tab-badge">${t.badge>99?'99+':t.badge}</span>`:''}</button>`).join('')}
+      ${tabs.map(t=>`<button class="admin-tab ${tab===t.key?'active':''}" data-tab="${t.key}" onclick="setAdminTab('${t.key}')">${t.label}${t.badge>0?`<span class="admin-tab-badge">${t.badge>99?'99+':t.badge}</span>`:''}</button>`).join('')}
     </div>
     <div style="flex:1; padding-bottom:30px;">
       ${tab==="pedidos" ? renderAdminPedidos() : ""}
@@ -3945,9 +3949,31 @@ async function syncAdminChats(){
         }
       }
     } else if(changed){
-      render();
+      // No usar render() acá: esto corre cada 5s en segundo plano sin
+      // importar en qué pestaña esté el admin, y un render() completo
+      // borra cualquier formulario a medio llenar (ej: el selector de
+      // proveedor del Comparador, o el archivo que estás por subir).
+      // Solo actualizamos el globo de Chats en el lugar.
+      updateAdminChatTabBadge(totalUnread);
     }
   }catch(e){ console.warn('Admin chat sync:', e); }
+}
+function updateAdminChatTabBadge(count){
+  const btn = document.querySelector('.admin-tab[data-tab="chats"]');
+  if(!btn) return;
+  let badge = btn.querySelector('.admin-tab-badge');
+  if(count>0){
+    const text = count>99?'99+':String(count);
+    if(badge){ badge.textContent = text; }
+    else{
+      badge = document.createElement('span');
+      badge.className = 'admin-tab-badge';
+      badge.textContent = text;
+      btn.appendChild(badge);
+    }
+  } else if(badge){
+    badge.remove();
+  }
 }
 
 async function uploadChatFile(file){
