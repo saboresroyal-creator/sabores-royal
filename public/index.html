@@ -3168,7 +3168,12 @@ function cmpDoSearch(){
       if(h2.prov.id===h.prov.id) return;
       const k2=h2.prov.id+'|'+h2.row.norm;
       if(used[k2]||g.byProv[h2.prov.id]) return;
-      if(cmpProdSim(h.row.norm,h2.row.norm)>=0.55){ g.byProv[h2.prov.id]={row:h2.row,prov:h2.prov}; used[k2]=1; }
+      // 0.55 emparejaba variantes de un mismo producto que en realidad son
+      // presentaciones distintas (ej: "Cofler Block 24x300g" con "Cofler
+      // Block 40grs 36u Simple") porque comparten marca+línea y las
+      // palabras de cantidad se ignoran a propósito. Más exigente para que
+      // haga falta coincidencia real más allá del nombre de la línea.
+      if(cmpProdSim(h.row.norm,h2.row.norm)>=0.7){ g.byProv[h2.prov.id]={row:h2.row,prov:h2.prov}; used[k2]=1; }
     });
     groups.push(g);
   });
