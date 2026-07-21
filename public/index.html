@@ -2680,15 +2680,6 @@ function cmpInitial(name){ return String(name||'').trim().charAt(0).toUpperCase(
 function cmpFmtDate(iso){ const d=new Date(iso); return d.toLocaleDateString('es-AR',{day:'2-digit',month:'2-digit',year:'2-digit'}); }
 function cmpCountProds(provId){ const l=cmpDB.listas.find(x=>x.provId===provId); return l?l.rows.length:0; }
 function cmpEsc(s){ return String(s||'').replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;'); }
-function cmpNormText(s){ return String(s||'').toLowerCase().replace(/[à-å]/g,'a').replace(/[è-ë]/g,'e').replace(/[ì-ï]/g,'i').replace(/[ò-ö]/g,'o').replace(/[ù-ü]/g,'u').replace(/ñ/g,'n').replace(/[^a-z0-9\s]/g,' ').replace(/\s+/g,' ').trim(); }
-function cmpInferQtyFromName(name){
-  const s=cmpNormText(name); let m;
-  m=s.match(/\b(\d+)\s*x\s*(\d+)\s*u(?:n(?:id)?)?(?:\b|\.)/); if(m){ const n=+m[1]*+m[2]; if(n>1&&n<=2000) return n; }
-  m=s.match(/\b(\d+)\s*u(?:n(?:id(?:ades?)?)?)?\.?(?:\s|$)/); if(m){ const n=+m[1]; if(n>1&&n<=500) return n; }
-  m=s.match(/\bx\s*(\d+)(?:\s|$)/); if(m){ const n=+m[1]; if(n>1&&n<=500) return n; }
-  return 1;
-}
-
 // ── MOTOR DE BÚSQUEDA ───────────────────────────────────
 function cmpTokenize(s){ return cmpNorm(s).split(/\s+/).filter(w=>w.length>0); }
 function cmpBigrams(s){ const r=[]; for(let i=0;i<s.length-1;i++) r.push(s[i]+s[i+1]); return r; }
@@ -2705,8 +2696,9 @@ function cmpTokSim(a,b){
 // Palabras de cantidad/unidad ("x38g", "40u", "500", "kg") — se ignoran al
 // comparar productos entre proveedores porque cada uno las escribe distinto
 // (x38g vs 38grs vs 38 gr) y eso le baja el puntaje a productos que en
-// realidad son el mismo. La cantidad ya se calcula aparte con
-// cmpParseUnitQty/cmpInferQtyFromName para el precio por unidad.
+// realidad son el mismo. La cantidad por bulto para el precio por unidad
+// sale solo de lo que se mapeó al importar (cmpParseUnitQty), nunca del
+// nombre del producto.
 const CMP_UNIT_WORDS = new Set(['gr','grs','gramos','kg','kgs','mg','ml','mls','lt','lts','litros','cc','cm','u','un','und','unid','unidades','uds','pack','cja','caja','cajas','docena','display','bulto','fardo','kilo','kilos','x']);
 function cmpIsNoiseToken(t){
   if(/^x?\d+[a-z]{0,4}$/.test(t)) return true; // 38g, x38g, 40u, 500, 1kg...
@@ -3142,14 +3134,18 @@ function cmpDoSearch(){
   provs.forEach(pl=>{ html+=`<th><div class="cmp-prov-th-av" style="background:${cmpColor(pl.prov.id)}">${cmpInitial(pl.prov.name)}</div><br>${cmpEsc(pl.prov.name)}</th>`; });
   html+=`</tr></thead><tbody>`;
   groups.slice(0,50).forEach(g=>{
-    // Calcular qty efectivo por proveedor: si unitQty=1, intentar inferir del nombre
+    // El qty por proveedor sale SOLO de lo que se mapeó al importar (columna
+    // "Cant x Bulto" o texto de presentación). Antes, si no había ese dato,
+    // se intentaba "adivinar" la cantidad buscando patrones tipo "24u" en el
+    // nombre del producto — pero el nombre describe el packaging exista o
+    // no bulto en el precio, así que terminaba dividiendo mal listas donde
+    // el precio ya es por unidad. Mejor mostrar "sin datos de bulto" que
+    // adivinar y mostrar un precio por unidad incorrecto.
     const provQtys={};
     provs.forEach(pl=>{
       if(g.byProv[pl.prov.id]){
         const r=g.byProv[pl.prov.id].row;
-        let q=r.unitQty||1, inferred=false;
-        if(q===1){ const qi=cmpInferQtyFromName(r.name); if(qi>1){ q=qi; inferred=true; } }
-        provQtys[pl.prov.id]={qty:q,inferred};
+        provQtys[pl.prov.id]={qty:r.unitQty||1, inferred:false};
       }
     });
     const unitPrices=[];
