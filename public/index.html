@@ -2511,13 +2511,13 @@ function renderAdmin(){
           <div style="display:flex; gap:8px; margin-top:8px;">
             <select onchange="state.adminProductCatFilter=this.value||null; state.adminProductSubFilter=null; render()"
               style="flex:1; padding:9px 10px; border-radius:10px; background:var(--glass); border:1px solid var(--glass-bd); color:var(--white); font-size:12.5px;">
-              <option value="">Todas las categorías</option>
-              ${productCategoriesInUse().map(c=>`<option value="${escapeHtml(c)}" ${state.adminProductCatFilter===c?'selected':''}>${escapeHtml(c)}</option>`).join('')}
+              <option value="" style="background:var(--navy2); color:var(--white);">Todas las categorías</option>
+              ${productCategoriesInUse().map(c=>`<option value="${escapeHtml(c)}" style="background:var(--navy2); color:var(--white);" ${state.adminProductCatFilter===c?'selected':''}>${escapeHtml(c)}</option>`).join('')}
             </select>
             <select onchange="state.adminProductSubFilter=this.value||null; render()"
               style="flex:1; padding:9px 10px; border-radius:10px; background:var(--glass); border:1px solid var(--glass-bd); color:var(--white); font-size:12.5px;">
-              <option value="">Todas las subcategorías</option>
-              ${productSubcatsInUse(state.adminProductCatFilter).map(s=>`<option value="${escapeHtml(s)}" ${state.adminProductSubFilter===s?'selected':''}>${escapeHtml(s)}</option>`).join('')}
+              <option value="" style="background:var(--navy2); color:var(--white);">Todas las subcategorías</option>
+              ${productSubcatsInUse(state.adminProductCatFilter).map(s=>`<option value="${escapeHtml(s)}" style="background:var(--navy2); color:var(--white);" ${state.adminProductSubFilter===s?'selected':''}>${escapeHtml(s)}</option>`).join('')}
             </select>
           </div>
           ${lowStockCount>0 ? `
