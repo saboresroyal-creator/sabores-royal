@@ -1698,8 +1698,15 @@ function renderHome(){
   const activeBg = (state.homeBackgrounds||[]).find(b=>b.id===state.homeBackgroundActiveId);
   const hasCustomBg = !!(activeBg && activeBg.image);
   return `
-  <div class="screen">
-    <div class="home-header" ${hasCustomBg ? `style="background:linear-gradient(rgba(15,28,69,0.45),rgba(15,28,69,0.8)), url('${activeBg.image}') center top/cover no-repeat;"` : ''}>
+  <div class="screen" style="position:relative;">
+    ${hasCustomBg ? `
+    <div style="position:absolute; top:0; left:0; right:0; height:640px; z-index:0; overflow:hidden; pointer-events:none;">
+      <img src="${activeBg.image}" style="width:100%; height:100%; object-fit:cover; object-position:center top; display:block;">
+      <div style="position:absolute; inset:0; background:linear-gradient(rgba(15,28,69,0.2), rgba(15,28,69,0.55) 55%, var(--navy) 97%);"></div>
+    </div>
+    ` : ''}
+    <div style="position:relative; z-index:1;">
+    <div class="home-header" ${hasCustomBg ? `style="background:none;"` : ''}>
       <img src="${LOGO_DATA_URL}" class="home-logo" alt="Sabores Royal">
       <h1>Sabores Royal</h1>
       <p>Maipú 734 · Rosario</p>
@@ -1793,6 +1800,7 @@ function renderHome(){
     <button class="wa-float-btn" onclick="window.open(waLink('¡Hola! Quiero hacer una consulta.'),'_blank')">
       ${ic('wa')} Hablar por WhatsApp
     </button>
+    </div>
   </div>`;
 }
 
