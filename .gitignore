@@ -17,3 +17,4 @@ node_modules/
 # Archivos de datos locales (ventas, exports, etc.)
 *.xlsx
 *.xls
+*.csv
