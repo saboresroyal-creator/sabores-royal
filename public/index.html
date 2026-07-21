@@ -4442,12 +4442,31 @@ function renderAdminProductosInPlace(){
 function updateProductPriceInline(productId, field, value){
   const p = state.products.find(pr=>pr.id===productId);
   if(!p) return;
-  if(field==="price"){ p.price = Math.max(0, Number(value)||0); }
+  // Al corregir el precio de cliente, si el producto ya tenía un precio
+  // mayorista cargado, se mantiene el mismo % de descuento en vez de
+  // dejarlo desactualizado (mismo cálculo que el % desc. mayorista del
+  // modal de producto).
+  if(field==="price"){
+    const oldPrice = p.price;
+    p.price = Math.max(0, Number(value)||0);
+    if(p.wholesalePrice && oldPrice>0){
+      const pct = 1 - (p.wholesalePrice/oldPrice);
+      p.wholesalePrice = Math.round(p.price*(1-pct));
+    }
+  }
   else if(field==="wholesalePrice"){ p.wholesalePrice = value.trim()==="" ? null : Math.max(0, Number(value)||0); }
-  else if(field==="pricePerKg"){ p.pricePerKg = Math.max(0, Number(value)||0); }
+  else if(field==="pricePerKg"){
+    const oldPrice = p.pricePerKg;
+    p.pricePerKg = Math.max(0, Number(value)||0);
+    if(p.wholesalePricePerKg && oldPrice>0){
+      const pct = 1 - (p.wholesalePricePerKg/oldPrice);
+      p.wholesalePricePerKg = Math.round(p.pricePerKg*(1-pct));
+    }
+  }
   else if(field==="wholesalePricePerKg"){ p.wholesalePricePerKg = value.trim()==="" ? null : Math.max(0, Number(value)||0); }
   saveState();
   apiSaveProduct(p);
+  renderAdminProductosInPlace();
   toast("Precio actualizado", "ok");
 }
 function deleteProduct(id){
