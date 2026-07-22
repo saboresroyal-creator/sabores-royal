@@ -5115,10 +5115,21 @@ function openBulkBarcodeScanner(){
 }
 function startBarcodeCamera(onSuccess){
   loadHtml5QrcodeLib().then(()=>{
-    _barcodeScanner = new Html5Qrcode("barcode-reader");
+    // Sin formatsToSupport, la librería prioriza QR y a veces no reconoce
+    // bien códigos de barras 1D (EAN/UPC/Code128) — los pedimos explícito.
+    // El recuadro de lectura además se hace rectangular y ancho en vez de
+    // cuadrado, porque un código de barras es horizontal y angosto.
+    const formats = window.Html5QrcodeSupportedFormats ? [
+      Html5QrcodeSupportedFormats.EAN_13, Html5QrcodeSupportedFormats.EAN_8,
+      Html5QrcodeSupportedFormats.UPC_A, Html5QrcodeSupportedFormats.UPC_E,
+      Html5QrcodeSupportedFormats.CODE_128, Html5QrcodeSupportedFormats.CODE_39,
+      Html5QrcodeSupportedFormats.CODE_93, Html5QrcodeSupportedFormats.ITF,
+      Html5QrcodeSupportedFormats.CODABAR, Html5QrcodeSupportedFormats.QR_CODE,
+    ] : undefined;
+    _barcodeScanner = new Html5Qrcode("barcode-reader", formats ? { formatsToSupport: formats, verbose: false } : undefined);
     _barcodeScanner.start(
       { facingMode: "environment" },
-      { fps: 10, qrbox: 240 },
+      { fps: 10, qrbox: { width: 280, height: 130 }, aspectRatio: 1.5 },
       onSuccess,
       ()=>{} // frame sin código legible todavía — no es un error real, se ignora
     ).catch(err=>{
