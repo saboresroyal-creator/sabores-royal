@@ -5222,11 +5222,25 @@ function startBarcodeCameraZXing(){
   const video = document.getElementById('barcode-video');
   loadZXingLib().then(()=>{
     appendBarcodeDebug('ZXing lib cargada');
-    const F = ZXingBrowser.BarcodeFormat;
-    const hints = new Map();
-    hints.set(ZXingBrowser.DecodeHintType.POSSIBLE_FORMATS, [
-      F.EAN_13, F.EAN_8, F.UPC_A, F.UPC_E, F.CODE_128, F.CODE_39, F.CODABAR, F.ITF, F.QR_CODE,
-    ]);
+    // El build de @zxing/browser que sirve el CDN no siempre expone
+    // DecodeHintType/BarcodeFormat en el global (varía según versión) —
+    // acceder a esos hints ahí rompía todo el flujo con un error de JS
+    // ANTES de siquiera pedir la cámara, así que quedaba todo negro. Si
+    // están disponibles los usamos (más rápido/preciso); si no, el lector
+    // igual funciona probando todos los formatos que soporta.
+    let hints = undefined;
+    try{
+      if(ZXingBrowser.DecodeHintType && ZXingBrowser.BarcodeFormat){
+        const F = ZXingBrowser.BarcodeFormat;
+        hints = new Map();
+        hints.set(ZXingBrowser.DecodeHintType.POSSIBLE_FORMATS, [
+          F.EAN_13, F.EAN_8, F.UPC_A, F.UPC_E, F.CODE_128, F.CODE_39, F.CODABAR, F.ITF, F.QR_CODE,
+        ]);
+        appendBarcodeDebug('hints de formato aplicados');
+      } else {
+        appendBarcodeDebug('sin DecodeHintType/BarcodeFormat, sigo sin hints');
+      }
+    }catch(e){ appendBarcodeDebug('armado de hints falló: '+e.message); hints = undefined; }
     const codeReader = new ZXingBrowser.BrowserMultiFormatReader(hints);
     codeReader.decodeFromConstraints(
       { video: { facingMode: 'environment', width:{ideal:1920}, height:{ideal:1080} } },
