@@ -891,6 +891,7 @@ async function apiSyncProducts(){
       displayDiscount: p.display_discount||null,
       promoPrice: p.promo_price ? Number(p.promo_price) : null,
       promoUntil: p.promo_until||null,
+      barcode: p.barcode||"",
     };});
     const pendingOnly = state.products.filter(p=>_pendingSaves.has(p.id));
     const newProducts = [...apiMapped, ...pendingOnly];
@@ -1156,6 +1157,7 @@ async function apiSaveProduct(product){
       display_discount: product.displayDiscount||null,
       promo_price: product.promoPrice||null,
       promo_until: product.promoUntil||null,
+      barcode: product.barcode||null,
     };
     if(product._apiId){
       await adminFetch('/products?id=eq.' + product._apiId, 'PATCH', body);
@@ -2536,6 +2538,7 @@ function renderAdmin(){
   const unreadCount = state.suggestions.filter(s=>!s.read).length;
   const chatUnreadTotal = Object.values(state.adminChatUnread||{}).reduce((s,n)=>s+n,0);
   const lowStockCount = state.products.filter(isLowStock).length;
+  const noBarcodeCount = state.products.filter(p=>!p.barcode).length;
   const pendingOrdersCount = state.orders.filter(o=>o.status==="Pendiente").length;
   const checksDueSoon = checksDueSoonCount(7);
   const ALL_TABS = [
@@ -2594,11 +2597,16 @@ function renderAdmin(){
               ${productSubcatsInUse(state.adminProductCatFilter).map(s=>`<option value="${escapeHtml(s)}" style="background:var(--navy2); color:var(--white);" ${state.adminProductSubFilter===s?'selected':''}>${escapeHtml(s)}</option>`).join('')}
             </select>
           </div>
-          ${lowStockCount>0 ? `
-          <button class="chip ${state.adminProductLowStockOnly?'active':''}" style="margin-top:8px; ${state.adminProductLowStockOnly?'':'color:var(--warn); border-color:var(--warn);'}"
-            onclick="state.adminProductLowStockOnly=!state.adminProductLowStockOnly; render()">
-            ⚠ Stock bajo (${lowStockCount})
-          </button>` : ''}
+          <div style="display:flex; gap:8px; margin-top:8px;">
+            <button class="btn-primary" style="flex:1; padding:9px; font-size:12.5px; display:flex; align-items:center; justify-content:center; gap:6px;" onclick="openBulkBarcodeScanner()">
+              ${ic('camera')} Escanear productos${noBarcodeCount>0?` (${noBarcodeCount} sin código)`:''}
+            </button>
+            ${lowStockCount>0 ? `
+            <button class="chip ${state.adminProductLowStockOnly?'active':''}" style="${state.adminProductLowStockOnly?'':'color:var(--warn); border-color:var(--warn);'}"
+              onclick="state.adminProductLowStockOnly=!state.adminProductLowStockOnly; render()">
+              ⚠ Stock bajo (${lowStockCount})
+            </button>` : ''}
+          </div>
         </div>
         <div id="admin-productos-list">${renderAdminProductos()}</div>
       ` : ""}
@@ -4759,6 +4767,7 @@ function renderAdminProductos(){
           `}
         </div>
         <div class="prod-row-actions">
+          <button class="icon-btn" style="${p.barcode?'':'color:var(--warn); border-color:var(--warn);'}" title="${p.barcode?'Código: '+p.barcode:'Sin código de barras'}" onclick="openBarcodeScannerModal(code=>updateProductBarcode('${p.id}', code))">${ic('camera')}</button>
           <button class="icon-btn" onclick="openProductModal('${p.id}')">${ic('edit')}</button>
           <button class="icon-btn" onclick="deleteProduct('${p.id}')">${ic('trash')}</button>
         </div>
@@ -4892,6 +4901,12 @@ function openProductModal(id){
       </div>
 
       <div class="form-group"><label>Stock</label><input id="pm-stock" type="number" value="${p?p.stock:''}" placeholder="0"></div>
+      <div class="form-group"><label>Código de barras</label>
+        <div style="display:flex; gap:8px;">
+          <input id="pm-barcode" value="${p&&p.barcode?p.barcode:''}" placeholder="Escaneá o escribí el código" style="flex:1;">
+          <button type="button" class="icon-btn" style="flex:none; width:44px;" title="Escanear" onclick="openBarcodeScannerModal(code=>{ document.getElementById('pm-barcode').value=code; })">${ic('camera')}</button>
+        </div>
+      </div>
       <div class="form-group"><label>Descripción</label><textarea id="pm-desc" placeholder="Descripción breve">${p?p.desc:''}</textarea></div>
 
       <div style="margin:0 16px 10px; display:flex; flex-direction:column; gap:8px;">
@@ -4982,6 +4997,7 @@ function saveProductModal(id){
   const wholesaleRaw = document.getElementById("pm-wholesale-price").value.trim();
   const wholesalePrice = wholesaleRaw ? Number(wholesaleRaw) : null;
   const stock = Number(document.getElementById("pm-stock").value)||0;
+  const barcode = document.getElementById("pm-barcode").value.trim();
   const desc = document.getElementById("pm-desc").value.trim();
   const sellByWeight = document.getElementById("pm-sellbyweight-toggle").classList.contains("on");
   const sinTacc = document.getElementById("pm-sintacc-toggle").classList.contains("on");
@@ -5010,11 +5026,11 @@ function saveProductModal(id){
   let savedProduct;
   if(id){
     const p = state.products.find(pr=>pr.id===id);
-    Object.assign(p, {name, section, cat, sub, price, wholesalePrice, stock, desc, sellByWeight, pricePerKg, wholesalePricePerKg, minGrams, sinTacc, sinAzucar, displayQty, displayDiscount, promoPrice, promoUntil, photo:adminPhotoDraft.current||p.photo, photoClean});
+    Object.assign(p, {name, section, cat, sub, price, wholesalePrice, stock, desc, barcode, sellByWeight, pricePerKg, wholesalePricePerKg, minGrams, sinTacc, sinAzucar, displayQty, displayDiscount, promoPrice, promoUntil, photo:adminPhotoDraft.current||p.photo, photoClean});
     savedProduct = p;
   }else{
     savedProduct = {
-      id: "p"+Date.now(), section, cat, sub, name, price, wholesalePrice, stock, desc,
+      id: "p"+Date.now(), section, cat, sub, name, price, wholesalePrice, stock, desc, barcode,
       sellByWeight, pricePerKg, wholesalePricePerKg, minGrams, sinTacc, sinAzucar, displayQty, displayDiscount, promoPrice, promoUntil,
       photo: adminPhotoDraft.current||"", photoClean
     };
@@ -5025,6 +5041,153 @@ function saveProductModal(id){
   closeProductModal();
   render();
   toast("Producto guardado", "ok");
+}
+
+/* ---------- ESCANEO DE CÓDIGO DE BARRAS ----------
+   Usa html5-qrcode (lee EAN-13/UPC/Code128/QR, etc.) cargada de un CDN al
+   vuelo, igual que ya se hace con xlsx.min.js/pdf.js — no queda instalada
+   en el proyecto, solo se descarga la primera vez que hace falta.
+   Dos formas de usarla:
+   - openBarcodeScannerModal(onResult): un solo escaneo, cierra sola y
+     devuelve el código (para el campo del modal de producto).
+   - openBulkBarcodeScanner(): cámara continua — cada código escaneado
+     pausa la cámara, te deja elegir a qué producto del catálogo pertenece,
+     lo guarda, y sigue escaneando sin volver a abrir nada. Pensada para
+     sentarse a cargar todo el stock de una sentada. */
+let _html5QrcodeLoadPromise = null;
+function loadHtml5QrcodeLib(){
+  if(window.Html5Qrcode) return Promise.resolve();
+  if(_html5QrcodeLoadPromise) return _html5QrcodeLoadPromise;
+  _html5QrcodeLoadPromise = new Promise((resolve, reject)=>{
+    const s = document.createElement('script');
+    s.src = 'https://unpkg.com/html5-qrcode@2.3.8/html5-qrcode.min.js';
+    s.onload = ()=>resolve();
+    s.onerror = ()=>{ _html5QrcodeLoadPromise=null; reject(new Error('No se pudo cargar el lector de códigos')); };
+    document.head.appendChild(s);
+  });
+  return _html5QrcodeLoadPromise;
+}
+let _barcodeScanner = null;
+let _barcodeScanOnResult = null;
+let _barcodeScanMode = 'single'; // 'single' | 'bulk'
+
+function openBarcodeScannerModal(onResult){
+  _barcodeScanMode = 'single';
+  _barcodeScanOnResult = onResult;
+  const overlay = document.createElement("div");
+  overlay.className = "modal-overlay";
+  overlay.id = "barcode-scanner-overlay";
+  overlay.innerHTML = `
+    <div class="modal-sheet" style="padding-bottom:20px;">
+      <div class="modal-handle"></div>
+      <h3 class="modal-title">Escanear código de barras</h3>
+      <div id="barcode-reader" style="border-radius:14px; overflow:hidden; background:#000; min-height:260px;"></div>
+      <p id="barcode-scan-status" style="text-align:center; font-size:12.5px; color:rgba(255,255,255,0.5); margin:10px 0;">Apuntá la cámara al código de barras…</p>
+      <button class="btn-secondary" style="width:100%;" onclick="closeBarcodeScannerModal()">Cancelar</button>
+    </div>`;
+  document.body.appendChild(overlay);
+  startBarcodeCamera(decodedText=>{
+    const cb = _barcodeScanOnResult;
+    closeBarcodeScannerModal();
+    if(cb) cb(decodedText);
+  });
+}
+function openBulkBarcodeScanner(){
+  _barcodeScanMode = 'bulk';
+  const overlay = document.createElement("div");
+  overlay.className = "modal-overlay";
+  overlay.id = "barcode-scanner-overlay";
+  overlay.innerHTML = `
+    <div class="modal-sheet" style="padding-bottom:20px;">
+      <div class="modal-handle"></div>
+      <h3 class="modal-title">Escanear productos</h3>
+      <div id="barcode-reader" style="border-radius:14px; overflow:hidden; background:#000; min-height:260px;"></div>
+      <div id="barcode-scan-panel">
+        <p id="barcode-scan-status" style="text-align:center; font-size:12.5px; color:rgba(255,255,255,0.5); margin:10px 0;">Apuntá la cámara al código de barras del producto…</p>
+      </div>
+      <button class="btn-secondary" style="width:100%;" onclick="closeBarcodeScannerModal()">Listo, terminar</button>
+    </div>`;
+  document.body.appendChild(overlay);
+  startBarcodeCamera(decodedText=>{
+    if(_barcodeScanner) _barcodeScanner.pause(true);
+    showBarcodeAssignPanel(decodedText);
+  });
+}
+function startBarcodeCamera(onSuccess){
+  loadHtml5QrcodeLib().then(()=>{
+    _barcodeScanner = new Html5Qrcode("barcode-reader");
+    _barcodeScanner.start(
+      { facingMode: "environment" },
+      { fps: 10, qrbox: 240 },
+      onSuccess,
+      ()=>{} // frame sin código legible todavía — no es un error real, se ignora
+    ).catch(err=>{
+      const status = document.getElementById('barcode-scan-status');
+      if(status) status.textContent = 'No se pudo abrir la cámara: '+(err.message||err);
+    });
+  }).catch(err=>{
+    const status = document.getElementById('barcode-scan-status');
+    if(status) status.textContent = err.message;
+  });
+}
+function closeBarcodeScannerModal(){
+  const el = document.getElementById("barcode-scanner-overlay");
+  const scanner = _barcodeScanner;
+  _barcodeScanner = null;
+  if(scanner){
+    scanner.stop().then(()=>scanner.clear()).catch(()=>{});
+  }
+  if(el) el.remove();
+}
+function showBarcodeAssignPanel(code){
+  const panel = document.getElementById('barcode-scan-panel');
+  if(!panel) return;
+  panel.innerHTML = `
+    <div style="padding:10px 0 0;">
+      <div style="font-size:12px; color:rgba(255,255,255,0.5); margin-bottom:8px;">Código escaneado: <b style="color:var(--gold2);">${escapeHtml(code)}</b></div>
+      <input id="barcode-assign-search" placeholder="Buscar producto por nombre…" oninput="renderBarcodeAssignResults('${code.replace(/'/g,"\\'")}')" autofocus
+        style="width:100%; padding:11px 14px; border-radius:12px; background:var(--glass); border:1px solid var(--glass-bd); color:var(--cream); outline:none; margin-bottom:8px;">
+      <div id="barcode-assign-results" style="max-height:200px; overflow-y:auto;"></div>
+      <button class="btn-secondary" style="width:100%; margin-top:8px;" onclick="resumeBarcodeScan()">Omitir / seguir escaneando</button>
+    </div>`;
+  renderBarcodeAssignResults(code);
+  setTimeout(()=>{ const i=document.getElementById('barcode-assign-search'); if(i) i.focus(); }, 50);
+}
+function renderBarcodeAssignResults(code){
+  const el = document.getElementById('barcode-assign-results');
+  if(!el) return;
+  const q = (document.getElementById('barcode-assign-search')?.value||'').toLowerCase().trim();
+  const existing = state.products.find(p=>p.barcode===code);
+  let list = q ? state.products.filter(p=>p.name.toLowerCase().includes(q)) : state.products;
+  list = list.slice(0, 30);
+  el.innerHTML = `
+    ${existing ? `<div style="font-size:11.5px; color:var(--warn); margin-bottom:6px;">⚠ Este código ya está asignado a "${escapeHtml(existing.name)}"</div>` : ''}
+    ${list.map(p=>`
+      <div style="display:flex; align-items:center; justify-content:space-between; gap:8px; padding:9px 10px; border-radius:10px; background:var(--glass); border:1px solid var(--glass-bd); margin-bottom:6px; cursor:pointer;" onclick="assignBarcodeAndResume('${p.id}','${code.replace(/'/g,"\\'")}')">
+        <span style="font-size:13px; flex:1; min-width:0; overflow:hidden; text-overflow:ellipsis; white-space:nowrap;">${escapeHtml(p.name)}</span>
+        ${p.barcode?`<span style="font-size:10px; color:rgba(255,255,255,0.4); flex-shrink:0;">ya tiene código</span>`:''}
+      </div>`).join('') || `<div style="text-align:center; padding:14px; color:rgba(255,255,255,0.4); font-size:12.5px;">Sin resultados.</div>`}
+  `;
+}
+function assignBarcodeAndResume(productId, code){
+  updateProductBarcode(productId, code, true);
+  resumeBarcodeScan();
+}
+function resumeBarcodeScan(){
+  const panel = document.getElementById('barcode-scan-panel');
+  if(panel) panel.innerHTML = `<p id="barcode-scan-status" style="text-align:center; font-size:12.5px; color:rgba(255,255,255,0.5); margin:10px 0;">Apuntá la cámara al código de barras del producto…</p>`;
+  if(_barcodeScanner) _barcodeScanner.resume();
+}
+function updateProductBarcode(id, code, skipConfirm){
+  const p = state.products.find(pr=>pr.id===id);
+  if(!p) return;
+  const dup = state.products.find(pr=>pr.barcode===code && pr.id!==id);
+  if(dup && !skipConfirm && !confirm(`Ese código ya está asignado a "${dup.name}". ¿Reasignarlo a "${p.name}"?`)) return;
+  p.barcode = code;
+  saveState();
+  apiSaveProduct(p);
+  renderAdminProductosInPlace();
+  toast('Código asignado a '+p.name, 'ok');
 }
 
 /* ---------- PHOTO UPLOAD + FILTERS + AI BG REMOVAL + BACKGROUNDS ---------- */
