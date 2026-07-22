@@ -5090,6 +5090,7 @@ function scannerModalHTML(title, bodyExtra, closeLabel){
         <input id="barcode-manual-input" placeholder="O escribilo a mano…" style="flex:1; padding:11px 14px; border-radius:12px; background:var(--glass); border:1px solid var(--glass-bd); color:var(--cream); outline:none;" onkeydown="if(event.key==='Enter') submitManualBarcode()">
         <button class="btn-secondary" style="flex:none; padding:0 16px;" onclick="submitManualBarcode()">Usar</button>
       </div>
+      <div id="barcode-debug" style="margin-top:8px; font-size:10px; color:rgba(255,255,255,0.35); word-break:break-word;"></div>
       <button class="btn-secondary" style="width:100%; margin-top:8px;" onclick="closeBarcodeScannerModal()">${closeLabel}</button>
     </div>`;
 }
@@ -5153,33 +5154,48 @@ function setBarcodeStatus(msg){
   const status = document.getElementById('barcode-scan-status');
   if(status) status.textContent = msg;
 }
+// Diagnóstico temporal: vamos por la tercera vuelta tratando de resolver
+// la pantalla negra en iPhone a ciegas (sin poder probar en el dispositivo
+// acá), así que en vez de adivinar de nuevo, esto deja un rastro de texto
+// visible en el propio modal (motor usado, si getUserMedia respondió, qué
+// tamaño de frame llegó) para diagnosticar con datos reales la próxima vez.
+// Sacar esto una vez que el escaneo funcione andando bien.
+function appendBarcodeDebug(msg){
+  const el = document.getElementById('barcode-debug');
+  if(el) el.textContent += (el.textContent?' | ':'') + msg;
+}
 function startBarcodeCamera(){
-  // Resguardo universal: sea cual sea el lector que termine usándose
-  // (nativo o ZXing), en cuanto el <video> tenga metadata forzamos play().
-  // Safari/iPhone no tiene BarcodeDetector, así que ahí SIEMPRE se usa el
-  // lector ZXing — sin este listener, el fix de pantalla negra que se
-  // aplicaba solo al lector nativo nunca corría en iPhone.
   const video = document.getElementById('barcode-video');
-  if(video) video.addEventListener('loadedmetadata', ()=>{ video.play().catch(()=>{}); });
+  if(video){
+    video.addEventListener('loadedmetadata', ()=>{
+      video.play().catch(e=>appendBarcodeDebug('play() rechazado: '+e.message));
+      appendBarcodeDebug('frame '+video.videoWidth+'x'+video.videoHeight);
+    });
+    video.addEventListener('error', ()=>appendBarcodeDebug('<video> error'));
+  }
+  appendBarcodeDebug('BarcodeDetector: '+(window.BarcodeDetector?'sí':'no'));
   // Si getSupportedFormats se cuelga o tarda de más en algún navegador
   // raro, no queremos dejar al usuario mirando una pantalla negra para
   // siempre — a los 2.5s probamos directo con ZXing.
   let decided = false;
-  const fallbackTimer = setTimeout(()=>{ if(!decided){ decided=true; startBarcodeCameraZXing(); } }, 2500);
+  const fallbackTimer = setTimeout(()=>{ if(!decided){ decided=true; appendBarcodeDebug('timeout formatos, uso ZXing'); startBarcodeCameraZXing(); } }, 2500);
   if(window.BarcodeDetector){
     BarcodeDetector.getSupportedFormats().then(supported=>{
       if(decided) return; decided=true; clearTimeout(fallbackTimer);
       const wanted = BARCODE_FORMATS_NATIVE.filter(f=>supported.includes(f));
+      appendBarcodeDebug('formatos soportados: '+supported.join(','));
       if(wanted.length) startBarcodeCameraNative(wanted); else startBarcodeCameraZXing();
-    }).catch(()=>{ if(decided) return; decided=true; clearTimeout(fallbackTimer); startBarcodeCameraZXing(); });
+    }).catch(e=>{ if(decided) return; decided=true; clearTimeout(fallbackTimer); appendBarcodeDebug('getSupportedFormats falló: '+e.message); startBarcodeCameraZXing(); });
   } else {
     decided = true; clearTimeout(fallbackTimer);
     startBarcodeCameraZXing();
   }
 }
 function startBarcodeCameraNative(formats){
+  appendBarcodeDebug('motor: nativo');
   const video = document.getElementById('barcode-video');
   navigator.mediaDevices.getUserMedia({ video:{ facingMode:'environment', width:{ideal:1920}, height:{ideal:1080} } }).then(stream=>{
+    appendBarcodeDebug('getUserMedia ok, tracks: '+stream.getVideoTracks().length);
     _barcodeStream = stream;
     video.srcObject = stream;
     // Sin este play() explícito, en varios navegadores de celular el
@@ -5195,14 +5211,17 @@ function startBarcodeCameraNative(formats){
         }).catch(()=>{});
       }, 180);
     }catch(e){
+      appendBarcodeDebug('BarcodeDetector constructor falló: '+e.message);
       pauseBarcodeCamera();
       startBarcodeCameraZXing();
     }
-  }).catch(err=>{ setBarcodeStatus('No se pudo abrir la cámara: '+(err.message||err)); });
+  }).catch(err=>{ appendBarcodeDebug('getUserMedia falló: '+err.name); setBarcodeStatus('No se pudo abrir la cámara: '+(err.message||err)); });
 }
 function startBarcodeCameraZXing(){
+  appendBarcodeDebug('motor: ZXing');
   const video = document.getElementById('barcode-video');
   loadZXingLib().then(()=>{
+    appendBarcodeDebug('ZXing lib cargada');
     const F = ZXingBrowser.BarcodeFormat;
     const hints = new Map();
     hints.set(ZXingBrowser.DecodeHintType.POSSIBLE_FORMATS, [
@@ -5213,9 +5232,9 @@ function startBarcodeCameraZXing(){
       { video: { facingMode: 'environment', width:{ideal:1920}, height:{ideal:1080} } },
       video,
       (result)=>{ if(result) onBarcodeDetected(result.getText()); }
-    ).then(controls=>{ _zxingControls = controls; })
-    .catch(err=>{ setBarcodeStatus('No se pudo abrir la cámara: '+(err.message||err)); });
-  }).catch(err=>{ setBarcodeStatus(err.message); });
+    ).then(controls=>{ _zxingControls = controls; appendBarcodeDebug('decodeFromConstraints ok'); })
+    .catch(err=>{ appendBarcodeDebug('decodeFromConstraints falló: '+(err.name||'')+' '+err.message); setBarcodeStatus('No se pudo abrir la cámara: '+(err.message||err)); });
+  }).catch(err=>{ appendBarcodeDebug('carga de ZXing falló'); setBarcodeStatus(err.message); });
 }
 function pauseBarcodeCamera(){
   if(_barcodePollTimer){ clearInterval(_barcodePollTimer); _barcodePollTimer=null; }
