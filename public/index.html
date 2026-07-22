@@ -5044,110 +5044,163 @@ function saveProductModal(id){
 }
 
 /* ---------- ESCANEO DE CÓDIGO DE BARRAS ----------
-   Usa html5-qrcode (lee EAN-13/UPC/Code128/QR, etc.) cargada de un CDN al
-   vuelo, igual que ya se hace con xlsx.min.js/pdf.js — no queda instalada
-   en el proyecto, solo se descarga la primera vez que hace falta.
-   Dos formas de usarla:
-   - openBarcodeScannerModal(onResult): un solo escaneo, cierra sola y
+   Dos motores, en orden de preferencia:
+   1) BarcodeDetector nativo del navegador — donde existe (Chrome/Android
+      sobre todo) usa el decodificador de códigos del sistema operativo
+      (Play Services Barcode API en Android), mucho más preciso y rápido
+      que cualquier librería en JS. No hace falta cargar nada.
+   2) @zxing/browser por CDN como respaldo en navegadores sin soporte
+      nativo (desktop, iOS Safari). Es el mismo motor de decodificación
+      que usan la mayoría de las libs de escaneo web, incluida la que se
+      había probado antes acá y no leía bien los códigos de barras.
+   En los dos casos se pide explícito qué formatos buscar (EAN/UPC/Code128
+   para productos de supermercado + QR) para que no pierda tiempo
+   probando formatos que no van a aparecer.
+   Además hay un campo para escribir el código a mano por si la cámara
+   sigue sin leerlo (mala luz, código dañado, etc).
+
+   openBarcodeScannerModal(onResult): un solo escaneo, cierra sola y
      devuelve el código (para el campo del modal de producto).
-   - openBulkBarcodeScanner(): cámara continua — cada código escaneado
-     pausa la cámara, te deja elegir a qué producto del catálogo pertenece,
-     lo guarda, y sigue escaneando sin volver a abrir nada. Pensada para
-     sentarse a cargar todo el stock de una sentada. */
-let _html5QrcodeLoadPromise = null;
-function loadHtml5QrcodeLib(){
-  if(window.Html5Qrcode) return Promise.resolve();
-  if(_html5QrcodeLoadPromise) return _html5QrcodeLoadPromise;
-  _html5QrcodeLoadPromise = new Promise((resolve, reject)=>{
-    const s = document.createElement('script');
-    s.src = 'https://unpkg.com/html5-qrcode@2.3.8/html5-qrcode.min.js';
-    s.onload = ()=>resolve();
-    s.onerror = ()=>{ _html5QrcodeLoadPromise=null; reject(new Error('No se pudo cargar el lector de códigos')); };
-    document.head.appendChild(s);
-  });
-  return _html5QrcodeLoadPromise;
-}
-let _barcodeScanner = null;
+   openBulkBarcodeScanner(): cámara continua — cada código escaneado
+     pausa la cámara, te deja elegir a qué producto del catálogo
+     pertenece, lo guarda, y sigue escaneando sin volver a abrir nada. */
+const BARCODE_FORMATS_NATIVE = ['ean_13','ean_8','upc_a','upc_e','code_128','code_39','codabar','itf','qr_code'];
 let _barcodeScanOnResult = null;
 let _barcodeScanMode = 'single'; // 'single' | 'bulk'
+let _barcodeStream = null;
+let _barcodePollTimer = null;
+let _zxingControls = null;
+let _zxingLoadPromise = null;
 
+function scannerModalHTML(title, bodyExtra, closeLabel){
+  return `
+    <div class="modal-sheet" style="padding-bottom:20px;">
+      <div class="modal-handle"></div>
+      <h3 class="modal-title">${title}</h3>
+      <div style="position:relative; border-radius:14px; overflow:hidden; background:#000; min-height:260px;">
+        <video id="barcode-video" autoplay playsinline muted style="width:100%; max-height:320px; display:block; object-fit:cover;"></video>
+        <div style="position:absolute; top:50%; left:50%; transform:translate(-50%,-50%); width:80%; height:100px; border:2px solid var(--gold); border-radius:10px; pointer-events:none;"></div>
+      </div>
+      ${bodyExtra}
+      <div style="display:flex; gap:8px; margin-top:10px;">
+        <input id="barcode-manual-input" placeholder="O escribilo a mano…" style="flex:1; padding:11px 14px; border-radius:12px; background:var(--glass); border:1px solid var(--glass-bd); color:var(--cream); outline:none;" onkeydown="if(event.key==='Enter') submitManualBarcode()">
+        <button class="btn-secondary" style="flex:none; padding:0 16px;" onclick="submitManualBarcode()">Usar</button>
+      </div>
+      <button class="btn-secondary" style="width:100%; margin-top:8px;" onclick="closeBarcodeScannerModal()">${closeLabel}</button>
+    </div>`;
+}
 function openBarcodeScannerModal(onResult){
   _barcodeScanMode = 'single';
   _barcodeScanOnResult = onResult;
   const overlay = document.createElement("div");
   overlay.className = "modal-overlay";
   overlay.id = "barcode-scanner-overlay";
-  overlay.innerHTML = `
-    <div class="modal-sheet" style="padding-bottom:20px;">
-      <div class="modal-handle"></div>
-      <h3 class="modal-title">Escanear código de barras</h3>
-      <div id="barcode-reader" style="border-radius:14px; overflow:hidden; background:#000; min-height:260px;"></div>
-      <p id="barcode-scan-status" style="text-align:center; font-size:12.5px; color:rgba(255,255,255,0.5); margin:10px 0;">Apuntá la cámara al código de barras…</p>
-      <button class="btn-secondary" style="width:100%;" onclick="closeBarcodeScannerModal()">Cancelar</button>
-    </div>`;
+  overlay.innerHTML = scannerModalHTML(
+    'Escanear código de barras',
+    `<p id="barcode-scan-status" style="text-align:center; font-size:12.5px; color:rgba(255,255,255,0.5); margin:10px 0 0;">Apuntá la cámara al código de barras…</p>`,
+    'Cancelar'
+  );
   document.body.appendChild(overlay);
-  startBarcodeCamera(decodedText=>{
-    const cb = _barcodeScanOnResult;
-    closeBarcodeScannerModal();
-    if(cb) cb(decodedText);
-  });
+  startBarcodeCamera();
 }
 function openBulkBarcodeScanner(){
   _barcodeScanMode = 'bulk';
   const overlay = document.createElement("div");
   overlay.className = "modal-overlay";
   overlay.id = "barcode-scanner-overlay";
-  overlay.innerHTML = `
-    <div class="modal-sheet" style="padding-bottom:20px;">
-      <div class="modal-handle"></div>
-      <h3 class="modal-title">Escanear productos</h3>
-      <div id="barcode-reader" style="border-radius:14px; overflow:hidden; background:#000; min-height:260px;"></div>
-      <div id="barcode-scan-panel">
-        <p id="barcode-scan-status" style="text-align:center; font-size:12.5px; color:rgba(255,255,255,0.5); margin:10px 0;">Apuntá la cámara al código de barras del producto…</p>
-      </div>
-      <button class="btn-secondary" style="width:100%;" onclick="closeBarcodeScannerModal()">Listo, terminar</button>
-    </div>`;
+  overlay.innerHTML = scannerModalHTML(
+    'Escanear productos',
+    `<div id="barcode-scan-panel"><p id="barcode-scan-status" style="text-align:center; font-size:12.5px; color:rgba(255,255,255,0.5); margin:10px 0 0;">Apuntá la cámara al código de barras del producto…</p></div>`,
+    'Listo, terminar'
+  );
   document.body.appendChild(overlay);
-  startBarcodeCamera(decodedText=>{
-    if(_barcodeScanner) _barcodeScanner.pause(true);
-    showBarcodeAssignPanel(decodedText);
-  });
+  startBarcodeCamera();
 }
-function startBarcodeCamera(onSuccess){
-  loadHtml5QrcodeLib().then(()=>{
-    // Sin formatsToSupport, la librería prioriza QR y a veces no reconoce
-    // bien códigos de barras 1D (EAN/UPC/Code128) — los pedimos explícito.
-    // El recuadro de lectura además se hace rectangular y ancho en vez de
-    // cuadrado, porque un código de barras es horizontal y angosto.
-    const formats = window.Html5QrcodeSupportedFormats ? [
-      Html5QrcodeSupportedFormats.EAN_13, Html5QrcodeSupportedFormats.EAN_8,
-      Html5QrcodeSupportedFormats.UPC_A, Html5QrcodeSupportedFormats.UPC_E,
-      Html5QrcodeSupportedFormats.CODE_128, Html5QrcodeSupportedFormats.CODE_39,
-      Html5QrcodeSupportedFormats.CODE_93, Html5QrcodeSupportedFormats.ITF,
-      Html5QrcodeSupportedFormats.CODABAR, Html5QrcodeSupportedFormats.QR_CODE,
-    ] : undefined;
-    _barcodeScanner = new Html5Qrcode("barcode-reader", formats ? { formatsToSupport: formats, verbose: false } : undefined);
-    _barcodeScanner.start(
-      { facingMode: "environment" },
-      { fps: 10, qrbox: { width: 280, height: 130 }, aspectRatio: 1.5 },
-      onSuccess,
-      ()=>{} // frame sin código legible todavía — no es un error real, se ignora
-    ).catch(err=>{
-      const status = document.getElementById('barcode-scan-status');
-      if(status) status.textContent = 'No se pudo abrir la cámara: '+(err.message||err);
-    });
-  }).catch(err=>{
-    const status = document.getElementById('barcode-scan-status');
-    if(status) status.textContent = err.message;
+function onBarcodeDetected(code){
+  if(!code) return;
+  if(_barcodeScanMode==='bulk'){
+    pauseBarcodeCamera();
+    showBarcodeAssignPanel(code);
+  } else {
+    const cb = _barcodeScanOnResult;
+    closeBarcodeScannerModal();
+    if(cb) cb(code);
+  }
+}
+function submitManualBarcode(){
+  const input = document.getElementById('barcode-manual-input');
+  const val = input ? input.value.trim() : '';
+  if(!val){ toast('Escribí un código primero', 'err'); return; }
+  onBarcodeDetected(val);
+}
+function loadZXingLib(){
+  if(window.ZXingBrowser) return Promise.resolve();
+  if(_zxingLoadPromise) return _zxingLoadPromise;
+  _zxingLoadPromise = new Promise((resolve, reject)=>{
+    const s = document.createElement('script');
+    s.src = 'https://unpkg.com/@zxing/browser@0.1.5';
+    s.onload = ()=>resolve();
+    s.onerror = ()=>{ _zxingLoadPromise=null; reject(new Error('No se pudo cargar el lector de respaldo')); };
+    document.head.appendChild(s);
   });
+  return _zxingLoadPromise;
+}
+function setBarcodeStatus(msg){
+  const status = document.getElementById('barcode-scan-status');
+  if(status) status.textContent = msg;
+}
+function startBarcodeCamera(){
+  if(window.BarcodeDetector){
+    BarcodeDetector.getSupportedFormats().then(supported=>{
+      const wanted = BARCODE_FORMATS_NATIVE.filter(f=>supported.includes(f));
+      if(wanted.length) startBarcodeCameraNative(wanted);
+      else startBarcodeCameraZXing();
+    }).catch(()=>startBarcodeCameraZXing());
+  } else {
+    startBarcodeCameraZXing();
+  }
+}
+function startBarcodeCameraNative(formats){
+  const video = document.getElementById('barcode-video');
+  navigator.mediaDevices.getUserMedia({ video:{ facingMode:'environment', width:{ideal:1920}, height:{ideal:1080} } }).then(stream=>{
+    _barcodeStream = stream;
+    video.srcObject = stream;
+    const detector = new BarcodeDetector({formats});
+    _barcodePollTimer = setInterval(()=>{
+      if(!video || video.readyState < 2) return;
+      detector.detect(video).then(codes=>{
+        if(codes && codes.length) onBarcodeDetected(codes[0].rawValue);
+      }).catch(()=>{});
+    }, 180);
+  }).catch(err=>{ setBarcodeStatus('No se pudo abrir la cámara: '+(err.message||err)); });
+}
+function startBarcodeCameraZXing(){
+  const video = document.getElementById('barcode-video');
+  loadZXingLib().then(()=>{
+    const F = ZXingBrowser.BarcodeFormat;
+    const hints = new Map();
+    hints.set(ZXingBrowser.DecodeHintType.POSSIBLE_FORMATS, [
+      F.EAN_13, F.EAN_8, F.UPC_A, F.UPC_E, F.CODE_128, F.CODE_39, F.CODABAR, F.ITF, F.QR_CODE,
+    ]);
+    const codeReader = new ZXingBrowser.BrowserMultiFormatReader(hints);
+    codeReader.decodeFromConstraints(
+      { video: { facingMode: 'environment', width:{ideal:1920}, height:{ideal:1080} } },
+      video,
+      (result)=>{ if(result) onBarcodeDetected(result.getText()); }
+    ).then(controls=>{ _zxingControls = controls; })
+    .catch(err=>{ setBarcodeStatus('No se pudo abrir la cámara: '+(err.message||err)); });
+  }).catch(err=>{ setBarcodeStatus(err.message); });
+}
+function pauseBarcodeCamera(){
+  if(_barcodePollTimer){ clearInterval(_barcodePollTimer); _barcodePollTimer=null; }
+  if(_zxingControls){ try{ _zxingControls.stop(); }catch(e){} _zxingControls=null; }
+  if(_barcodeStream){ _barcodeStream.getTracks().forEach(t=>t.stop()); _barcodeStream=null; }
+  const video = document.getElementById('barcode-video');
+  if(video) video.srcObject = null;
 }
 function closeBarcodeScannerModal(){
+  pauseBarcodeCamera();
   const el = document.getElementById("barcode-scanner-overlay");
-  const scanner = _barcodeScanner;
-  _barcodeScanner = null;
-  if(scanner){
-    scanner.stop().then(()=>scanner.clear()).catch(()=>{});
-  }
   if(el) el.remove();
 }
 function showBarcodeAssignPanel(code){
@@ -5187,7 +5240,7 @@ function assignBarcodeAndResume(productId, code){
 function resumeBarcodeScan(){
   const panel = document.getElementById('barcode-scan-panel');
   if(panel) panel.innerHTML = `<p id="barcode-scan-status" style="text-align:center; font-size:12.5px; color:rgba(255,255,255,0.5); margin:10px 0;">Apuntá la cámara al código de barras del producto…</p>`;
-  if(_barcodeScanner) _barcodeScanner.resume();
+  startBarcodeCamera();
 }
 function updateProductBarcode(id, code, skipConfirm){
   const p = state.products.find(pr=>pr.id===id);
