@@ -1,0 +1,528 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+<title>Sabores Royal — Caja</title>
+<style>
+:root {
+  --navy: #0f1c45;
+  --navy2: #1a2a5e;
+  --navy3: #22357a;
+  --gold: #c5a028;
+  --gold2: #e0bb4a;
+  --ok: #3ecf8e;
+  --danger: #e5566d;
+  --warn: #e0a83c;
+  --glass: rgba(255,255,255,.06);
+  --glass2: rgba(255,255,255,.10);
+  --bd: rgba(255,255,255,.12);
+  --muted: rgba(255,255,255,.45);
+  --text: #f0f2ff;
+}
+*, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+html, body {
+  height: 100%;
+  background: var(--navy);
+  color: var(--text);
+  font-family: system-ui, -apple-system, sans-serif;
+  font-size: 16px;
+  overscroll-behavior: none;
+}
+#app { min-height: 100vh; display: flex; flex-direction: column; }
+button { font-family: inherit; cursor: pointer; border: none; background: none; color: inherit; }
+input { font-family: inherit; }
+
+/* ── TOPBAR ── */
+.topbar {
+  display: flex; align-items: center; gap: 14px;
+  padding: 12px 20px; background: rgba(15,28,69,.9);
+  border-bottom: 1px solid var(--bd);
+}
+.topbar .caja-badge {
+  background: var(--gold); color: #000; font-weight: 800;
+  padding: 5px 12px; border-radius: 8px; font-size: 14px;
+}
+.topbar .cajero-name { font-weight: 700; color: var(--gold2); }
+.topbar .spacer { flex: 1; }
+.topbar button {
+  background: var(--glass); border: 1px solid var(--bd); border-radius: 8px;
+  padding: 8px 14px; font-size: 13px; color: var(--text);
+}
+.topbar button:hover { background: var(--glass2); }
+
+/* ── SELECT CAJA / LOGIN screens ── */
+.center-wrap {
+  flex: 1; display: flex; flex-direction: column; align-items: center;
+  justify-content: center; padding: 24px; gap: 22px;
+}
+.center-wrap h1 { font-size: 22px; color: var(--gold2); text-align: center; }
+.big-choice-row { display: flex; gap: 16px; flex-wrap: wrap; justify-content: center; }
+.big-choice {
+  background: var(--glass); border: 1px solid var(--bd); border-radius: 16px;
+  padding: 26px 40px; font-size: 20px; font-weight: 700; color: var(--text);
+  min-width: 160px; text-align: center;
+}
+.big-choice:hover { background: var(--glass2); border-color: var(--gold); }
+
+.pin-dots { display: flex; gap: 14px; margin: 6px 0 4px; }
+.pin-dot {
+  width: 18px; height: 18px; border-radius: 50%; border: 2px solid var(--bd);
+}
+.pin-dot.filled { background: var(--gold); border-color: var(--gold); }
+.keypad { display: grid; grid-template-columns: repeat(3, 74px); gap: 12px; }
+.keypad button {
+  width: 74px; height: 60px; border-radius: 12px; background: var(--glass);
+  border: 1px solid var(--bd); font-size: 22px; font-weight: 700;
+}
+.keypad button:active { background: var(--glass2); }
+.keypad button.wide { grid-column: span 1; font-size: 14px; color: var(--muted); }
+.pin-error { color: var(--danger); font-size: 13px; min-height: 18px; }
+
+/* ── VENTA screen ── */
+.venta-wrap { flex: 1; display: flex; flex-direction: column; padding: 16px 20px 20px; gap: 14px; max-width: 900px; margin: 0 auto; width: 100%; }
+.scan-box {
+  display: flex; gap: 10px;
+}
+.scan-box input {
+  flex: 1; background: var(--glass2); border: 2px solid var(--bd); border-radius: 12px;
+  padding: 16px 18px; color: var(--text); font-size: 20px; outline: none;
+}
+.scan-box input:focus { border-color: var(--gold); }
+.search-results {
+  background: var(--navy2); border: 1px solid var(--bd); border-radius: 10px;
+  max-height: 260px; overflow-y: auto; display: none;
+}
+.search-results.show { display: block; }
+.search-row {
+  display: flex; justify-content: space-between; align-items: center;
+  padding: 10px 14px; border-bottom: 1px solid var(--bd); font-size: 14px;
+}
+.search-row:last-child { border-bottom: none; }
+.search-row:hover { background: var(--glass2); }
+.search-row .sr-stock { font-size: 11px; color: var(--muted); }
+.search-row .sr-stock.low { color: var(--warn); }
+.search-row .sr-stock.none { color: var(--danger); }
+
+.cart-wrap { flex: 1; overflow-y: auto; background: var(--glass); border: 1px solid var(--bd); border-radius: 12px; }
+.cart-empty { text-align: center; padding: 40px 20px; color: var(--muted); font-size: 14px; }
+.cart-row {
+  display: flex; align-items: center; gap: 10px; padding: 12px 14px;
+  border-bottom: 1px solid var(--bd);
+}
+.cart-row:last-child { border-bottom: none; }
+.cart-row .cr-name { flex: 1; font-size: 14px; font-weight: 600; }
+.cart-row .cr-unit { font-size: 11px; color: var(--muted); }
+.cart-row .cr-qty-ctl { display: flex; align-items: center; gap: 6px; }
+.cart-row .cr-qty-ctl button {
+  width: 28px; height: 28px; border-radius: 8px; background: var(--glass2);
+  border: 1px solid var(--bd); font-size: 16px; font-weight: 700;
+}
+.cart-row .cr-qty-ctl span { min-width: 22px; text-align: center; font-weight: 700; }
+.cart-row .cr-total { min-width: 90px; text-align: right; font-weight: 700; }
+.cart-row .cr-del { color: var(--danger); font-size: 18px; padding: 4px 6px; }
+
+.totals-bar { display: flex; justify-content: space-between; align-items: baseline; padding: 4px 4px; }
+.totals-bar .tb-label { color: var(--muted); font-size: 14px; }
+.totals-bar .tb-value { font-size: 26px; font-weight: 800; color: var(--gold2); }
+
+.pay-methods { display: grid; grid-template-columns: repeat(4, 1fr); gap: 8px; }
+.pay-methods button {
+  background: var(--glass); border: 1.5px solid var(--bd); border-radius: 10px;
+  padding: 12px 6px; font-size: 12px; font-weight: 700; color: var(--text);
+}
+.pay-methods button.active { background: var(--gold); color: #000; border-color: var(--gold); }
+
+.btn-cobrar {
+  background: var(--ok); color: #06281a; font-weight: 800; font-size: 18px;
+  padding: 16px; border-radius: 12px; text-align: center;
+}
+.btn-cobrar:disabled { opacity: .4; }
+.btn-cobrar:active { transform: scale(.98); }
+
+.banner { border-radius: 10px; padding: 10px 14px; font-size: 13px; font-weight: 600; }
+.banner.err { background: rgba(229,86,109,.15); border: 1px solid rgba(229,86,109,.3); color: var(--danger); }
+.banner.ok { background: rgba(62,207,142,.15); border: 1px solid rgba(62,207,142,.3); color: var(--ok); }
+
+/* ── RESUMEN DEL DIA modal ── */
+.modal-bg {
+  position: fixed; inset: 0; background: rgba(5,10,30,.8); z-index: 200;
+  display: flex; align-items: center; justify-content: center; padding: 20px;
+}
+.modal {
+  width: 100%; max-width: 480px; max-height: 82vh; overflow-y: auto;
+  background: var(--navy2); border-radius: 18px; padding: 20px;
+}
+.modal h2 { color: var(--gold2); font-size: 17px; margin-bottom: 14px; }
+.sale-row { display: flex; justify-content: space-between; padding: 9px 0; border-bottom: 1px solid var(--bd); font-size: 13px; }
+.sale-row:last-child { border-bottom: none; }
+.sale-row .s-time { color: var(--muted); }
+.sale-row .s-pay { font-size: 10px; text-transform: uppercase; color: var(--gold2); }
+.modal .close-btn { margin-top: 14px; width: 100%; background: var(--glass); border: 1px solid var(--bd); border-radius: 10px; padding: 10px; }
+
+#toast {
+  position: fixed; bottom: 24px; left: 50%; transform: translateX(-50%);
+  padding: 12px 22px; border-radius: 12px; font-size: 14px; font-weight: 600;
+  opacity: 0; transition: opacity .2s; z-index: 999; pointer-events: none; color: #fff;
+}
+#toast.show { opacity: 1; }
+</style>
+</head>
+<body>
+<div id="app"></div>
+<div id="toast"></div>
+<div id="modal-root"></div>
+
+<script>
+'use strict';
+
+/* ── SUPABASE — mismo proyecto que Sabores Royal, sin login de admin:
+   el cajero se identifica por PIN, no por sesión. Archivo standalone,
+   solo comparte la base de datos (mismo criterio que caja-diaria.html). ── */
+const SUPABASE_KEY = 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6InRvcGd1bndlcWV6dGVkaGh0aGJsIiwicm9sZSI6ImFub24iLCJpYXQiOjE3ODI3NDczMjgsImV4cCI6MjA5ODMyMzMyOH0.KfZ8f8GlKoQoRxdPk-lrNDSTRcjd21z6d8CgITHf3WU';
+const SUPABASE_URL = (()=>{ try{ const r=JSON.parse(atob(SUPABASE_KEY.split('.')[1])).ref; return 'https://'+r+'.supabase.co'; }catch(e){ return 'https://topgunweqeztedhhthbl.supabase.co'; } })();
+
+async function posFetch(path, method, body, prefer){
+  const headers = {'Content-Type':'application/json','apikey':SUPABASE_KEY,'Authorization':'Bearer '+SUPABASE_KEY};
+  if(prefer) headers['Prefer'] = prefer;
+  const res = await fetch(SUPABASE_URL + '/rest/v1' + path, { method: method||'GET', headers, body: body?JSON.stringify(body):undefined });
+  const text = await res.text();
+  if(!res.ok){ let err; try{ err=JSON.parse(text); }catch(e){ err={message:text}; } throw new Error(err.message || 'HTTP '+res.status); }
+  return text ? JSON.parse(text) : null;
+}
+
+/* ── STATE ── */
+let screen = 'loading'; // loading | select-caja | login | venta
+let caja = localStorage.getItem('pos_caja') || null;
+let posConfig = { cajeros: [] };
+let fiscal = { razonSocial:'Sabores Royal SRL', cuit:'30-71698572-1', domicilio:'Maipú 734, Rosario' };
+let cajero = null;
+let pinBuffer = '';
+let pinError = '';
+let products = [];
+let cart = []; // [{id,name,price,qty,barcode}]
+let payMethod = null;
+let searchQuery = '';
+let submitting = false;
+let saleError = '';
+
+function render(){
+  const el = document.getElementById('app');
+  if(screen === 'loading') el.innerHTML = `<div class="center-wrap"><h1>Cargando…</h1></div>`;
+  else if(screen === 'select-caja') el.innerHTML = renderSelectCaja();
+  else if(screen === 'login') el.innerHTML = renderLogin();
+  else if(screen === 'venta') el.innerHTML = renderVenta();
+  if(screen === 'venta'){
+    const inp = document.getElementById('scan-input');
+    if(inp) inp.focus();
+  }
+}
+
+function toast(msg, type){
+  const t = document.getElementById('toast');
+  t.textContent = msg;
+  t.style.background = type==='err' ? '#c0392b' : type==='ok' ? '#1e7e34' : '#8a6800';
+  t.className = 'show';
+  clearTimeout(toast._t);
+  toast._t = setTimeout(()=>{ t.className=''; }, 2600);
+}
+
+/* ── SELECT CAJA ── */
+function renderSelectCaja(){
+  return `<div class="center-wrap">
+    <h1>¿Esta computadora es Caja 1 o Caja 2?</h1>
+    <div class="big-choice-row">
+      <button class="big-choice" onclick="chooseCaja('Caja 1')">Caja 1</button>
+      <button class="big-choice" onclick="chooseCaja('Caja 2')">Caja 2</button>
+    </div>
+  </div>`;
+}
+function chooseCaja(c){
+  caja = c;
+  localStorage.setItem('pos_caja', c);
+  screen = 'login';
+  render();
+}
+
+/* ── LOGIN POR PIN ── */
+function renderLogin(){
+  if(!cajero){
+    const cajeros = posConfig.cajeros || [];
+    if(!cajeros.length){
+      return `<div class="center-wrap"><h1>No hay cajeros configurados</h1>
+        <p style="color:var(--muted); font-size:13px; text-align:center; max-width:320px;">
+          Agregalos desde el panel de administración, en Configuración.
+        </p></div>`;
+    }
+    return `<div class="center-wrap">
+      <h1>¿Quién está en ${cajaEsc()}?</h1>
+      <div class="big-choice-row">
+        ${cajeros.map(c=>`<button class="big-choice" onclick="pickCajero('${escAttr(c.nombre)}')">${esc(c.nombre)}</button>`).join('')}
+      </div>
+    </div>`;
+  }
+  return `<div class="center-wrap">
+    <h1>PIN de ${esc(cajero)}</h1>
+    <div class="pin-dots">${[0,1,2,3].map(i=>`<div class="pin-dot ${i<pinBuffer.length?'filled':''}"></div>`).join('')}</div>
+    <div class="pin-error">${esc(pinError)}</div>
+    <div class="keypad">
+      ${[1,2,3,4,5,6,7,8,9].map(n=>`<button onclick="pinPress('${n}')">${n}</button>`).join('')}
+      <button class="wide" onclick="pinCancel()">Volver</button>
+      <button onclick="pinPress('0')">0</button>
+      <button class="wide" onclick="pinBackspace()">&larr;</button>
+    </div>
+  </div>`;
+}
+function pickCajero(name){ cajero = name; pinBuffer=''; pinError=''; render(); }
+function pinCancel(){ cajero = null; pinBuffer=''; pinError=''; render(); }
+function pinPress(d){
+  if(pinBuffer.length >= 4) return;
+  pinBuffer += d;
+  pinError = '';
+  render();
+  if(pinBuffer.length === 4) checkPin();
+}
+function pinBackspace(){ pinBuffer = pinBuffer.slice(0,-1); render(); }
+function checkPin(){
+  const rec = (posConfig.cajeros||[]).find(c=>c.nombre===cajero);
+  if(rec && rec.pin === pinBuffer){
+    screen = 'venta';
+    render();
+  } else {
+    pinError = 'PIN incorrecto';
+    pinBuffer = '';
+    render();
+  }
+}
+function cambiarCajero(){ cajero = null; pinBuffer=''; pinError=''; screen='login'; cart=[]; payMethod=null; render(); }
+function cambiarCaja(){
+  if(!confirm('¿Cambiar la caja configurada en esta computadora?')) return;
+  localStorage.removeItem('pos_caja');
+  caja = null; cajero = null; cart = []; payMethod = null;
+  screen = 'select-caja';
+  render();
+}
+
+/* ── VENTA ── */
+function cajaEsc(){ return esc(caja||''); }
+
+function renderVenta(){
+  const filtered = filterProducts();
+  return `
+    <div class="topbar">
+      <span class="caja-badge">${cajaEsc()}</span>
+      <span class="cajero-name">${esc(cajero)}</span>
+      <div class="spacer"></div>
+      <button onclick="openResumenDia()">Ventas de hoy</button>
+      <button onclick="cambiarCajero()">Cambiar cajero</button>
+      <button onclick="cambiarCaja()" title="Cambiar caja" style="opacity:.5;">⚙</button>
+    </div>
+    <div class="venta-wrap">
+      ${saleError ? `<div class="banner err">${esc(saleError)}</div>` : ''}
+      <div class="scan-box">
+        <input id="scan-input" placeholder="Escaneá o escribí para buscar..." value="${escAttr(searchQuery)}"
+          oninput="onSearchInput(this.value)"
+          onkeydown="onScanKeydown(event)" autocomplete="off">
+      </div>
+      <div class="search-results ${searchQuery.length>=2 && filtered.length ? 'show':''}">
+        ${filtered.slice(0,30).map(p=>{
+          const stockCls = p.stock<=0 ? 'none' : p.stock<=5 ? 'low' : '';
+          return `<div class="search-row" onclick="addToCart(${p.id})">
+            <div><div>${esc(p.name)}</div><div class="sr-stock ${stockCls}">Stock: ${p.stock}</div></div>
+            <div>${money(p.price)}</div>
+          </div>`;
+        }).join('')}
+      </div>
+      <div class="cart-wrap">
+        ${cart.length===0 ? `<div class="cart-empty">Carrito vacío — escaneá un producto o buscalo arriba</div>` :
+          cart.map((it,i)=>`<div class="cart-row">
+            <div class="cr-name">${esc(it.name)}<div class="cr-unit">${money(it.price)} c/u</div></div>
+            <div class="cr-qty-ctl">
+              <button onclick="changeQty(${i},-1)">-</button>
+              <span>${it.qty}</span>
+              <button onclick="changeQty(${i},1)">+</button>
+            </div>
+            <div class="cr-total">${money(it.price*it.qty)}</div>
+            <button class="cr-del" onclick="removeFromCart(${i})">✕</button>
+          </div>`).join('')}
+      </div>
+      <div class="totals-bar">
+        <span class="tb-label">Total</span>
+        <span class="tb-value">${money(cartTotal())}</span>
+      </div>
+      <div class="pay-methods">
+        ${payMethodBtn('efectivo','Efectivo')}
+        ${payMethodBtn('debito','Débito')}
+        ${payMethodBtn('credito','Crédito')}
+        ${payMethodBtn('qr','QR / MP')}
+      </div>
+      <button class="btn-cobrar" ${(!cart.length || !payMethod || submitting) ? 'disabled' : ''} onclick="confirmSale()">
+        ${submitting ? 'Cobrando…' : 'Cobrar ' + money(cartTotal())}
+      </button>
+    </div>
+  `;
+}
+function payMethodBtn(key, label){
+  return `<button class="${payMethod===key?'active':''}" onclick="setPayMethod('${key}')">${label}</button>`;
+}
+function setPayMethod(m){ payMethod = m; render(); }
+
+function filterProducts(){
+  const q = norm(searchQuery);
+  if(q.length < 2) return [];
+  return products.filter(p => norm(p.name).includes(q)).slice(0,50);
+}
+function norm(s){ return String(s||'').toLowerCase().normalize('NFD').replace(/[̀-ͯ]/g,'').trim(); }
+
+function onSearchInput(v){
+  searchQuery = v;
+  saleError = '';
+  render();
+  const inp = document.getElementById('scan-input');
+  if(inp){ inp.focus(); inp.setSelectionRange(v.length, v.length); }
+}
+function onScanKeydown(ev){
+  if(ev.key !== 'Enter') return;
+  const raw = searchQuery.trim();
+  if(!raw) return;
+  const byBarcode = products.find(p => p.barcode && p.barcode === raw);
+  if(byBarcode){ addToCart(byBarcode.id); return; }
+  const matches = filterProducts();
+  if(matches.length === 1){ addToCart(matches[0].id); return; }
+  toast(matches.length ? 'Hay varias coincidencias, elegí de la lista' : 'No se encontró el producto', 'err');
+}
+function addToCart(id){
+  const p = products.find(x=>x.id===id);
+  if(!p) return;
+  const existing = cart.find(it=>it.id===id);
+  if(existing) existing.qty += 1;
+  else cart.push({id:p.id, name:p.name, price:p.price, qty:1, barcode:p.barcode||''});
+  searchQuery = '';
+  saleError = '';
+  render();
+}
+function changeQty(i, delta){
+  cart[i].qty += delta;
+  if(cart[i].qty <= 0) cart.splice(i,1);
+  render();
+}
+function removeFromCart(i){ cart.splice(i,1); render(); }
+function cartTotal(){ return cart.reduce((s,it)=>s+it.price*it.qty,0); }
+function money(n){ return '$' + Number(n||0).toLocaleString('es-AR',{minimumFractionDigits:2,maximumFractionDigits:2}); }
+
+async function confirmSale(){
+  if(!cart.length || !payMethod || submitting) return;
+  submitting = true; saleError=''; render();
+  const items = cart.map(it=>({id:it.id, name:it.name, qty:it.qty, price:it.price, lineTotal:it.price*it.qty, barcode:it.barcode}));
+  const subtotal = cartTotal();
+  try{
+    const rows = await posFetch('/rpc/create_pos_sale', 'POST', {
+      p_caja: caja, p_cajero: cajero, p_items: items,
+      p_subtotal: subtotal, p_total: subtotal, p_payment_method: payMethod
+    }, 'return=representation');
+    const sale = Array.isArray(rows) ? rows[0] : rows;
+    cart.forEach(it=>{ const p = products.find(x=>x.id===it.id); if(p) p.stock -= it.qty; });
+    printTicket(sale || {id:'', items, total:subtotal, payment_method:payMethod, created_at:new Date().toISOString()});
+    cart = []; payMethod = null;
+    toast('Venta cobrada', 'ok');
+  }catch(e){
+    const m = String(e.message||'');
+    if(m.startsWith('sin_stock:')) saleError = 'Sin stock suficiente: ' + m.slice(10);
+    else saleError = 'Error al cobrar: ' + m;
+    toast(saleError, 'err');
+  }finally{
+    submitting = false; render();
+  }
+}
+
+/* ── TICKET NO FISCAL ── */
+function printTicket(sale){
+  const win = window.open('', '_blank', 'width=380,height=600');
+  if(!win) return;
+  const items = sale.items || [];
+  const fecha = new Date(sale.created_at || Date.now()).toLocaleString('es-AR');
+  const payLabels = {efectivo:'Efectivo', debito:'Débito', credito:'Crédito', qr:'QR / Mercado Pago'};
+  win.document.write(`<!DOCTYPE html><html lang="es"><head><meta charset="UTF-8"><title>Ticket</title>
+    <style>
+      body{font-family:'DM Sans',Arial,sans-serif; color:#111; padding:16px; font-size:13px; max-width:320px; margin:0 auto;}
+      h2{font-size:15px; text-align:center; margin-bottom:2px;}
+      p{font-size:11px; text-align:center; color:#444; margin:0 0 2px;}
+      .line{border-top:1px dashed #999; margin:10px 0;}
+      table{width:100%; border-collapse:collapse;}
+      td{font-size:12px; padding:3px 0;}
+      .tot{font-weight:800; font-size:15px;}
+      .foot{margin-top:14px; text-align:center; font-size:10px; color:#666;}
+    </style></head><body>
+    <h2>${esc(fiscal.razonSocial)}</h2>
+    <p>${esc(fiscal.domicilio)}</p>
+    <p>CUIT: ${esc(fiscal.cuit)}</p>
+    <p>${esc(caja)} · ${esc(cajero)} · ${esc(fecha)}</p>
+    <div class="line"></div>
+    <table>
+      ${items.map(it=>`<tr><td>${it.qty} x ${esc(it.name)}</td><td style="text-align:right;">${money(it.lineTotal!=null?it.lineTotal:it.price*it.qty)}</td></tr>`).join('')}
+    </table>
+    <div class="line"></div>
+    <table><tr><td class="tot">TOTAL</td><td class="tot" style="text-align:right;">${money(sale.total)}</td></tr></table>
+    <p style="margin-top:6px;">Medio de pago: ${esc(payLabels[sale.payment_method]||sale.payment_method)}</p>
+    <div class="foot">Comprobante interno no válido como factura fiscal AFIP</div>
+    </body></html>`);
+  win.document.close();
+  setTimeout(()=>{ try{ win.print(); }catch(e){} }, 300);
+}
+
+/* ── RESUMEN DEL DIA ── */
+async function openResumenDia(){
+  const root = document.getElementById('modal-root');
+  root.innerHTML = `<div class="modal-bg" onclick="if(event.target===this) closeModal()"><div class="modal">
+    <h2>Ventas de hoy — ${cajaEsc()}</h2>
+    <div id="resumen-body">Cargando…</div>
+    <button class="close-btn" onclick="closeModal()">Cerrar</button>
+  </div></div>`;
+  try{
+    const todayStart = new Date(); todayStart.setHours(0,0,0,0);
+    const rows = await posFetch('/pos_sales?caja=eq.'+encodeURIComponent(caja)+'&created_at=gte.'+todayStart.toISOString()+'&order=created_at.desc&select=*');
+    const body = document.getElementById('resumen-body');
+    if(!body) return;
+    if(!rows.length){ body.innerHTML = `<p style="color:var(--muted); font-size:13px;">Todavía no hay ventas hoy en esta caja.</p>`; return; }
+    const total = rows.reduce((s,r)=>s+Number(r.total||0),0);
+    body.innerHTML = `<div style="margin-bottom:10px; font-weight:700; color:var(--gold2);">Total: ${money(total)} (${rows.length} venta${rows.length===1?'':'s'})</div>` +
+      rows.map(r=>`<div class="sale-row">
+        <span class="s-time">${new Date(r.created_at).toLocaleTimeString('es-AR',{hour:'2-digit',minute:'2-digit'})} · ${esc(r.cajero||'')}</span>
+        <span>${money(r.total)} <span class="s-pay">${esc(r.payment_method)}</span></span>
+      </div>`).join('');
+  }catch(e){
+    const body = document.getElementById('resumen-body');
+    if(body) body.innerHTML = `<p style="color:var(--danger); font-size:13px;">Error: ${esc(e.message)}</p>`;
+  }
+}
+function closeModal(){ document.getElementById('modal-root').innerHTML = ''; }
+
+/* ── HELPERS ── */
+function esc(s){ return String(s||'').replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;'); }
+function escAttr(s){ return esc(s).replace(/'/g,'&#39;'); }
+
+/* ── INIT ── */
+async function init(){
+  try{
+    const [settingsRows, productRows] = await Promise.all([
+      posFetch('/app_settings?setting_key=in.(pos_config,fiscal_config)&select=setting_key,setting_value'),
+      posFetch('/products?select=id,name,price,stock,barcode&order=name'),
+    ]);
+    (settingsRows||[]).forEach(row=>{
+      try{
+        const parsed = JSON.parse(row.setting_value);
+        if(row.setting_key === 'pos_config' && parsed && parsed.cajeros) posConfig = parsed;
+        if(row.setting_key === 'fiscal_config' && parsed) fiscal = Object.assign({}, fiscal, parsed);
+      }catch(e){}
+    });
+    products = (productRows||[]).map(p=>({id:p.id, name:p.name, price:Number(p.price)||0, stock:Number(p.stock)||0, barcode:p.barcode||''}));
+  }catch(e){
+    toast('No se pudo conectar: ' + e.message, 'err');
+  }
+  screen = caja ? 'login' : 'select-caja';
+  render();
+}
+init();
+</script>
+</body>
+</html>

@@ -650,6 +650,7 @@ let state = {
     ivaPorcentaje:21,
     aliasTransferencia:"SABORES.ROYAL.MAIPU",
   },
+  posConfig:{cajeros:[]},
   vouchers: [],
   voucherCounters:{factura:0, remito:0, ticket:0, presupuesto:0},
   suggestions: [],
@@ -933,7 +934,7 @@ function normalizeHomeBackground(parsed){
 }
 async function apiSyncContent(){
   try{
-    const data = await supaFetch('/app_settings?setting_key=in.(novedades,ofertas,banner_novedades,banner_ofertas,home_background,client_discounts,wholesale_clients,categories,store_config,fiscal_config,banners)&select=setting_key,setting_value', 'GET');
+    const data = await supaFetch('/app_settings?setting_key=in.(novedades,ofertas,banner_novedades,banner_ofertas,home_background,client_discounts,wholesale_clients,categories,store_config,fiscal_config,banners,pos_config)&select=setting_key,setting_value', 'GET');
     if(!data || data.length===0) return;
     let changed = false;
     data.forEach(row=>{
@@ -972,6 +973,9 @@ async function apiSyncContent(){
         if(row.setting_key==='fiscal_config' && parsed){
           const merged = Object.assign({}, state.fiscal, parsed);
           if(JSON.stringify(merged)!==JSON.stringify(state.fiscal)){ state.fiscal = merged; changed = true; }
+        }
+        if(row.setting_key==='pos_config' && parsed){
+          if(JSON.stringify(parsed)!==JSON.stringify(state.posConfig)){ state.posConfig = parsed; changed = true; }
         }
         if(row.setting_key==='client_discounts'){
           const discounts = parsed || {};
@@ -5150,13 +5154,19 @@ function setBarcodeStatus(msg){
   if(status) status.textContent = msg;
 }
 function startBarcodeCamera(){
+  // Si getSupportedFormats se cuelga o tarda de más en algún navegador
+  // raro, no queremos dejar al usuario mirando una pantalla negra para
+  // siempre — a los 2.5s probamos directo con ZXing.
+  let decided = false;
+  const fallbackTimer = setTimeout(()=>{ if(!decided){ decided=true; startBarcodeCameraZXing(); } }, 2500);
   if(window.BarcodeDetector){
     BarcodeDetector.getSupportedFormats().then(supported=>{
+      if(decided) return; decided=true; clearTimeout(fallbackTimer);
       const wanted = BARCODE_FORMATS_NATIVE.filter(f=>supported.includes(f));
-      if(wanted.length) startBarcodeCameraNative(wanted);
-      else startBarcodeCameraZXing();
-    }).catch(()=>startBarcodeCameraZXing());
+      if(wanted.length) startBarcodeCameraNative(wanted); else startBarcodeCameraZXing();
+    }).catch(()=>{ if(decided) return; decided=true; clearTimeout(fallbackTimer); startBarcodeCameraZXing(); });
   } else {
+    decided = true; clearTimeout(fallbackTimer);
     startBarcodeCameraZXing();
   }
 }
@@ -5165,13 +5175,22 @@ function startBarcodeCameraNative(formats){
   navigator.mediaDevices.getUserMedia({ video:{ facingMode:'environment', width:{ideal:1920}, height:{ideal:1080} } }).then(stream=>{
     _barcodeStream = stream;
     video.srcObject = stream;
-    const detector = new BarcodeDetector({formats});
-    _barcodePollTimer = setInterval(()=>{
-      if(!video || video.readyState < 2) return;
-      detector.detect(video).then(codes=>{
-        if(codes && codes.length) onBarcodeDetected(codes[0].rawValue);
-      }).catch(()=>{});
-    }, 180);
+    // Sin este play() explícito, en varios navegadores de celular el
+    // stream queda asignado pero el video nunca arranca — se ve todo
+    // negro aunque el permiso de cámara ya esté dado.
+    video.play().catch(()=>{});
+    try{
+      const detector = new BarcodeDetector({formats});
+      _barcodePollTimer = setInterval(()=>{
+        if(!video || video.readyState < 2) return;
+        detector.detect(video).then(codes=>{
+          if(codes && codes.length) onBarcodeDetected(codes[0].rawValue);
+        }).catch(()=>{});
+      }, 180);
+    }catch(e){
+      pauseBarcodeCamera();
+      startBarcodeCameraZXing();
+    }
   }).catch(err=>{ setBarcodeStatus('No se pudo abrir la cámara: '+(err.message||err)); });
 }
 function startBarcodeCameraZXing(){
@@ -6089,6 +6108,21 @@ function renderAdminConfig(){
       <button class="btn-outline-gold" onclick="resetFiscalDefaults()">Restablecer datos fiscales a los valores correctos</button>
     </div>
 
+    <h3 style="color:var(--gold2); font-size:14px; margin:18px 16px 4px;">Cajeros de Caja (Punto de Venta)</h3>
+    <div style="padding:0 16px 6px;">
+      <p style="font-size:12px; color:rgba(255,255,255,0.5); margin-bottom:10px;">Nombre y PIN de 4 dígitos que cada cajero usa para entrar a <b>caja-venta.html</b> en el mostrador.</p>
+      ${(state.posConfig.cajeros||[]).length===0 ? `<p style="font-size:13px; color:rgba(255,255,255,0.4); margin-bottom:10px;">Todavía no hay cajeros configurados.</p>` : (state.posConfig.cajeros||[]).map((c,i)=>`
+        <div style="display:flex; align-items:center; gap:10px; padding:10px 0; border-bottom:1px solid var(--glass-bd);">
+          <div style="flex:1;">
+            <div style="font-weight:600; font-size:13.5px;">${escapeHtml(c.nombre)}</div>
+            <div style="font-size:11.5px; opacity:.5; margin-top:2px;">PIN: ${escapeHtml(c.pin)}</div>
+          </div>
+          <button class="icon-btn" onclick="openCajeroModal(${i})">${ic('edit')}</button>
+          <button class="icon-btn" style="color:var(--danger);" onclick="deleteCajero(${i})">${ic('trash')}</button>
+        </div>`).join('')}
+      <button class="btn-outline-gold" style="margin-top:10px; width:100%;" onclick="openCajeroModal(null)">+ Agregar cajero</button>
+    </div>
+
     <div style="padding:16px;">
       <button class="btn-secondary" onclick="exportData()">Exportar datos (JSON)</button>
     </div>
@@ -6119,6 +6153,46 @@ function resetFiscalDefaults(){
   render();
   apiSaveSetting('fiscal_config', state.fiscal);
   toast("Datos fiscales restablecidos", "ok");
+}
+function openCajeroModal(idx){
+  const c = idx!==null && idx!==undefined ? state.posConfig.cajeros[idx] : null;
+  const overlay = document.createElement("div");
+  overlay.className = "modal-overlay";
+  overlay.id = "cajero-modal-overlay";
+  overlay.innerHTML = `
+    <div class="modal-sheet">
+      <div class="modal-handle"></div>
+      <h3 class="modal-title">${idx!==null&&idx!==undefined?'Editar cajero':'Nuevo cajero'}</h3>
+      <div class="form-group"><label>Nombre</label><input id="cj-nombre" value="${c?escapeHtml(c.nombre):''}" placeholder="Ej: Gastón"></div>
+      <div class="form-group"><label>PIN (4 dígitos)</label><input id="cj-pin" inputmode="numeric" maxlength="4" value="${c?escapeHtml(c.pin):''}" placeholder="Ej: 1234"></div>
+      <div style="display:flex; gap:10px; margin-top:6px;">
+        <button class="btn-secondary" style="flex:1;" onclick="closeCajeroModal()">Cancelar</button>
+        <button class="btn-primary" style="flex:1;" onclick="saveCajero(${idx===null||idx===undefined?'null':idx})">Guardar</button>
+      </div>
+    </div>`;
+  document.body.appendChild(overlay);
+}
+function closeCajeroModal(){ const el=document.getElementById("cajero-modal-overlay"); if(el) el.remove(); }
+function saveCajero(idx){
+  const nombre = document.getElementById("cj-nombre").value.trim();
+  const pin = document.getElementById("cj-pin").value.trim();
+  if(!nombre){ toast("Ingresá un nombre","err"); return; }
+  if(!/^\d{4}$/.test(pin)){ toast("El PIN tiene que ser de 4 dígitos","err"); return; }
+  if(!state.posConfig.cajeros) state.posConfig.cajeros = [];
+  if(idx===null || idx===undefined) state.posConfig.cajeros.push({nombre, pin});
+  else state.posConfig.cajeros[idx] = {nombre, pin};
+  closeCajeroModal();
+  saveState();
+  render();
+  apiSaveSetting('pos_config', state.posConfig);
+  toast("Cajero guardado","ok");
+}
+function deleteCajero(idx){
+  if(!confirm("¿Eliminar este cajero?")) return;
+  state.posConfig.cajeros.splice(idx,1);
+  saveState();
+  render();
+  apiSaveSetting('pos_config', state.posConfig);
 }
 function exportData(){
   const blob = new Blob([JSON.stringify(state, null, 2)], {type:"application/json"});
