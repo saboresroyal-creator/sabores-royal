@@ -5154,6 +5154,13 @@ function setBarcodeStatus(msg){
   if(status) status.textContent = msg;
 }
 function startBarcodeCamera(){
+  // Resguardo universal: sea cual sea el lector que termine usándose
+  // (nativo o ZXing), en cuanto el <video> tenga metadata forzamos play().
+  // Safari/iPhone no tiene BarcodeDetector, así que ahí SIEMPRE se usa el
+  // lector ZXing — sin este listener, el fix de pantalla negra que se
+  // aplicaba solo al lector nativo nunca corría en iPhone.
+  const video = document.getElementById('barcode-video');
+  if(video) video.addEventListener('loadedmetadata', ()=>{ video.play().catch(()=>{}); });
   // Si getSupportedFormats se cuelga o tarda de más en algún navegador
   // raro, no queremos dejar al usuario mirando una pantalla negra para
   // siempre — a los 2.5s probamos directo con ZXing.
