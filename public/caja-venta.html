@@ -51,6 +51,69 @@ input { font-family: inherit; }
 }
 .topbar button:hover { background: var(--glass2); }
 
+/* ── SIDEBAR ── */
+.app-shell { flex: 1; display: flex; min-height: 0; }
+.sidebar {
+  width: 84px; flex: none; background: rgba(15,28,69,.95); border-right: 1px solid var(--bd);
+  display: flex; flex-direction: column; align-items: stretch; padding: 10px 6px; gap: 4px; overflow-y: auto;
+}
+.sidebar-btn {
+  display: flex; flex-direction: column; align-items: center; gap: 4px; padding: 10px 4px;
+  border-radius: 10px; font-size: 10.5px; font-weight: 700; color: var(--muted); text-align: center;
+}
+.sidebar-btn .sb-icon { font-size: 20px; }
+.sidebar-btn.active { background: var(--gold); color: #000; }
+.sidebar-btn:hover:not(.active) { background: var(--glass2); color: var(--text); }
+.sidebar-spacer { flex: 1; }
+.sidebar-foot-btn { font-size: 10px; color: var(--muted); padding: 8px 4px; border-radius: 8px; text-align: center; }
+.sidebar-foot-btn:hover { background: var(--glass2); color: var(--text); }
+.main-col { flex: 1; display: flex; flex-direction: column; min-width: 0; overflow-y: auto; }
+
+/* ── SECCIONES (Clientes / Comprobantes / Cierre X-Z) ── */
+.section-wrap { flex: 1; display: flex; flex-direction: column; padding: 16px 20px 20px; gap: 12px; max-width: 700px; margin: 0 auto; width: 100%; }
+.section-title { color: var(--gold2); font-size: 18px; }
+.comp-meta { font-size: 12px; color: var(--muted); }
+.section-actions { display: flex; gap: 10px; margin-top: 8px; }
+.section-actions button { flex: 1; }
+
+.btn-primary, .btn-secondary, .btn-danger {
+  padding: 11px 16px; border-radius: 10px; font-size: 14px; font-weight: 700;
+}
+.btn-primary { background: var(--gold); color: #000; }
+.btn-secondary { background: var(--glass); border: 1px solid var(--bd); color: var(--text); }
+.btn-danger { background: var(--danger); color: #fff; }
+
+.search-inline { display: flex; gap: 8px; }
+.search-inline input {
+  flex: 1; background: var(--glass2); border: 2px solid var(--bd); border-radius: 12px;
+  padding: 13px 16px; color: var(--text); font-size: 15px; outline: none;
+}
+.search-inline input:focus { border-color: var(--gold); }
+
+.form-row { display: flex; flex-direction: column; gap: 4px; }
+.form-row label { font-size: 12px; color: var(--muted); }
+.form-row input {
+  background: var(--glass2); border: 1px solid var(--bd); border-radius: 10px;
+  padding: 11px 14px; color: var(--text); font-size: 14px; outline: none;
+}
+.form-row input:focus { border-color: var(--gold); }
+
+.list-wrap { display: flex; flex-direction: column; background: var(--glass); border: 1px solid var(--bd); border-radius: 12px; overflow: hidden; }
+.list-row {
+  display: flex; align-items: center; gap: 10px; padding: 12px 14px; border-bottom: 1px solid var(--bd);
+}
+.list-row:last-child { border-bottom: none; }
+.list-row.clickable:hover { background: var(--glass2); cursor: pointer; }
+.list-row.anulada { opacity: .5; }
+.list-row .lr-info { flex: 1; min-width: 0; }
+.list-row .lr-title { font-size: 14px; font-weight: 600; }
+.list-row .lr-sub { font-size: 11.5px; color: var(--muted); margin-top: 2px; }
+.list-row .lr-amount { font-weight: 700; color: var(--gold2); }
+.badge-anulada {
+  background: rgba(229,86,109,.2); color: var(--danger); font-size: 9px; font-weight: 800;
+  padding: 2px 6px; border-radius: 4px; margin-left: 6px; vertical-align: middle;
+}
+
 /* ── SELECT CAJA / LOGIN screens ── */
 .center-wrap {
   flex: 1; display: flex; flex-direction: column; align-items: center;
@@ -278,6 +341,32 @@ let showClientBox = false;
 let clientPhone = '';
 let clientName = '';
 let activeCategory = null; // null = "Todas"
+let section = 'vender'; // vender | clientes | comprobantes | cierreX | cierreZ
+
+/* ── CLIENTES ── */
+let clienteQuery = '';
+let clienteResults = [];
+let clienteSearching = false;
+let clienteEditando = null; // {phone,full_name,address,email} o null
+
+/* ── COMPROBANTES ── */
+let compVentas = [];
+let compLoading = false;
+let compDetalle = null;
+let compFiltro = 'hoy'; // hoy | ayer | todos
+
+/* ── CIERRE X / Z ── */
+let cierrePreview = null; // {periodStart, periodEnd, total, count, byPayment}
+let cierreLoading = false;
+
+const PAY_LABELS = {efectivo:'Efectivo', debito:'Débito', credito:'Crédito', qr:'QR / Mercado Pago'};
+const SECCIONES = [
+  {key:'vender', icon:'🛒', label:'Vender'},
+  {key:'clientes', icon:'👤', label:'Clientes'},
+  {key:'comprobantes', icon:'🧾', label:'Comprobantes'},
+  {key:'cierreX', icon:'📊', label:'Cierre X'},
+  {key:'cierreZ', icon:'🔒', label:'Cierre Z'},
+];
 
 /* ── ESCANEO POR CÁMARA (respaldo del lector USB) ──
    Versión recortada, standalone, de openBarcodeScannerModal() en
@@ -297,7 +386,7 @@ function render(){
   else if(screen === 'select-caja') el.innerHTML = renderSelectCaja();
   else if(screen === 'login') el.innerHTML = renderLogin();
   else if(screen === 'venta') el.innerHTML = renderVenta();
-  if(screen === 'venta'){
+  if(screen === 'venta' && section === 'vender'){
     const inp = document.getElementById('scan-input');
     if(inp) inp.focus();
   }
@@ -379,11 +468,11 @@ function checkPin(){
     render();
   }
 }
-function cambiarCajero(){ cajero = null; pinBuffer=''; pinError=''; screen='login'; cart=[]; payMethod=null; clientPhone=''; clientName=''; showClientBox=false; render(); }
+function cambiarCajero(){ cajero = null; pinBuffer=''; pinError=''; screen='login'; section='vender'; cart=[]; payMethod=null; clientPhone=''; clientName=''; showClientBox=false; render(); }
 function cambiarCaja(){
   if(!confirm('¿Cambiar la caja configurada en esta computadora?')) return;
   localStorage.removeItem('pos_caja');
-  caja = null; cajero = null; cart = []; payMethod = null; clientPhone=''; clientName=''; showClientBox=false;
+  caja = null; cajero = null; cart = []; payMethod = null; clientPhone=''; clientName=''; showClientBox=false; section='vender';
   screen = 'select-caja';
   render();
 }
@@ -422,17 +511,39 @@ function renderProductGrid(){
   return list.slice(0,120).map(productCardHtml).join('');
 }
 
+function setSection(s){
+  section = s;
+  if(s==='comprobantes') cargarComprobantes();
+  if(s==='cierreX' || s==='cierreZ') cargarCierrePreview();
+  render();
+}
 function renderVenta(){
-  const categories = getCategories();
   return `
     <div class="topbar">
       <span class="caja-badge">${cajaEsc()}</span>
       <span class="cajero-name">${esc(cajero)}</span>
-      <div class="spacer"></div>
-      <button onclick="openResumenDia()">Ventas de hoy</button>
-      <button onclick="cambiarCajero()">Cambiar cajero</button>
-      <button onclick="cambiarCaja()" title="Cambiar caja" style="opacity:.5;">⚙</button>
     </div>
+    <div class="app-shell">
+      <div class="sidebar">
+        ${SECCIONES.map(s=>`<button class="sidebar-btn ${section===s.key?'active':''}" onclick="setSection('${s.key}')"><span class="sb-icon">${s.icon}</span>${s.label}</button>`).join('')}
+        <div class="sidebar-spacer"></div>
+        <button class="sidebar-foot-btn" onclick="cambiarCajero()">Cambiar cajero</button>
+        <button class="sidebar-foot-btn" onclick="cambiarCaja()">Cambiar caja</button>
+      </div>
+      <div class="main-col">${renderMainSection()}</div>
+    </div>
+  `;
+}
+function renderMainSection(){
+  if(section==='clientes') return renderSeccionClientes();
+  if(section==='comprobantes') return renderSeccionComprobantes();
+  if(section==='cierreX') return renderSeccionCierre('X');
+  if(section==='cierreZ') return renderSeccionCierre('Z');
+  return renderSeccionVender();
+}
+function renderSeccionVender(){
+  const categories = getCategories();
+  return `
     <div class="venta-wrap">
       ${saleError ? `<div class="banner err">${esc(saleError)}</div>` : ''}
       <div class="scan-box">
@@ -705,32 +816,227 @@ function printTicket(sale){
   setTimeout(()=>{ try{ win.print(); }catch(e){} }, 300);
 }
 
-/* ── RESUMEN DEL DIA ── */
-async function openResumenDia(){
-  const root = document.getElementById('modal-root');
-  root.innerHTML = `<div class="modal-bg" onclick="if(event.target===this) closeModal()"><div class="modal">
-    <h2>Ventas de hoy — ${cajaEsc()}</h2>
-    <div id="resumen-body">Cargando…</div>
-    <button class="close-btn" onclick="closeModal()">Cerrar</button>
-  </div></div>`;
+/* ── CLIENTES ── */
+async function buscarClientes(){
+  const inp = document.getElementById('cliente-query');
+  if(inp) clienteQuery = inp.value;
+  if(clienteQuery.trim().length < 2){ toast('Escribí al menos 2 letras o números', 'err'); return; }
+  clienteSearching = true; render();
   try{
-    const todayStart = new Date(); todayStart.setHours(0,0,0,0);
-    const rows = await posFetch('/pos_sales?caja=eq.'+encodeURIComponent(caja)+'&created_at=gte.'+todayStart.toISOString()+'&order=created_at.desc&select=*');
-    const body = document.getElementById('resumen-body');
-    if(!body) return;
-    if(!rows.length){ body.innerHTML = `<p style="color:var(--muted); font-size:13px;">Todavía no hay ventas hoy en esta caja.</p>`; return; }
-    const total = rows.reduce((s,r)=>s+Number(r.total||0),0);
-    body.innerHTML = `<div style="margin-bottom:10px; font-weight:700; color:var(--gold2);">Total: ${money(total)} (${rows.length} venta${rows.length===1?'':'s'})</div>` +
-      rows.map(r=>`<div class="sale-row">
-        <span class="s-time">${new Date(r.created_at).toLocaleTimeString('es-AR',{hour:'2-digit',minute:'2-digit'})} · ${esc(r.cajero||'')}</span>
-        <span>${money(r.total)} <span class="s-pay">${esc(r.payment_method)}</span></span>
-      </div>`).join('');
-  }catch(e){
-    const body = document.getElementById('resumen-body');
-    if(body) body.innerHTML = `<p style="color:var(--danger); font-size:13px;">Error: ${esc(e.message)}</p>`;
-  }
+    clienteResults = await posFetch('/rpc/search_clients', 'POST', {p_query: clienteQuery.trim()}) || [];
+  }catch(e){ toast('Error buscando: '+e.message, 'err'); clienteResults = []; }
+  clienteSearching = false; render();
 }
-function closeModal(){ document.getElementById('modal-root').innerHTML = ''; }
+function editarCliente(c){ clienteEditando = c ? Object.assign({}, c) : {phone:'', full_name:'', address:'', email:''}; render(); }
+function editarClienteIdx(i){ editarCliente(clienteResults[i]); }
+function cancelarEdicionCliente(){ clienteEditando = null; render(); }
+function seleccionarClienteParaVenta(c){
+  clientPhone = c.phone; clientName = c.full_name || '';
+  showClientBox = true;
+  setSection('vender');
+  toast('Cliente asociado a la próxima venta: ' + (c.full_name || c.phone), 'ok');
+}
+function usarClienteIdx(i){ seleccionarClienteParaVenta(clienteResults[i]); }
+async function guardarCliente(){
+  const phone = document.getElementById('cli-phone').value.trim();
+  const name = document.getElementById('cli-name').value.trim();
+  const address = document.getElementById('cli-address').value.trim();
+  const email = document.getElementById('cli-email').value.trim();
+  if(!phone){ toast('El teléfono es obligatorio', 'err'); return; }
+  try{
+    await posFetch('/rpc/find_or_create_client', 'POST', {p_phone:phone, p_name:name, p_address:address, p_email:email});
+    toast('Cliente guardado', 'ok');
+    clienteEditando = null;
+    clienteQuery = phone;
+    await buscarClientes();
+  }catch(e){ toast('Error guardando: '+e.message, 'err'); }
+}
+function renderSeccionClientes(){
+  if(clienteEditando){
+    const c = clienteEditando;
+    return `<div class="section-wrap">
+      <button class="client-toggle" onclick="cancelarEdicionCliente()">&larr; Volver</button>
+      <h2 class="section-title">${c.phone ? 'Editar cliente' : 'Nuevo cliente'}</h2>
+      <div class="form-row"><label>Teléfono</label><input id="cli-phone" value="${escAttr(c.phone||'')}" inputmode="tel" ${c.phone?'disabled':''}></div>
+      <div class="form-row"><label>Nombre</label><input id="cli-name" value="${escAttr(c.full_name||'')}"></div>
+      <div class="form-row"><label>Dirección</label><input id="cli-address" value="${escAttr(c.address||'')}"></div>
+      <div class="form-row"><label>Email</label><input id="cli-email" value="${escAttr(c.email||'')}"></div>
+      <div class="section-actions">
+        <button class="btn-secondary" onclick="cancelarEdicionCliente()">Cancelar</button>
+        <button class="btn-primary" onclick="guardarCliente()">Guardar</button>
+      </div>
+    </div>`;
+  }
+  return `<div class="section-wrap">
+    <h2 class="section-title">Clientes</h2>
+    <div class="search-inline">
+      <input id="cliente-query" placeholder="Buscar por nombre o teléfono..." value="${escAttr(clienteQuery)}" oninput="clienteQuery=this.value" onkeydown="if(event.key==='Enter') buscarClientes()">
+      <button class="btn-primary" onclick="buscarClientes()">Buscar</button>
+    </div>
+    <button class="client-toggle" onclick="editarCliente(null)">+ Nuevo cliente</button>
+    ${clienteSearching ? '<p style="color:var(--muted);">Buscando…</p>' : `
+      <div class="list-wrap">
+        ${clienteResults.length===0 ? `<div class="grid-empty">Buscá un cliente por nombre o teléfono</div>` :
+          clienteResults.map((c,i)=>`<div class="list-row">
+            <div class="lr-info">
+              <div class="lr-title">${esc(c.full_name||'(sin nombre)')}</div>
+              <div class="lr-sub">${esc(c.phone)}${c.address?' · '+esc(c.address):''}</div>
+            </div>
+            <button class="btn-secondary" onclick="editarClienteIdx(${i})">Editar</button>
+            <button class="btn-primary" onclick="usarClienteIdx(${i})">Usar en venta</button>
+          </div>`).join('')
+        }
+      </div>`
+    }
+  </div>`;
+}
+
+/* ── COMPROBANTES (buscar / ver / anular) ── */
+async function cargarComprobantes(){
+  compLoading = true; compDetalle = null; render();
+  try{
+    let q = '/pos_sales?caja=eq.'+encodeURIComponent(caja)+'&order=created_at.desc&select=*&limit=200';
+    if(compFiltro==='hoy' || compFiltro==='ayer'){
+      const d = new Date();
+      if(compFiltro==='ayer') d.setDate(d.getDate()-1);
+      d.setHours(0,0,0,0);
+      const d2 = new Date(d); d2.setDate(d2.getDate()+1);
+      q += '&created_at=gte.'+d.toISOString()+'&created_at=lt.'+d2.toISOString();
+    }
+    compVentas = await posFetch(q) || [];
+  }catch(e){ toast('Error: '+e.message, 'err'); compVentas = []; }
+  compLoading = false; render();
+}
+function setCompFiltro(f){ compFiltro = f; cargarComprobantes(); }
+function verComprobante(id){ compDetalle = compVentas.find(v=>v.id===id) || null; render(); }
+function cerrarComprobante(){ compDetalle = null; render(); }
+function reimprimirComprobante(){ if(compDetalle) printTicket(compDetalle); }
+async function anularVentaActual(){
+  if(!compDetalle) return;
+  if(!confirm('¿Anular esta venta? Se devuelve el stock y queda marcada como anulada.')) return;
+  try{
+    const rows = await posFetch('/rpc/cancel_pos_sale', 'POST', {p_sale_id: compDetalle.id}, 'return=representation');
+    const updated = Array.isArray(rows) ? rows[0] : rows;
+    (updated.items||[]).forEach(it=>{ const p = products.find(x=>x.id===it.id); if(p) p.stock += (it.qty||0); });
+    compDetalle = updated;
+    const idx = compVentas.findIndex(v=>v.id===updated.id);
+    if(idx>=0) compVentas[idx] = updated;
+    toast('Venta anulada', 'ok');
+    render();
+  }catch(e){ toast('Error al anular: '+e.message, 'err'); }
+}
+function renderSeccionComprobantes(){
+  if(compDetalle){
+    const v = compDetalle;
+    return `<div class="section-wrap">
+      <button class="client-toggle" onclick="cerrarComprobante()">&larr; Volver</button>
+      <h2 class="section-title">Venta ${esc(v.id)} ${v.status==='anulada'?'<span class="badge-anulada">ANULADA</span>':''}</h2>
+      <p class="comp-meta">${new Date(v.created_at).toLocaleString('es-AR')} · ${esc(v.caja)} · ${esc(v.cajero||'')}</p>
+      ${v.client_phone ? `<p class="comp-meta">Cliente: ${esc(v.client_name||'')} ${esc(v.client_phone)}</p>` : ''}
+      <div class="list-wrap">
+        ${(v.items||[]).map(it=>`<div class="sale-row"><span>${it.qty} x ${esc(it.name)}</span><span>${money(it.lineTotal!=null?it.lineTotal:it.price*it.qty)}</span></div>`).join('')}
+      </div>
+      <div class="totals-bar"><span class="tb-label">Total</span><span class="tb-value">${money(v.total)}</span></div>
+      <p class="comp-meta">Medio de pago: ${esc(PAY_LABELS[v.payment_method]||v.payment_method)}</p>
+      <div class="section-actions">
+        <button class="btn-secondary" onclick="reimprimirComprobante()">Reimprimir ticket</button>
+        ${v.status!=='anulada' ? `<button class="btn-danger" onclick="anularVentaActual()">Anular venta</button>` : ''}
+      </div>
+    </div>`;
+  }
+  const activas = compVentas.filter(v=>v.status!=='anulada');
+  return `<div class="section-wrap">
+    <h2 class="section-title">Comprobantes — ${cajaEsc()}</h2>
+    <div class="cat-chips">
+      <button class="cat-chip ${compFiltro==='hoy'?'active':''}" onclick="setCompFiltro('hoy')">Hoy</button>
+      <button class="cat-chip ${compFiltro==='ayer'?'active':''}" onclick="setCompFiltro('ayer')">Ayer</button>
+      <button class="cat-chip ${compFiltro==='todos'?'active':''}" onclick="setCompFiltro('todos')">Todos</button>
+    </div>
+    ${compLoading ? '<p style="color:var(--muted);">Cargando…</p>' : !compVentas.length ? `<div class="grid-empty">No hay ventas para este filtro</div>` : `
+      <div class="comp-meta" style="color:var(--gold2); font-weight:700; font-size:14px;">Total: ${money(activas.reduce((s,v)=>s+Number(v.total||0),0))} (${activas.length} venta${activas.length!==1?'s':''})</div>
+      <div class="list-wrap">
+        ${compVentas.map(v=>`<div class="list-row clickable ${v.status==='anulada'?'anulada':''}" onclick="verComprobante('${escAttr(v.id)}')">
+          <div class="lr-info">
+            <div class="lr-title">${new Date(v.created_at).toLocaleTimeString('es-AR',{hour:'2-digit',minute:'2-digit'})} · ${esc(v.cajero||'')} ${v.status==='anulada'?'<span class="badge-anulada">ANULADA</span>':''}</div>
+            <div class="lr-sub">${esc(PAY_LABELS[v.payment_method]||v.payment_method)}</div>
+          </div>
+          <div class="lr-amount">${money(v.total)}</div>
+        </div>`).join('')}
+      </div>`
+    }
+  </div>`;
+}
+
+/* ── CIERRE X / Z ── */
+async function cargarCierrePreview(){
+  cierreLoading = true; render();
+  try{
+    const closures = await posFetch('/pos_closures?caja=eq.'+encodeURIComponent(caja)+'&order=period_end.desc&limit=1&select=period_end');
+    const periodStart = (closures && closures[0]) ? closures[0].period_end : '2000-01-01T00:00:00Z';
+    const periodEnd = new Date().toISOString();
+    const sales = await posFetch('/pos_sales?caja=eq.'+encodeURIComponent(caja)+'&status=neq.anulada&created_at=gt.'+periodStart+'&created_at=lte.'+periodEnd+'&select=*') || [];
+    const total = sales.reduce((s,v)=>s+Number(v.total||0),0);
+    const byPayment = {};
+    sales.forEach(v=>{ const k=v.payment_method||'?'; if(!byPayment[k]) byPayment[k]={total:0,cant:0}; byPayment[k].total+=Number(v.total||0); byPayment[k].cant++; });
+    cierrePreview = { periodStart, periodEnd, total, count: sales.length, byPayment };
+  }catch(e){ toast('Error: '+e.message, 'err'); cierrePreview = null; }
+  cierreLoading = false; render();
+}
+async function confirmarCierreZ(){
+  if(!confirm('¿Cerrar Z? Se guarda este resumen y arranca un período nuevo. No es un cierre fiscal ante AFIP.')) return;
+  try{
+    const rows = await posFetch('/rpc/close_pos_batch', 'POST', {p_caja: caja, p_cajero: cajero}, 'return=representation');
+    const closure = Array.isArray(rows) ? rows[0] : rows;
+    toast('Cierre Z guardado', 'ok');
+    imprimirCierre('Z', closure);
+    await cargarCierrePreview();
+  }catch(e){ toast('Error al cerrar: '+e.message, 'err'); }
+}
+function imprimirCierre(tipo, closureOverride){
+  const total = closureOverride ? closureOverride.total : (cierrePreview?cierrePreview.total:0);
+  const start = closureOverride ? closureOverride.period_start : (cierrePreview?cierrePreview.periodStart:null);
+  const end = closureOverride ? closureOverride.period_end : (cierrePreview?cierrePreview.periodEnd:null);
+  const byPayment = closureOverride ? closureOverride.by_payment : (cierrePreview?cierrePreview.byPayment:{});
+  if(!start) return;
+  const win = window.open('', '_blank', 'width=380,height=600');
+  if(!win) return;
+  win.document.write(`<!DOCTYPE html><html lang="es"><head><meta charset="UTF-8"><title>Cierre ${tipo}</title>
+    <style>
+      body{font-family:'DM Sans',Arial,sans-serif; color:#111; padding:16px; font-size:13px; max-width:320px; margin:0 auto;}
+      h2{font-size:16px; text-align:center; margin-bottom:2px;} p{font-size:11px; text-align:center; color:#444; margin:2px 0;}
+      .line{border-top:1px dashed #999; margin:10px 0;} table{width:100%; border-collapse:collapse;}
+      td{font-size:12px; padding:3px 0;} .tot{font-weight:800; font-size:15px;}
+      .foot{margin-top:14px; text-align:center; font-size:10px; color:#666;}
+    </style></head><body>
+    <h2>${esc(fiscal.razonSocial)}</h2>
+    <p>Cierre ${tipo} · ${esc(caja)}</p>
+    <p>${new Date(start).toLocaleString('es-AR')} — ${new Date(end).toLocaleString('es-AR')}</p>
+    <div class="line"></div>
+    <table>${Object.entries(byPayment||{}).map(([k,v])=>`<tr><td>${esc(PAY_LABELS[k]||k)}</td><td style="text-align:right;">${money(v.total)} (${v.cant})</td></tr>`).join('') || '<tr><td>Sin ventas en este período</td></tr>'}</table>
+    <div class="line"></div>
+    <table><tr><td class="tot">TOTAL</td><td class="tot" style="text-align:right;">${money(total)}</td></tr></table>
+    <div class="foot">Cierre ${tipo} de sistema — no es un cierre fiscal ante AFIP</div>
+    </body></html>`);
+  win.document.close();
+  setTimeout(()=>{ try{ win.print(); }catch(e){} }, 300);
+}
+function renderSeccionCierre(tipo){
+  return `<div class="section-wrap">
+    <h2 class="section-title">Cierre ${tipo} — ${cajaEsc()}</h2>
+    ${cierreLoading || !cierrePreview ? '<p style="color:var(--muted);">Cargando…</p>' : `
+      <p class="comp-meta">Desde ${new Date(cierrePreview.periodStart).toLocaleString('es-AR')} hasta ${new Date(cierrePreview.periodEnd).toLocaleString('es-AR')}</p>
+      <div class="totals-bar"><span class="tb-label">Total del período</span><span class="tb-value">${money(cierrePreview.total)}</span></div>
+      <div class="list-wrap">
+        ${Object.entries(cierrePreview.byPayment).map(([k,v])=>`<div class="sale-row"><span>${esc(PAY_LABELS[k]||k)}</span><span>${money(v.total)} (${v.cant})</span></div>`).join('') || `<div class="grid-empty">Sin ventas en este período</div>`}
+      </div>
+      <div class="section-actions">
+        ${tipo==='X' ? `<button class="btn-secondary" onclick="cargarCierrePreview()">Actualizar</button>` : ''}
+        <button class="btn-secondary" onclick="imprimirCierre('${tipo}')">Imprimir</button>
+        ${tipo==='Z' ? `<button class="btn-danger" onclick="confirmarCierreZ()">Cerrar Z</button>` : ''}
+      </div>
+    `}
+  </div>`;
+}
 
 /* ── HELPERS ── */
 function esc(s){ return String(s||'').replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;'); }
