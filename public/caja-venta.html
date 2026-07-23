@@ -50,6 +50,21 @@ input { font-family: inherit; }
   padding: 8px 14px; font-size: 13px; color: var(--text);
 }
 .topbar button:hover { background: var(--glass2); }
+.brand-logo { border-radius: 8px; object-fit: cover; flex: none; }
+
+/* ── BANNER DE CAJA (oferta) ── */
+.pos-banner {
+  position: relative; border-radius: 14px; overflow: hidden; flex: none;
+  min-height: 90px; display: flex; align-items: flex-end; padding: 14px 16px;
+  background-size: cover; background-position: center;
+}
+.pos-banner::before {
+  content: ''; position: absolute; inset: 0;
+  background: linear-gradient(0deg, rgba(0,0,0,.65) 0%, rgba(0,0,0,.05) 70%);
+}
+.pos-banner-text { position: relative; z-index: 1; }
+.pos-banner-title { font-size: 16px; font-weight: 800; color: #fff; }
+.pos-banner-subtitle { font-size: 12.5px; color: rgba(255,255,255,.85); margin-top: 2px; }
 
 /* ── SIDEBAR ── */
 .app-shell { flex: 1; display: flex; min-height: 0; }
@@ -92,11 +107,12 @@ input { font-family: inherit; }
 
 .form-row { display: flex; flex-direction: column; gap: 4px; }
 .form-row label { font-size: 12px; color: var(--muted); }
-.form-row input {
+.form-row input, .form-row select {
   background: var(--glass2); border: 1px solid var(--bd); border-radius: 10px;
-  padding: 11px 14px; color: var(--text); font-size: 14px; outline: none;
+  padding: 11px 14px; color: var(--text); font-size: 14px; outline: none; font-family: inherit;
 }
-.form-row input:focus { border-color: var(--gold); }
+.form-row input:focus, .form-row select:focus { border-color: var(--gold); }
+.form-row select option { background: var(--navy2); }
 
 .list-wrap { display: flex; flex-direction: column; background: var(--glass); border: 1px solid var(--bd); border-radius: 12px; overflow: hidden; }
 .list-row {
@@ -328,6 +344,7 @@ let screen = 'loading'; // loading | select-caja | login | venta
 let caja = localStorage.getItem('pos_caja') || null;
 let posConfig = { cajeros: [] };
 let fiscal = { razonSocial:'Sabores Royal SRL', cuit:'30-71698572-1', domicilio:'Maipú 734, Rosario' };
+let posBanner = null; // {image, title, subtitle, active} — cargado desde app_settings.pos_banner
 let cajero = null;
 let pinBuffer = '';
 let pinError = '';
@@ -402,8 +419,12 @@ function toast(msg, type){
 }
 
 /* ── SELECT CAJA ── */
+function logoHtml(size){
+  return `<img src="apple-touch-icon.png" class="brand-logo" style="width:${size}px; height:${size}px;" onerror="this.style.display='none'">`;
+}
 function renderSelectCaja(){
   return `<div class="center-wrap">
+    ${logoHtml(72)}
     <h1>¿Esta computadora es Caja 1 o Caja 2?</h1>
     <div class="big-choice-row">
       <button class="big-choice" onclick="chooseCaja('Caja 1')">Caja 1</button>
@@ -423,12 +444,13 @@ function renderLogin(){
   if(!cajero){
     const cajeros = posConfig.cajeros || [];
     if(!cajeros.length){
-      return `<div class="center-wrap"><h1>No hay cajeros configurados</h1>
+      return `<div class="center-wrap">${logoHtml(56)}<h1>No hay cajeros configurados</h1>
         <p style="color:var(--muted); font-size:13px; text-align:center; max-width:320px;">
           Agregalos desde el panel de administración, en Configuración.
         </p></div>`;
     }
     return `<div class="center-wrap">
+      ${logoHtml(56)}
       <h1>¿Quién está en ${cajaEsc()}?</h1>
       <div class="big-choice-row">
         ${cajeros.map(c=>`<button class="big-choice" onclick="pickCajero('${escAttr(c.nombre)}')">${esc(c.nombre)}</button>`).join('')}
@@ -436,6 +458,7 @@ function renderLogin(){
     </div>`;
   }
   return `<div class="center-wrap">
+    ${logoHtml(56)}
     <h1>PIN de ${esc(cajero)}</h1>
     <div class="pin-dots">${[0,1,2,3].map(i=>`<div class="pin-dot ${i<pinBuffer.length?'filled':''}"></div>`).join('')}</div>
     <div class="pin-error">${esc(pinError)}</div>
@@ -520,6 +543,7 @@ function setSection(s){
 function renderVenta(){
   return `
     <div class="topbar">
+      ${logoHtml(28)}
       <span class="caja-badge">${cajaEsc()}</span>
       <span class="cajero-name">${esc(cajero)}</span>
     </div>
@@ -546,6 +570,14 @@ function renderSeccionVender(){
   return `
     <div class="venta-wrap">
       ${saleError ? `<div class="banner err">${esc(saleError)}</div>` : ''}
+      ${posBanner && posBanner.active && posBanner.image ? `
+        <div class="pos-banner" style="background-image:url('${escAttr(posBanner.image)}')">
+          <div class="pos-banner-text">
+            ${posBanner.title ? `<div class="pos-banner-title">${esc(posBanner.title)}</div>` : ''}
+            ${posBanner.subtitle ? `<div class="pos-banner-subtitle">${esc(posBanner.subtitle)}</div>` : ''}
+          </div>
+        </div>` : ''
+      }
       <div class="scan-box">
         <input id="scan-input" placeholder="Escaneá o escribí para buscar..." value="${escAttr(searchQuery)}"
           oninput="onSearchInput(this.value)"
@@ -827,7 +859,8 @@ async function buscarClientes(){
   }catch(e){ toast('Error buscando: '+e.message, 'err'); clienteResults = []; }
   clienteSearching = false; render();
 }
-function editarCliente(c){ clienteEditando = c ? Object.assign({}, c) : {phone:'', full_name:'', address:'', email:''}; render(); }
+const CONDICIONES_IVA = ['Responsable Inscripto', 'Monotributista', 'Exento', 'Consumidor Final'];
+function editarCliente(c){ clienteEditando = c ? Object.assign({}, c) : {phone:'', full_name:'', address:'', email:'', cuit:'', razon_social:'', condicion_iva:''}; render(); }
 function editarClienteIdx(i){ editarCliente(clienteResults[i]); }
 function cancelarEdicionCliente(){ clienteEditando = null; render(); }
 function seleccionarClienteParaVenta(c){
@@ -842,9 +875,15 @@ async function guardarCliente(){
   const name = document.getElementById('cli-name').value.trim();
   const address = document.getElementById('cli-address').value.trim();
   const email = document.getElementById('cli-email').value.trim();
+  const cuit = document.getElementById('cli-cuit').value.trim();
+  const razonSocial = document.getElementById('cli-razon-social').value.trim();
+  const condicionIva = document.getElementById('cli-condicion-iva').value;
   if(!phone){ toast('El teléfono es obligatorio', 'err'); return; }
   try{
-    await posFetch('/rpc/find_or_create_client', 'POST', {p_phone:phone, p_name:name, p_address:address, p_email:email});
+    await posFetch('/rpc/find_or_create_client', 'POST', {
+      p_phone:phone, p_name:name, p_address:address, p_email:email,
+      p_cuit:cuit, p_razon_social:razonSocial, p_condicion_iva:condicionIva
+    });
     toast('Cliente guardado', 'ok');
     clienteEditando = null;
     clienteQuery = phone;
@@ -857,10 +896,19 @@ function renderSeccionClientes(){
     return `<div class="section-wrap">
       <button class="client-toggle" onclick="cancelarEdicionCliente()">&larr; Volver</button>
       <h2 class="section-title">${c.phone ? 'Editar cliente' : 'Nuevo cliente'}</h2>
+      ${c.client_number ? `<p class="comp-meta">Cliente N° ${c.client_number}</p>` : ''}
       <div class="form-row"><label>Teléfono</label><input id="cli-phone" value="${escAttr(c.phone||'')}" inputmode="tel" ${c.phone?'disabled':''}></div>
       <div class="form-row"><label>Nombre</label><input id="cli-name" value="${escAttr(c.full_name||'')}"></div>
       <div class="form-row"><label>Dirección</label><input id="cli-address" value="${escAttr(c.address||'')}"></div>
       <div class="form-row"><label>Email</label><input id="cli-email" value="${escAttr(c.email||'')}"></div>
+      <div class="form-row"><label>Razón Social</label><input id="cli-razon-social" value="${escAttr(c.razon_social||'')}"></div>
+      <div class="form-row"><label>CUIT</label><input id="cli-cuit" value="${escAttr(c.cuit||'')}" placeholder="Ej: 20-12345678-9"></div>
+      <div class="form-row"><label>Condición ante el IVA</label>
+        <select id="cli-condicion-iva">
+          <option value="">-- Sin especificar --</option>
+          ${CONDICIONES_IVA.map(o=>`<option value="${o}" ${c.condicion_iva===o?'selected':''}>${o}</option>`).join('')}
+        </select>
+      </div>
       <div class="section-actions">
         <button class="btn-secondary" onclick="cancelarEdicionCliente()">Cancelar</button>
         <button class="btn-primary" onclick="guardarCliente()">Guardar</button>
@@ -870,7 +918,7 @@ function renderSeccionClientes(){
   return `<div class="section-wrap">
     <h2 class="section-title">Clientes</h2>
     <div class="search-inline">
-      <input id="cliente-query" placeholder="Buscar por nombre o teléfono..." value="${escAttr(clienteQuery)}" oninput="clienteQuery=this.value" onkeydown="if(event.key==='Enter') buscarClientes()">
+      <input id="cliente-query" placeholder="Buscar por nombre, teléfono o CUIT..." value="${escAttr(clienteQuery)}" oninput="clienteQuery=this.value" onkeydown="if(event.key==='Enter') buscarClientes()">
       <button class="btn-primary" onclick="buscarClientes()">Buscar</button>
     </div>
     <button class="client-toggle" onclick="editarCliente(null)">+ Nuevo cliente</button>
@@ -879,8 +927,8 @@ function renderSeccionClientes(){
         ${clienteResults.length===0 ? `<div class="grid-empty">Buscá un cliente por nombre o teléfono</div>` :
           clienteResults.map((c,i)=>`<div class="list-row">
             <div class="lr-info">
-              <div class="lr-title">${esc(c.full_name||'(sin nombre)')}</div>
-              <div class="lr-sub">${esc(c.phone)}${c.address?' · '+esc(c.address):''}</div>
+              <div class="lr-title">${c.client_number?`#${c.client_number} · `:''}${esc(c.full_name||'(sin nombre)')}</div>
+              <div class="lr-sub">${esc(c.phone)}${c.cuit?' · CUIT '+esc(c.cuit):''}${c.razon_social?' · '+esc(c.razon_social):''}${c.address?' · '+esc(c.address):''}</div>
             </div>
             <button class="btn-secondary" onclick="editarClienteIdx(${i})">Editar</button>
             <button class="btn-primary" onclick="usarClienteIdx(${i})">Usar en venta</button>
@@ -1046,7 +1094,7 @@ function escAttr(s){ return esc(s).replace(/'/g,'&#39;'); }
 async function init(){
   try{
     const [settingsRows, productRows] = await Promise.all([
-      posFetch('/app_settings?setting_key=in.(pos_config,fiscal_config)&select=setting_key,setting_value'),
+      posFetch('/app_settings?setting_key=in.(pos_config,fiscal_config,pos_banner)&select=setting_key,setting_value'),
       posFetch('/products?select=id,name,price,stock,barcode,cat,photo_url,photo_clean_url&order=name'),
     ]);
     (settingsRows||[]).forEach(row=>{
@@ -1054,6 +1102,7 @@ async function init(){
         const parsed = JSON.parse(row.setting_value);
         if(row.setting_key === 'pos_config' && parsed && parsed.cajeros) posConfig = parsed;
         if(row.setting_key === 'fiscal_config' && parsed) fiscal = Object.assign({}, fiscal, parsed);
+        if(row.setting_key === 'pos_banner' && parsed) posBanner = parsed;
       }catch(e){}
     });
     products = (productRows||[]).map(p=>({id:p.id, name:p.name, price:Number(p.price)||0, stock:Number(p.stock)||0, barcode:p.barcode||'', cat:p.cat||'Otros', photo_url:p.photo_url||'', photo_clean_url:p.photo_clean_url||''}));
