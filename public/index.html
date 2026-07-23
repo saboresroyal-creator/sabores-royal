@@ -629,6 +629,7 @@ let state = {
   categories: JSON.parse(JSON.stringify(DEFAULT_CATEGORIES)),
   cart: [],
   orders: [],
+  posSales: [],
   clients: {},
   currentClientPhone: null,
   route: {screen:"home"},
@@ -1234,6 +1235,20 @@ async function apiSyncOrders(){
       render();
     }
   }catch(e){ console.warn('Sync orders:', e); }
+}
+
+// Ventas de mostrador (caja-venta.html) — mismo patrón que apiSyncOrders,
+// para poder mostrarlas en Estadísticas junto a los pedidos online.
+async function apiSyncPosSales(){
+  if(!IS_ADMIN_APP || !state.adminAuthed) return;
+  try{
+    const rows = await adminFetch('/pos_sales?select=*&order=created_at.desc&limit=500', 'GET');
+    if(JSON.stringify(rows) !== JSON.stringify(state.posSales)){
+      state.posSales = rows||[];
+      saveState();
+      render();
+    }
+  }catch(e){ console.warn('Sync pos_sales:', e); }
 }
 
 // Actualiza el estado de UN pedido (una fila, no todo el blob) — usado
@@ -6041,6 +6056,33 @@ function renderAdminEstadisticas(){
   });
   const topProductos = Object.values(prodVentas).sort((a,b)=>b.unidades-a.unidades).slice(0,10);
 
+  // Ventas de mostrador (caja-venta.html) — canal aparte de los pedidos online.
+  const posSales = state.posSales || [];
+  const posTotal = posSales.reduce((s,v)=>s+Number(v.total||0), 0);
+  const PAY_LABELS = {efectivo:'Efectivo', debito:'Débito', credito:'Crédito', qr:'QR / MP'};
+  const porMedioPago = {};
+  posSales.forEach(v=>{
+    const k = v.payment_method || '?';
+    if(!porMedioPago[k]) porMedioPago[k] = {total:0, cant:0};
+    porMedioPago[k].total += Number(v.total||0);
+    porMedioPago[k].cant++;
+  });
+  const porCaja = {};
+  posSales.forEach(v=>{
+    const k = v.caja || '?';
+    porCaja[k] = (porCaja[k]||0) + Number(v.total||0);
+  });
+  const prodVentasMostrador = {};
+  posSales.forEach(v=>{
+    (v.items||[]).forEach(it=>{
+      const key = it.name||it.id;
+      if(!prodVentasMostrador[key]) prodVentasMostrador[key] = {name:key, unidades:0, ingresos:0};
+      prodVentasMostrador[key].unidades += (it.qty||1);
+      prodVentasMostrador[key].ingresos += (it.lineTotal!=null?it.lineTotal:(it.price||0)*(it.qty||1));
+    });
+  });
+  const topProductosMostrador = Object.values(prodVentasMostrador).sort((a,b)=>b.unidades-a.unidades).slice(0,10);
+
   const statBox = (label, value, sub='') => `
     <div style="flex:1; min-width:140px; background:var(--glass); border:1px solid var(--glass-bd); border-radius:14px; padding:14px 16px;">
       <div style="font-size:11px; color:rgba(255,255,255,0.5); margin-bottom:4px; text-transform:uppercase; letter-spacing:.5px;">${label}</div>
@@ -6086,6 +6128,32 @@ function renderAdminEstadisticas(){
             <div style="width:24px; text-align:center; font-weight:700; font-size:13px; color:var(--gold2); opacity:.7;">${i+1}</div>
             <div style="flex:1;">
               <div style="font-weight:600; font-size:13.5px;">${p.name}</div>
+              <div style="font-size:11.5px; color:rgba(255,255,255,0.45);">${p.unidades} unidad${p.unidades!==1?'es':''} vendida${p.unidades!==1?'s':''}</div>
+            </div>
+            <div style="font-weight:700; color:var(--gold2); font-size:14px;">${money(p.ingresos)}</div>
+          </div>`).join('')
+      }
+
+      <h3 style="color:var(--gold2); font-size:14px; margin:22px 0 10px; border-top:1px solid var(--glass-bd); padding-top:18px;">🧾 Ventas de mostrador (Caja)</h3>
+      <div style="display:flex; flex-wrap:wrap; gap:10px; margin-bottom:18px;">
+        ${statBox('Total facturado en caja', money(posTotal), posSales.length+' venta'+(posSales.length!==1?'s':''))}
+        ${Object.entries(porCaja).map(([caja,total])=>statBox(caja, money(total))).join('')}
+      </div>
+
+      <h3 style="color:var(--gold2); font-size:13px; margin-bottom:10px;">Por medio de pago</h3>
+      <div style="display:flex; flex-wrap:wrap; gap:10px; margin-bottom:18px;">
+        ${Object.keys(porMedioPago).length===0 ? '<p style="font-size:13px; color:rgba(255,255,255,0.4);">Sin ventas de mostrador todavía.</p>' :
+          Object.entries(porMedioPago).map(([k,v])=>statBox(PAY_LABELS[k]||k, money(v.total), v.cant+' venta'+(v.cant!==1?'s':''))).join('')
+        }
+      </div>
+
+      <h3 style="color:var(--gold2); font-size:14px; margin-bottom:10px;">Top productos vendidos en mostrador</h3>
+      ${topProductosMostrador.length===0 ? `<p style="font-size:13px; color:rgba(255,255,255,0.4);">Sin datos todavía.</p>` :
+        topProductosMostrador.map((p,i)=>`
+          <div style="display:flex; align-items:center; gap:10px; padding:10px 0; border-bottom:1px solid var(--glass-bd);">
+            <div style="width:24px; text-align:center; font-weight:700; font-size:13px; color:var(--gold2); opacity:.7;">${i+1}</div>
+            <div style="flex:1;">
+              <div style="font-weight:600; font-size:13.5px;">${escapeHtml(p.name)}</div>
               <div style="font-size:11.5px; color:rgba(255,255,255,0.45);">${p.unidades} unidad${p.unidades!==1?'es':''} vendida${p.unidades!==1?'s':''}</div>
             </div>
             <div style="font-weight:700; color:var(--gold2); font-size:14px;">${money(p.ingresos)}</div>
@@ -7791,16 +7859,16 @@ apiSyncProducts();
 apiSyncContent();
 if(IS_ADMIN_APP){
   tryRestoreAdminSession().then(()=>{
-    if(state.adminAuthed){ apiSyncClients(); apiSyncOrders(); apiSyncSuggestions(); apiSyncVouchers(); syncAdminChats(); }
+    if(state.adminAuthed){ apiSyncClients(); apiSyncOrders(); apiSyncPosSales(); apiSyncSuggestions(); apiSyncVouchers(); syncAdminChats(); }
   });
 }else if(state.currentClientPhone){ syncClientChat(); }
 startChatPoll();
 
 document.addEventListener('visibilitychange', ()=>{
-  if(document.visibilityState === 'visible'){ apiSyncProducts(); apiSyncContent(); if(IS_ADMIN_APP){ apiSyncClients(); apiSyncOrders(); apiSyncSuggestions(); apiSyncVouchers(); } }
+  if(document.visibilityState === 'visible'){ apiSyncProducts(); apiSyncContent(); if(IS_ADMIN_APP){ apiSyncClients(); apiSyncOrders(); apiSyncPosSales(); apiSyncSuggestions(); apiSyncVouchers(); } }
 });
-window.addEventListener('focus', ()=>{ apiSyncProducts(); apiSyncContent(); if(IS_ADMIN_APP){ apiSyncClients(); apiSyncOrders(); apiSyncSuggestions(); apiSyncVouchers(); } });
-setInterval(()=>{ apiSyncProducts(); apiSyncContent(); if(IS_ADMIN_APP){ apiSyncClients(); apiSyncOrders(); apiSyncSuggestions(); apiSyncVouchers(); } }, 30000);
+window.addEventListener('focus', ()=>{ apiSyncProducts(); apiSyncContent(); if(IS_ADMIN_APP){ apiSyncClients(); apiSyncOrders(); apiSyncPosSales(); apiSyncSuggestions(); apiSyncVouchers(); } });
+setInterval(()=>{ apiSyncProducts(); apiSyncContent(); if(IS_ADMIN_APP){ apiSyncClients(); apiSyncOrders(); apiSyncPosSales(); apiSyncSuggestions(); apiSyncVouchers(); } }, 30000);
 
 if('serviceWorker' in navigator){
   navigator.serviceWorker.register('sw.js');

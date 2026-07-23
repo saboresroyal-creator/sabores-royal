@@ -89,22 +89,68 @@ input { font-family: inherit; }
   padding: 16px 18px; color: var(--text); font-size: 20px; outline: none;
 }
 .scan-box input:focus { border-color: var(--gold); }
+.scan-box .cam-btn {
+  flex: none; width: 56px; background: var(--glass2); border: 2px solid var(--bd);
+  border-radius: 12px; font-size: 22px;
+}
+.scan-box .cam-btn:hover { border-color: var(--gold); }
 .search-results {
   background: var(--navy2); border: 1px solid var(--bd); border-radius: 10px;
   max-height: 260px; overflow-y: auto; display: none;
 }
 .search-results.show { display: block; }
 .search-row {
-  display: flex; justify-content: space-between; align-items: center;
+  display: flex; justify-content: space-between; align-items: center; gap: 10px;
   padding: 10px 14px; border-bottom: 1px solid var(--bd); font-size: 14px;
 }
 .search-row:last-child { border-bottom: none; }
 .search-row:hover { background: var(--glass2); }
+.search-row .sr-info { display: flex; align-items: center; gap: 10px; flex: 1; min-width: 0; }
 .search-row .sr-stock { font-size: 11px; color: var(--muted); }
 .search-row .sr-stock.low { color: var(--warn); }
 .search-row .sr-stock.none { color: var(--danger); }
 
-.cart-wrap { flex: 1; overflow-y: auto; background: var(--glass); border: 1px solid var(--bd); border-radius: 12px; }
+.thumb { width: 38px; height: 38px; border-radius: 8px; object-fit: cover; background: var(--glass2); flex: none; }
+.thumb-ph {
+  width: 38px; height: 38px; border-radius: 8px; background: var(--glass2); flex: none;
+  display: flex; align-items: center; justify-content: center; font-size: 15px; color: var(--muted);
+}
+
+/* ── CHIPS DE CATEGORÍA / GRILLA DE PRODUCTOS ── */
+.cat-chips { display: flex; gap: 8px; overflow-x: auto; padding-bottom: 2px; }
+.cat-chips::-webkit-scrollbar { display: none; }
+.cat-chip {
+  flex: none; background: var(--glass); border: 1.5px solid var(--bd); border-radius: 20px;
+  padding: 8px 16px; font-size: 13px; font-weight: 700; color: var(--text); white-space: nowrap;
+}
+.cat-chip.active { background: var(--gold); color: #000; border-color: var(--gold); }
+
+.grid-empty { text-align: center; padding: 40px 20px; color: var(--muted); font-size: 14px; }
+.product-grid {
+  flex: 3; min-height: 160px; overflow-y: auto; display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(130px, 1fr)); gap: 10px;
+  align-content: start;
+}
+.product-card {
+  background: var(--glass); border: 1px solid var(--bd); border-radius: 12px;
+  padding: 8px; display: flex; flex-direction: column; gap: 6px; text-align: left;
+}
+.product-card:hover { border-color: var(--gold); background: var(--glass2); }
+.product-card .pc-thumb { width: 100%; aspect-ratio: 1; border-radius: 8px; object-fit: cover; background: var(--glass2); }
+.product-card .pc-thumb-ph {
+  width: 100%; aspect-ratio: 1; border-radius: 8px; background: var(--glass2);
+  display: flex; align-items: center; justify-content: center; font-size: 28px; color: var(--muted);
+}
+.product-card .pc-name {
+  font-size: 12.5px; font-weight: 600; line-height: 1.25;
+  display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; overflow: hidden;
+}
+.product-card .pc-price { font-size: 14px; font-weight: 800; color: var(--gold2); }
+.product-card .pc-stock { font-size: 10.5px; color: var(--muted); }
+.product-card .pc-stock.low { color: var(--warn); }
+.product-card .pc-stock.none { color: var(--danger); }
+
+.cart-wrap { flex: 2; min-height: 120px; overflow-y: auto; background: var(--glass); border: 1px solid var(--bd); border-radius: 12px; }
 .cart-empty { text-align: center; padding: 40px 20px; color: var(--muted); font-size: 14px; }
 .cart-row {
   display: flex; align-items: center; gap: 10px; padding: 12px 14px;
@@ -132,6 +178,29 @@ input { font-family: inherit; }
   padding: 12px 6px; font-size: 12px; font-weight: 700; color: var(--text);
 }
 .pay-methods button.active { background: var(--gold); color: #000; border-color: var(--gold); }
+
+.client-toggle {
+  background: none; border: none; color: var(--gold2); font-size: 13px;
+  text-align: left; padding: 2px 4px; text-decoration: underline;
+}
+.client-box { display: flex; gap: 8px; flex-wrap: wrap; }
+.client-box input {
+  flex: 1; min-width: 140px; background: var(--glass2); border: 1px solid var(--bd);
+  border-radius: 10px; padding: 10px 12px; color: var(--text); font-size: 14px; outline: none;
+}
+.client-box input:focus { border-color: var(--gold); }
+.client-found { font-size: 12px; color: var(--ok); }
+
+/* ── ESCANEO POR CÁMARA ── */
+.scan-video-wrap {
+  position: relative; border-radius: 14px; overflow: hidden; background: #000;
+  min-height: 220px; margin-bottom: 10px;
+}
+.scan-video-wrap video { width: 100%; max-height: 280px; display: block; object-fit: cover; }
+.scan-frame {
+  position: absolute; top: 50%; left: 50%; transform: translate(-50%,-50%);
+  width: 80%; height: 90px; border: 2px solid var(--gold); border-radius: 10px; pointer-events: none;
+}
 
 .btn-cobrar {
   background: var(--ok); color: #06281a; font-weight: 800; font-size: 18px;
@@ -205,6 +274,22 @@ let payMethod = null;
 let searchQuery = '';
 let submitting = false;
 let saleError = '';
+let showClientBox = false;
+let clientPhone = '';
+let clientName = '';
+let activeCategory = null; // null = "Todas"
+
+/* ── ESCANEO POR CÁMARA (respaldo del lector USB) ──
+   Versión recortada, standalone, de openBarcodeScannerModal() en
+   index.html (líneas ~5050-5265): mismo motor de dos pasos (BarcodeDetector
+   nativo, con @zxing/browser por CDN de respaldo), pero solo el modo
+   "single scan" — acá siempre se busca un producto para agregar al
+   carrito, no hace falta el modo de asignación masiva de Admin Productos. */
+const BARCODE_FORMATS_NATIVE = ['ean_13','ean_8','upc_a','upc_e','code_128','code_39','codabar','itf','qr_code'];
+let _barcodeStream = null;
+let _barcodePollTimer = null;
+let _zxingControls = null;
+let _zxingLoadPromise = null;
 
 function render(){
   const el = document.getElementById('app');
@@ -294,11 +379,11 @@ function checkPin(){
     render();
   }
 }
-function cambiarCajero(){ cajero = null; pinBuffer=''; pinError=''; screen='login'; cart=[]; payMethod=null; render(); }
+function cambiarCajero(){ cajero = null; pinBuffer=''; pinError=''; screen='login'; cart=[]; payMethod=null; clientPhone=''; clientName=''; showClientBox=false; render(); }
 function cambiarCaja(){
   if(!confirm('¿Cambiar la caja configurada en esta computadora?')) return;
   localStorage.removeItem('pos_caja');
-  caja = null; cajero = null; cart = []; payMethod = null;
+  caja = null; cajero = null; cart = []; payMethod = null; clientPhone=''; clientName=''; showClientBox=false;
   screen = 'select-caja';
   render();
 }
@@ -306,8 +391,39 @@ function cambiarCaja(){
 /* ── VENTA ── */
 function cajaEsc(){ return esc(caja||''); }
 
+function getCategories(){
+  const set = new Set(products.map(p=>p.cat));
+  return Array.from(set).sort((a,b)=>a.localeCompare(b,'es'));
+}
+function setCategory(cat){ activeCategory = cat; render(); }
+function filterProductsForGrid(){
+  const q = norm(searchQuery);
+  return products.filter(p=>{
+    if(activeCategory && p.cat !== activeCategory) return false;
+    if(q.length>=2 && !norm(p.name).includes(q)) return false;
+    return true;
+  });
+}
+function productCardHtml(p){
+  const src = p.photo_clean_url || p.photo_url;
+  const stockCls = p.stock<=0 ? 'none' : p.stock<=5 ? 'low' : '';
+  return `<button class="product-card" onclick="addToCart(${p.id})">
+    ${src ? `<img class="pc-thumb" src="${escAttr(src)}" loading="lazy">` : `<div class="pc-thumb-ph">🛒</div>`}
+    <div class="pc-name">${esc(p.name)}</div>
+    <div class="pc-price">${money(p.price)}</div>
+    <div class="pc-stock ${stockCls}">Stock: ${p.stock}</div>
+  </button>`;
+}
+function renderProductGrid(){
+  const showGrid = activeCategory || searchQuery.length>=2;
+  if(!showGrid) return `<div class="grid-empty">Elegí una categoría o buscá un producto</div>`;
+  const list = filterProductsForGrid();
+  if(!list.length) return `<div class="grid-empty">No se encontraron productos</div>`;
+  return list.slice(0,120).map(productCardHtml).join('');
+}
+
 function renderVenta(){
-  const filtered = filterProducts();
+  const categories = getCategories();
   return `
     <div class="topbar">
       <span class="caja-badge">${cajaEsc()}</span>
@@ -323,19 +439,17 @@ function renderVenta(){
         <input id="scan-input" placeholder="Escaneá o escribí para buscar..." value="${escAttr(searchQuery)}"
           oninput="onSearchInput(this.value)"
           onkeydown="onScanKeydown(event)" autocomplete="off">
+        <button class="cam-btn" title="Escanear con cámara" onclick="openCameraScanner()">📷</button>
       </div>
-      <div class="search-results ${searchQuery.length>=2 && filtered.length ? 'show':''}">
-        ${filtered.slice(0,30).map(p=>{
-          const stockCls = p.stock<=0 ? 'none' : p.stock<=5 ? 'low' : '';
-          return `<div class="search-row" onclick="addToCart(${p.id})">
-            <div><div>${esc(p.name)}</div><div class="sr-stock ${stockCls}">Stock: ${p.stock}</div></div>
-            <div>${money(p.price)}</div>
-          </div>`;
-        }).join('')}
+      <div class="cat-chips">
+        <button class="cat-chip ${!activeCategory?'active':''}" onclick="setCategory(null)">Todas</button>
+        ${categories.map(c=>`<button class="cat-chip ${activeCategory===c?'active':''}" onclick="setCategory('${escAttr(c)}')">${esc(c)}</button>`).join('')}
       </div>
+      <div class="product-grid">${renderProductGrid()}</div>
       <div class="cart-wrap">
         ${cart.length===0 ? `<div class="cart-empty">Carrito vacío — escaneá un producto o buscalo arriba</div>` :
           cart.map((it,i)=>`<div class="cart-row">
+            ${thumbHtml(it)}
             <div class="cr-name">${esc(it.name)}<div class="cr-unit">${money(it.price)} c/u</div></div>
             <div class="cr-qty-ctl">
               <button onclick="changeQty(${i},-1)">-</button>
@@ -350,6 +464,13 @@ function renderVenta(){
         <span class="tb-label">Total</span>
         <span class="tb-value">${money(cartTotal())}</span>
       </div>
+      ${showClientBox ? `
+        <div class="client-box">
+          <input id="client-phone" placeholder="Teléfono del cliente" value="${escAttr(clientPhone)}" oninput="clientPhone=this.value" inputmode="tel">
+          <input id="client-name" placeholder="Nombre (opcional)" value="${escAttr(clientName)}" oninput="clientName=this.value">
+        </div>` :
+        `<button class="client-toggle" onclick="showClientBox=true; render();">+ Agregar cliente (opcional)</button>`
+      }
       <div class="pay-methods">
         ${payMethodBtn('efectivo','Efectivo')}
         ${payMethodBtn('debito','Débito')}
@@ -361,6 +482,10 @@ function renderVenta(){
       </button>
     </div>
   `;
+}
+function thumbHtml(p){
+  const src = p.photo_clean_url || p.photo_url;
+  return src ? `<img class="thumb" src="${escAttr(src)}" loading="lazy">` : `<div class="thumb-ph">🛒</div>`;
 }
 function payMethodBtn(key, label){
   return `<button class="${payMethod===key?'active':''}" onclick="setPayMethod('${key}')">${label}</button>`;
@@ -396,7 +521,7 @@ function addToCart(id){
   if(!p) return;
   const existing = cart.find(it=>it.id===id);
   if(existing) existing.qty += 1;
-  else cart.push({id:p.id, name:p.name, price:p.price, qty:1, barcode:p.barcode||''});
+  else cart.push({id:p.id, name:p.name, price:p.price, qty:1, barcode:p.barcode||'', photo_url:p.photo_url, photo_clean_url:p.photo_clean_url});
   searchQuery = '';
   saleError = '';
   render();
@@ -416,14 +541,19 @@ async function confirmSale(){
   const items = cart.map(it=>({id:it.id, name:it.name, qty:it.qty, price:it.price, lineTotal:it.price*it.qty, barcode:it.barcode}));
   const subtotal = cartTotal();
   try{
-    const rows = await posFetch('/rpc/create_pos_sale', 'POST', {
+    const rpcBody = {
       p_caja: caja, p_cajero: cajero, p_items: items,
       p_subtotal: subtotal, p_total: subtotal, p_payment_method: payMethod
-    }, 'return=representation');
+    };
+    // Solo se manda el cliente si se cargó algo — así una venta sin cliente
+    // sigue funcionando igual aunque todavía no se haya corrido la migración
+    // que le agrega esos dos parámetros a create_pos_sale().
+    if(clientPhone.trim()){ rpcBody.p_client_phone = clientPhone.trim(); rpcBody.p_client_name = clientName.trim(); }
+    const rows = await posFetch('/rpc/create_pos_sale', 'POST', rpcBody, 'return=representation');
     const sale = Array.isArray(rows) ? rows[0] : rows;
     cart.forEach(it=>{ const p = products.find(x=>x.id===it.id); if(p) p.stock -= it.qty; });
-    printTicket(sale || {id:'', items, total:subtotal, payment_method:payMethod, created_at:new Date().toISOString()});
-    cart = []; payMethod = null;
+    printTicket(sale || {id:'', items, total:subtotal, payment_method:payMethod, created_at:new Date().toISOString(), client_phone:clientPhone, client_name:clientName});
+    cart = []; payMethod = null; clientPhone = ''; clientName = ''; showClientBox = false;
     toast('Venta cobrada', 'ok');
   }catch(e){
     const m = String(e.message||'');
@@ -433,6 +563,110 @@ async function confirmSale(){
   }finally{
     submitting = false; render();
   }
+}
+
+/* ── ESCANEO POR CÁMARA ── */
+function openCameraScanner(){
+  const root = document.getElementById('modal-root');
+  root.innerHTML = `<div class="modal-bg" onclick="if(event.target===this) closeCameraScanner()"><div class="modal">
+    <h2>Escanear producto</h2>
+    <div class="scan-video-wrap">
+      <video id="cam-video" autoplay playsinline muted></video>
+      <div class="scan-frame"></div>
+    </div>
+    <p id="cam-status" style="font-size:12px; color:var(--muted); text-align:center; margin-bottom:10px;">Apuntá la cámara al código de barras…</p>
+    <button class="close-btn" onclick="closeCameraScanner()">Cancelar</button>
+  </div></div>`;
+  startBarcodeCamera();
+}
+function closeCameraScanner(){
+  pauseBarcodeCamera();
+  closeModal();
+}
+function setCamStatus(msg){ const el = document.getElementById('cam-status'); if(el) el.textContent = msg; }
+function onBarcodeDetected(code){
+  if(!code) return;
+  closeCameraScanner();
+  const p = products.find(x => x.barcode && x.barcode === code);
+  if(p) addToCart(p.id);
+  else toast('Código no encontrado: ' + code, 'err');
+}
+function loadZXingLib(){
+  if(window.ZXingBrowser) return Promise.resolve();
+  if(_zxingLoadPromise) return _zxingLoadPromise;
+  _zxingLoadPromise = new Promise((resolve, reject)=>{
+    const s = document.createElement('script');
+    s.src = 'https://unpkg.com/@zxing/browser@0.1.5';
+    s.onload = ()=>resolve();
+    s.onerror = ()=>{ _zxingLoadPromise=null; reject(new Error('No se pudo cargar el lector de respaldo')); };
+    document.head.appendChild(s);
+  });
+  return _zxingLoadPromise;
+}
+function startBarcodeCamera(){
+  const video = document.getElementById('cam-video');
+  if(video) video.addEventListener('loadedmetadata', ()=>{ video.play().catch(()=>{}); });
+  let decided = false;
+  const fallbackTimer = setTimeout(()=>{ if(!decided){ decided=true; startBarcodeCameraZXing(); } }, 2500);
+  if(window.BarcodeDetector){
+    BarcodeDetector.getSupportedFormats().then(supported=>{
+      if(decided) return; decided=true; clearTimeout(fallbackTimer);
+      const wanted = BARCODE_FORMATS_NATIVE.filter(f=>supported.includes(f));
+      if(wanted.length) startBarcodeCameraNative(wanted); else startBarcodeCameraZXing();
+    }).catch(()=>{ if(decided) return; decided=true; clearTimeout(fallbackTimer); startBarcodeCameraZXing(); });
+  } else {
+    decided = true; clearTimeout(fallbackTimer);
+    startBarcodeCameraZXing();
+  }
+}
+function startBarcodeCameraNative(formats){
+  const video = document.getElementById('cam-video');
+  navigator.mediaDevices.getUserMedia({ video:{ facingMode:'environment', width:{ideal:1920}, height:{ideal:1080} } }).then(stream=>{
+    _barcodeStream = stream;
+    video.srcObject = stream;
+    video.play().catch(()=>{});
+    try{
+      const detector = new BarcodeDetector({formats});
+      _barcodePollTimer = setInterval(()=>{
+        if(!video || video.readyState < 2) return;
+        detector.detect(video).then(codes=>{
+          if(codes && codes.length) onBarcodeDetected(codes[0].rawValue);
+        }).catch(()=>{});
+      }, 180);
+    }catch(e){
+      pauseBarcodeCamera();
+      startBarcodeCameraZXing();
+    }
+  }).catch(err=>{ setCamStatus('No se pudo abrir la cámara: '+(err.message||err)); });
+}
+function startBarcodeCameraZXing(){
+  const video = document.getElementById('cam-video');
+  loadZXingLib().then(()=>{
+    let hints = undefined;
+    try{
+      if(ZXingBrowser.DecodeHintType && ZXingBrowser.BarcodeFormat){
+        const F = ZXingBrowser.BarcodeFormat;
+        hints = new Map();
+        hints.set(ZXingBrowser.DecodeHintType.POSSIBLE_FORMATS, [
+          F.EAN_13, F.EAN_8, F.UPC_A, F.UPC_E, F.CODE_128, F.CODE_39, F.CODABAR, F.ITF, F.QR_CODE,
+        ]);
+      }
+    }catch(e){ hints = undefined; }
+    const codeReader = new ZXingBrowser.BrowserMultiFormatReader(hints);
+    codeReader.decodeFromConstraints(
+      { video: { facingMode: 'environment', width:{ideal:1920}, height:{ideal:1080} } },
+      video,
+      (result)=>{ if(result) onBarcodeDetected(result.getText()); }
+    ).then(controls=>{ _zxingControls = controls; })
+    .catch(err=>{ setCamStatus('No se pudo abrir la cámara: '+(err.message||err)); });
+  }).catch(err=>{ setCamStatus(err.message); });
+}
+function pauseBarcodeCamera(){
+  if(_barcodePollTimer){ clearInterval(_barcodePollTimer); _barcodePollTimer=null; }
+  if(_zxingControls){ try{ _zxingControls.stop(); }catch(e){} _zxingControls=null; }
+  if(_barcodeStream){ _barcodeStream.getTracks().forEach(t=>t.stop()); _barcodeStream=null; }
+  const video = document.getElementById('cam-video');
+  if(video) video.srcObject = null;
 }
 
 /* ── TICKET NO FISCAL ── */
@@ -464,6 +698,7 @@ function printTicket(sale){
     <div class="line"></div>
     <table><tr><td class="tot">TOTAL</td><td class="tot" style="text-align:right;">${money(sale.total)}</td></tr></table>
     <p style="margin-top:6px;">Medio de pago: ${esc(payLabels[sale.payment_method]||sale.payment_method)}</p>
+    ${sale.client_phone ? `<p>Cliente: ${esc(sale.client_name||'')} ${esc(sale.client_phone)}</p>` : ''}
     <div class="foot">Comprobante interno no válido como factura fiscal AFIP</div>
     </body></html>`);
   win.document.close();
@@ -506,7 +741,7 @@ async function init(){
   try{
     const [settingsRows, productRows] = await Promise.all([
       posFetch('/app_settings?setting_key=in.(pos_config,fiscal_config)&select=setting_key,setting_value'),
-      posFetch('/products?select=id,name,price,stock,barcode&order=name'),
+      posFetch('/products?select=id,name,price,stock,barcode,cat,photo_url,photo_clean_url&order=name'),
     ]);
     (settingsRows||[]).forEach(row=>{
       try{
@@ -515,7 +750,7 @@ async function init(){
         if(row.setting_key === 'fiscal_config' && parsed) fiscal = Object.assign({}, fiscal, parsed);
       }catch(e){}
     });
-    products = (productRows||[]).map(p=>({id:p.id, name:p.name, price:Number(p.price)||0, stock:Number(p.stock)||0, barcode:p.barcode||''}));
+    products = (productRows||[]).map(p=>({id:p.id, name:p.name, price:Number(p.price)||0, stock:Number(p.stock)||0, barcode:p.barcode||'', cat:p.cat||'Otros', photo_url:p.photo_url||'', photo_clean_url:p.photo_clean_url||''}));
   }catch(e){
     toast('No se pudo conectar: ' + e.message, 'err');
   }
