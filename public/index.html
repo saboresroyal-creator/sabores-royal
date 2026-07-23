@@ -681,7 +681,8 @@ let state = {
 let cmpDB = {proveedores:[], listas:[], pedidos:[]};
 let _cmpRowIdx = [];
 let cmpLoaded = false;
-let _cmpImpData = null;
+let _cmpAiItems = null;
+let _cmpAiFilename = '';
 let rentLoaded = false;
 let supplierDebtsLoaded = false;
 let supplierChecksLoaded = false;
@@ -2696,30 +2697,6 @@ function cmpNorm(s){
     .replace(/[ù-ü]/g,'u').replace(/ñ/g,'n')
     .replace(/[^a-z0-9\s]/g,' ').replace(/\s+/g,' ').trim();
 }
-function cmpParseUnitQty(s){
-  if(!s) return 1;
-  const n=cmpNorm(s); let m;
-  m=n.match(/\bx\s*(\d+)/); if(m) return +m[1];
-  m=n.match(/\bpor\s+(\d+)/); if(m) return +m[1];
-  m=n.match(/(\d+)\s*(?:unidades?|und?|u\b|piezas?|pcs?)/); if(m) return +m[1];
-  m=n.match(/(?:pack|caja|fardo|display|bulto)\s*(?:de\s*)?(?:x\s*)?(\d+)/); if(m) return +m[1];
-  m=n.match(/(\d+)\s*(?:pack|cajas?|fardos?)/); if(m) return +m[1];
-  if(n==='docena'||n.includes('docena')) return 12;
-  if((n.includes('media')||n.includes('1/2'))&&n.includes('docena')) return 6;
-  m=n.match(/^(\d+)$/); if(m){ const v=+m[1]; if(v>1&&v<=144) return v; }
-  return 1;
-}
-function cmpParsePrice(v){
-  if(v===undefined||v===null||v==='') return null;
-  let s=String(v).replace(/[^\d.,]/g,'');
-  if(!s) return null;
-  let n;
-  if(s.includes(',')&&s.includes('.')){
-    n=s.lastIndexOf(',')>s.lastIndexOf('.')?parseFloat(s.replace(/\./g,'').replace(',','.')):parseFloat(s.replace(/,/g,''));
-  } else if(s.includes(',')){ n=parseFloat(s.replace(',','.')); }
-  else { n=parseFloat(s); }
-  return isNaN(n)?null:n;
-}
 function cmpMoney(v){ const n=parseFloat(v); return isNaN(n)?'-':'$'+n.toLocaleString('es-AR',{minimumFractionDigits:2,maximumFractionDigits:2}); }
 const CMP_COLORS=['#1a6b4a','#6b1a4a','#1a3a6b','#6b4a1a','#4a1a6b','#6b1a1a'];
 function cmpColor(id){ let h=0; for(let i=0;i<id.length;i++) h=(h*31+id.charCodeAt(i))|0; return CMP_COLORS[Math.abs(h)%CMP_COLORS.length]; }
@@ -2744,8 +2721,8 @@ function cmpTokSim(a,b){
 // comparar productos entre proveedores porque cada uno las escribe distinto
 // (x38g vs 38grs vs 38 gr) y eso le baja el puntaje a productos que en
 // realidad son el mismo. La cantidad por bulto para el precio por unidad
-// sale solo de lo que se mapeó al importar (cmpParseUnitQty), nunca del
-// nombre del producto.
+// sale de lo que la IA extrajo al importar (ver api/comparador-parse.js),
+// nunca del nombre del producto.
 const CMP_UNIT_WORDS = new Set(['gr','grs','gramos','kg','kgs','mg','ml','mls','lt','lts','litros','cc','cm','u','un','und','unid','unidades','uds','pack','cja','caja','cajas','docena','display','bulto','fardo','kilo','kilos','x']);
 function cmpIsNoiseToken(t){
   if(/^x?\d+[a-z]{0,4}$/.test(t)) return true; // 38g, x38g, 40u, 500, 1kg...
@@ -2952,12 +2929,12 @@ function cmpHtmlImportar(){
       <div class="cmp-upload-zone" onclick="document.getElementById('cmp-fi').click()">
         <div style="font-size:30px;">&#128194;</div>
         <p style="font-weight:700;margin-top:6px;">Tocar para seleccionar</p>
-        <p style="font-size:11px;color:rgba(255,255,255,0.4);margin-top:4px;">Excel (.xlsx, .xls), CSV o PDF</p>
+        <p style="font-size:11px;color:rgba(255,255,255,0.4);margin-top:4px;">Excel (.xlsx, .xls), CSV o PDF — una IA lo lee y arma la lista sola</p>
         <input type="file" id="cmp-fi" accept=".csv,.txt,.xlsx,.xls,.pdf" style="display:none" onchange="cmpOnFile(this)">
       </div>
-      <div style="font-size:12px;color:rgba(255,255,255,0.4);margin-bottom:8px;text-align:center;">O bien peg&aacute; el texto:</div>
-      <textarea class="cmp-inp" id="cmp-paste" style="min-height:80px;font-size:12px;font-family:monospace;resize:vertical;" placeholder="Peg&aacute; aqu&iacute; el texto de la lista (separado por tabs o comas)..."></textarea>
-      <button class="btn-secondary" style="width:100%;margin-top:8px;font-size:13px;" onclick="cmpParseText()">Analizar texto</button>
+      <div style="font-size:12px;color:rgba(255,255,255,0.4);margin-bottom:8px;text-align:center;">O bien peg&aacute; el texto (aunque sea desprolijo):</div>
+      <textarea class="cmp-inp" id="cmp-paste" style="min-height:80px;font-size:12px;font-family:monospace;resize:vertical;" placeholder="Peg&aacute; ac&aacute; la lista tal cual la tengas — la IA la entiende igual..."></textarea>
+      <button class="btn-secondary" style="width:100%;margin-top:8px;font-size:13px;" onclick="cmpParseText()">Analizar con IA</button>
     </div>
     <div id="cmp-imp-preview"></div>
   </div>`;
@@ -2970,15 +2947,15 @@ function cmpOnFile(input){
     if(!window.XLSX){
       const s=document.createElement('script');
       s.src='xlsx.min.js';
-      s.onload=()=>cmpReadXlsx(f);
+      s.onload=()=>cmpReadXlsxToText(f);
       s.onerror=()=>toast('xlsx.min.js no disponible — exportá como CSV','err');
       document.head.appendChild(s);
-    } else { cmpReadXlsx(f); }
+    } else { cmpReadXlsxToText(f); }
   } else if(ext==='pdf'){
     cmpReadPdf(f);
   } else {
     const r=new FileReader();
-    r.onload=e=>cmpParseCsvText(e.target.result,f.name);
+    r.onload=e=>cmpAiParse(e.target.result,f.name);
     r.readAsText(f,'UTF-8');
   }
 }
@@ -3020,22 +2997,19 @@ async function cmpReadPdf(f){
     }
     const text=pageTexts.join('\n');
     if(!text.trim()){ toast('No se encontró texto en el PDF','err'); return; }
-    cmpParseCsvText(text,f.name);
+    cmpAiParse(text,f.name);
   }catch(e){ toast('Error al leer PDF: '+e.message,'err'); }
 }
 
-function cmpReadXlsx(f){
+function cmpReadXlsxToText(f){
   const r=new FileReader();
   r.onload=e=>{
     try{
       const wb=XLSX.read(e.target.result,{type:'array'});
       const ws=wb.Sheets[wb.SheetNames[0]];
-      const data=XLSX.utils.sheet_to_json(ws,{header:1,defval:''});
-      if(data.length<2){ toast('Archivo vacío','err'); return; }
-      const headers=data[0].map((h,i)=>String(h||'Col '+(i+1)).trim());
-      const rows=data.slice(1).filter(r=>r.some(c=>String(c||'').trim())).map(r=>r.map(c=>String(c===null||c===undefined?'':c)));
-      _cmpImpData={headers,rows,filename:f.name};
-      cmpShowMapper();
+      const csv=XLSX.utils.sheet_to_csv(ws);
+      if(!csv.trim()){ toast('Archivo vacío','err'); return; }
+      cmpAiParse(csv,f.name);
     }catch(err){ toast('Error al leer Excel: '+err.message,'err'); }
   };
   r.readAsArrayBuffer(f);
@@ -3044,118 +3018,86 @@ function cmpReadXlsx(f){
 function cmpParseText(){
   const txt=(document.getElementById('cmp-paste').value||'').trim();
   if(!txt){ toast('Pegá texto primero','err'); return; }
-  cmpParseCsvText(txt,'texto pegado');
+  cmpAiParse(txt,'texto pegado');
 }
 
-function cmpParseCsvText(text,filename){
-  const lines=text.split(/\r?\n/).filter(l=>l.trim());
-  if(lines.length<2){ toast('El archivo parece vacío','err'); return; }
-  const first=lines[0];
-  let sep='\t';
-  if((first.match(/;/g)||[]).length>(first.match(/,/g)||[]).length) sep=';';
-  else if((first.match(/,/g)||[]).length>0) sep=',';
-  function splitLine(l){
-    const res=[]; let cur='',inq=false;
-    for(let i=0;i<l.length;i++){
-      const c=l[i];
-      if(c==='"'){inq=!inq;continue;}
-      if(c===sep&&!inq){res.push(cur.trim());cur='';continue;}
-      cur+=c;
-    }
-    res.push(cur.trim()); return res;
-  }
-  const headers=splitLine(lines[0]).map((h,i)=>h||'Col '+(i+1));
-  const rows=lines.slice(1).map(l=>splitLine(l)).filter(r=>r.some(c=>c.trim()));
-  if(!rows.length){ toast('No se encontraron filas','err'); return; }
-  _cmpImpData={headers,rows,filename};
-  cmpShowMapper();
-}
-
-function cmpShowMapper(){
-  if(!_cmpImpData) return;
+// Le mandamos el texto crudo (CSV, texto de PDF, o pegado a mano) a una IA
+// en el backend, que devuelve {name, price, unit, unitQty, code} por
+// producto ya limpio — reemplaza el mapeo manual de columnas de antes.
+// Ver api/comparador-parse.js.
+async function cmpAiParse(text,filename){
   const provId=(document.getElementById('cmp-prov')||{}).value||'';
-  const prov=cmpDB.proveedores.find(p=>p.id===provId);
-  const saved=prov&&prov.mapping?prov.mapping:{};
-  const h=_cmpImpData.headers;
-  function opts(sel){ let o='<option value="">-- No usar --</option>'; h.forEach((hh,i)=>{ o+=`<option value="${i}"${sel==i?' selected':''}>${cmpEsc(hh)}</option>`; }); return o; }
-  let an=-1,ap=-1,au=-1,ac=-1,ab=-1;
-  // Solo reusar el mapeo guardado si el archivo tiene EXACTAMENTE las mismas
-  // columnas que la última vez. Si cambió la forma del archivo (por ejemplo
-  // se sacó la columna de bulto), los índices viejos apuntan a otra
-  // columna distinta y arman un mapeo sin sentido (se vio con Milenium:
-  // terminó usando "Precio" como columna de bulto, dividiendo el precio
-  // por sí mismo). Mejor volver a detectar todo por palabra clave.
-  const savedMatchesFile = prov && prov.mapping && Array.isArray(prov.mapping.headers) && JSON.stringify(prov.mapping.headers)===JSON.stringify(h);
-  if(!savedMatchesFile){
-    const nKw=['descripcion','descripci','producto','nombre','articulo','item','detalle'];
-    const pKw=['precio','price','importe','costo','valor'];
-    const uKw=['unidad','presentacion','medida','unit','contenido'];
-    const cKw=['codigo','code','cod','sku','ref'];
-    const bKw=['bulto','x bulto','por bulto','cant bulto','unid x','uds x','uds/caja','por caja'];
-    h.forEach((hh,i)=>{ const n=cmpNorm(hh);
-      if(an<0&&nKw.some(k=>n.includes(k))) an=i;
-      if(ap<0&&pKw.some(k=>n.includes(k))) ap=i;
-      if(au<0&&uKw.some(k=>n.includes(k))) au=i;
-      if(ac<0&&cKw.some(k=>n.includes(k))) ac=i;
-      if(ab<0&&bKw.some(k=>n.includes(k))) ab=i;
-    });
-  } else { an=saved.nameCol??-1; ap=saved.priceCol??-1; au=saved.unitCol??-1; ac=saved.codeCol??-1; ab=saved.bultoCol??-1; }
-  const previewRows=_cmpImpData.rows.slice(0,4);
-  let preview=`<div class="cmp-tbl-wrap"><table><tr>${h.map(hh=>`<th>${cmpEsc(hh)}</th>`).join('')}</tr>`;
-  previewRows.forEach(r=>{ preview+=`<tr>${h.map((_,i)=>`<td>${cmpEsc(r[i]||'')}</td>`).join('')}</tr>`; });
-  preview+='</table></div>';
-  const html=`<div style="background:var(--glass);border:1px solid var(--glass-bd);border-radius:14px;padding:14px;">
-    <div style="font-size:11px;font-weight:700;color:var(--gold2);text-transform:uppercase;letter-spacing:.5px;margin-bottom:4px;">Archivo: ${cmpEsc(_cmpImpData.filename)}</div>
-    <div style="font-size:12px;color:rgba(255,255,255,0.4);margin-bottom:12px;">${_cmpImpData.rows.length} filas &middot; ${h.length} columnas</div>
-    <div style="font-size:11px;font-weight:700;color:var(--gold2);text-transform:uppercase;letter-spacing:.5px;margin-bottom:10px;">Mapear columnas</div>
-    <div class="cmp-col-row"><span>&#128246; Producto</span><select id="cmp-cn">${opts(an)}</select></div>
-    <div class="cmp-col-row"><span>&#128176; Precio</span><select id="cmp-cp">${opts(ap)}</select></div>
-    <div class="cmp-col-row"><span>&#128208; Presentaci&oacute;n</span><select id="cmp-cu">${opts(au)}</select></div>
-    <div class="cmp-col-row"><span>&#128230; Unid/Bulto</span><select id="cmp-cb">${opts(ab)}</select></div>
-    <div class="cmp-note">&#128161; Si una columna tiene la cantidad por bulto (ej: 12, 24) seleccionala. Si no, lo detecto solo desde la presentaci&oacute;n.</div>
-    <div class="cmp-col-row"><span># C&oacute;digo</span><select id="cmp-cc">${opts(ac)}</select></div>
-    <div style="margin-top:12px;font-size:11px;font-weight:700;color:var(--gold2);text-transform:uppercase;letter-spacing:.5px;margin-bottom:8px;">Vista previa</div>
-    ${preview}
-    <button class="btn-primary" style="width:100%;margin-top:14px;" onclick="cmpDoImport()">Importar</button>
-  </div>`;
+  if(!provId){ toast('Seleccioná un proveedor primero','err'); return; }
+  if(!text||!text.trim()){ toast('El archivo parece vacío','err'); return; }
+  _cmpAiFilename=filename;
   const el=document.getElementById('cmp-imp-preview');
-  if(el) el.innerHTML=html;
+  if(el) el.innerHTML=`<div style="background:var(--glass);border:1px solid var(--glass-bd);border-radius:14px;padding:28px 14px;text-align:center;">
+    <span class="spin" style="display:inline-block;font-size:22px;">${ic('sparkle')}</span>
+    <p style="margin-top:10px;font-size:13px;color:rgba(255,255,255,0.6);">Analizando &ldquo;${cmpEsc(filename)}&rdquo; con IA&hellip;</p>
+  </div>`;
+  try{
+    const res=await fetch('/api/comparador-parse',{
+      method:'POST',
+      headers:{'Content-Type':'application/json','Authorization':'Bearer '+((adminSession&&adminSession.access_token)||'')},
+      body:JSON.stringify({text,filename})
+    });
+    const data=await res.json().catch(()=>({}));
+    if(!res.ok) throw new Error(data.error||('Error '+res.status));
+    if(!data.items||!data.items.length) throw new Error('No se encontraron productos en el archivo');
+    _cmpAiItems=data.items;
+    cmpRenderAiPreview();
+    if(data.truncated) toast('El archivo era muy largo, se analizó una parte','err');
+  }catch(e){
+    if(el) el.innerHTML=`<div style="background:var(--glass);border:1px solid var(--glass-bd);border-radius:14px;padding:16px;text-align:center;">
+      <p style="font-size:13px;color:var(--warn);margin-bottom:10px;">${cmpEsc(e.message)}</p>
+      <button class="btn-secondary" onclick="document.getElementById('cmp-imp-preview').innerHTML=''">Cerrar</button>
+    </div>`;
+  }
 }
 
-async function cmpDoImport(){
+function cmpRenderAiPreview(){
+  const el=document.getElementById('cmp-imp-preview');
+  if(!el) return;
+  const items=_cmpAiItems||[];
+  const rowsHtml=items.map((it,i)=>`
+    <tr>
+      <td><input class="cmp-inp" style="padding:6px 8px;font-size:12px;" value="${cmpEsc(it.name)}" oninput="_cmpAiItems[${i}].name=this.value"></td>
+      <td><input class="cmp-inp" style="padding:6px 8px;font-size:12px;width:80px;" type="number" step="0.01" value="${it.price}" oninput="_cmpAiItems[${i}].price=parseFloat(this.value)||0"></td>
+      <td><input class="cmp-inp" style="padding:6px 8px;font-size:12px;width:64px;" type="number" step="1" value="${it.unitQty}" oninput="_cmpAiItems[${i}].unitQty=parseInt(this.value)||1"></td>
+      <td><button class="icon-btn" onclick="cmpAiRemoveItem(${i})">${ic('trash')}</button></td>
+    </tr>`).join('');
+  el.innerHTML=`<div style="background:var(--glass);border:1px solid var(--glass-bd);border-radius:14px;padding:14px;">
+    <div style="font-size:11px;font-weight:700;color:var(--gold2);text-transform:uppercase;letter-spacing:.5px;margin-bottom:4px;">Archivo: ${cmpEsc(_cmpAiFilename)}</div>
+    <div style="font-size:12px;color:rgba(255,255,255,0.4);margin-bottom:12px;">${items.length} producto(s) detectados por IA &middot; revisá antes de importar</div>
+    <div class="cmp-tbl-wrap"><table>
+      <tr><th>Producto</th><th>Precio</th><th>Uds/bulto</th><th></th></tr>
+      ${rowsHtml}
+    </table></div>
+    <button class="btn-primary" style="width:100%;margin-top:14px;" onclick="cmpDoAiImport()">Importar ${items.length} producto(s)</button>
+    <button class="btn-secondary" style="width:100%;margin-top:8px;font-size:12.5px;" onclick="_cmpAiItems=null;render()">Cancelar</button>
+  </div>`;
+}
+
+function cmpAiRemoveItem(i){
+  _cmpAiItems.splice(i,1);
+  cmpRenderAiPreview();
+}
+
+async function cmpDoAiImport(){
   const provId=(document.getElementById('cmp-prov')||{}).value||'';
   if(!provId){ toast('Seleccioná un proveedor','err'); return; }
-  const cn=document.getElementById('cmp-cn').value;
-  const cp=document.getElementById('cmp-cp').value;
-  const cu=document.getElementById('cmp-cu').value;
-  const cb=document.getElementById('cmp-cb').value;
-  const cc=document.getElementById('cmp-cc').value;
-  if(cn===''){ toast('Seleccioná la columna de producto','err'); return; }
-  if(cp===''){ toast('Seleccioná la columna de precio','err'); return; }
-  const rows=[];
-  _cmpImpData.rows.forEach(r=>{
-    const name=String(r[cn]||'').trim();
-    const price=cmpParsePrice(r[cp]);
-    if(!name||price===null) return;
-    const unitStr=cu!==''?String(r[cu]||'').trim():'';
-    let unitQty=1;
-    if(cb!==''){
-      const raw=parseFloat(String(r[cb]||'').replace(',','.'));
-      unitQty=(raw>1&&raw<=1000)?raw:1;
-    } else { unitQty=cmpParseUnitQty(unitStr); }
-    rows.push({name,price,unit:unitStr,unitQty,code:cc!==''?String(r[cc]||'').trim():'',norm:cmpNorm(name)});
-  });
-  if(!rows.length){ toast('No se encontraron filas válidas','err'); return; }
+  const items=_cmpAiItems||[];
+  const rows=items.filter(it=>it.name&&it.price>0).map(it=>({
+    name:it.name, price:it.price, unit:it.unit||'', unitQty:it.unitQty||1, code:it.code||'', norm:cmpNorm(it.name)
+  }));
+  if(!rows.length){ toast('No hay productos para importar','err'); return; }
   const now=new Date().toISOString();
   const lista={provId,rows,at:now};
   const idx=cmpDB.listas.findIndex(l=>l.provId===provId);
   if(idx>=0) cmpDB.listas[idx]=lista; else cmpDB.listas.push(lista);
   const prov=cmpDB.proveedores.find(p=>p.id===provId);
-  if(prov){
-    prov.mapping={nameCol:+cn,priceCol:+cp,unitCol:cu!==''?+cu:null,codeCol:cc!==''?+cc:null,bultoCol:cb!==''?+cb:null,headers:_cmpImpData.headers};
-    prov.lastImport=now;
-  }
-  _cmpImpData=null;
+  if(prov) prov.lastImport=now;
+  _cmpAiItems=null;
   try{
     await Promise.all([cmpSaveListaSupa(lista),prov?cmpSaveProvSupa(prov):Promise.resolve()]);
     toast(rows.length+' productos importados');
