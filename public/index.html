@@ -676,6 +676,7 @@ let state = {
   supplierChecks: {movements:[]},
   adminPagosSub: 'deudas',
   adminPagosProveedor: null,
+  stockCount: {items: []},
 };
 
 let cmpDB = {proveedores:[], listas:[], pedidos:[]};
@@ -686,6 +687,7 @@ let _cmpAiFilename = '';
 let rentLoaded = false;
 let supplierDebtsLoaded = false;
 let supplierChecksLoaded = false;
+let stockCountLoaded = false;
 
 function saveState(){
   try{ localStorage.setItem(STORAGE_KEY, JSON.stringify(state)); }catch(e){}
@@ -1757,10 +1759,11 @@ function renderSectionBannerHTML(b, fallbackGradient){
       </div>
     `;
   }
+  const hasMedia = !!(b.video || b.image);
   return `
-    <div style="margin:0 16px 14px; border-radius:16px; overflow:hidden; position:relative; background:${b.image?'#000':fallbackGradient};">
-      ${b.image?`<img src="${b.image}" style="width:100%;display:block;">`:''}
-      <div style="position:${b.image?'absolute':'relative'}; bottom:0; left:0; right:0; background:${b.image?'linear-gradient(transparent,rgba(0,0,0,0.65))':'none'}; padding:16px; ${b.image?'':'min-height:80px;display:flex;flex-direction:column;justify-content:flex-end;'}">
+    <div style="margin:0 16px 14px; border-radius:16px; overflow:hidden; position:relative; background:${hasMedia?'#000':fallbackGradient};">
+      ${b.video?`<video src="${b.video}" style="width:100%;display:block;" autoplay muted loop playsinline ${b.image?`poster="${b.image}"`:''}></video>`:(b.image?`<img src="${b.image}" style="width:100%;display:block;">`:'')}
+      <div style="position:${hasMedia?'absolute':'relative'}; bottom:0; left:0; right:0; background:${hasMedia?'linear-gradient(transparent,rgba(0,0,0,0.65))':'none'}; padding:16px; ${hasMedia?'':'min-height:80px;display:flex;flex-direction:column;justify-content:flex-end;'}">
         ${b.title?`<h3 style="color:#fff; font-size:17px; font-weight:700; margin-bottom:3px;">${b.title}</h3>`:''}
         ${b.subtitle?`<p style="color:rgba(255,255,255,0.85); font-size:12.5px;">${b.subtitle}</p>`:''}
       </div>
@@ -2569,6 +2572,7 @@ function renderAdmin(){
   const ALL_TABS = [
     {key:"pedidos",       label:"Pedidos", badge:pendingOrdersCount},
     {key:"productos",     label:"Productos", badge:lowStockCount},
+    {key:"conteo",        label:"Conteo de Stock"},
     {key:"categorias",    label:"Categorías"},
     {key:"clientes",      label:"Clientes"},
     {key:"estadisticas",  label:"Estadísticas"},
@@ -2635,6 +2639,7 @@ function renderAdmin(){
         </div>
         <div id="admin-productos-list">${renderAdminProductos()}</div>
       ` : ""}
+      ${tab==="conteo" ? renderAdminConteo() : ""}
       ${tab==="categorias" ? renderAdminCategorias() : ""}
       ${tab==="clientes" ? renderAdminClientes() : ""}
       ${tab==="estadisticas" ? renderAdminEstadisticas() : ""}
@@ -4033,6 +4038,7 @@ function renderAdminAlquiler(){
 const PERM_OPTIONS = [
   {key:"pedidos",       label:"Ver y gestionar pedidos"},
   {key:"productos",     label:"Ver y editar productos"},
+  {key:"conteo",        label:"Usar conteo de stock"},
   {key:"categorias",    label:"Ver y editar categorías"},
   {key:"clientes",      label:"Ver clientes"},
   {key:"estadisticas",  label:"Ver estadísticas"},
@@ -5088,6 +5094,9 @@ function onBarcodeDetected(code){
   if(_barcodeScanMode==='bulk'){
     pauseBarcodeCamera();
     showBarcodeAssignPanel(code);
+  } else if(_barcodeScanMode==='conteo'){
+    pauseBarcodeCamera();
+    showStockCountEntryPanel(code);
   } else {
     const cb = _barcodeScanOnResult;
     closeBarcodeScannerModal();
@@ -5273,6 +5282,212 @@ function updateProductBarcode(id, code, skipConfirm){
   apiSaveProduct(p);
   renderAdminProductosInPlace();
   toast('Código asignado a '+p.name, 'ok');
+}
+
+/* ---------- ADMIN: CONTEO DE STOCK ----------
+   Registro de conteo físico de mercadería: se escanea cada producto
+   con la cámara (reutilizando el mismo motor de arriba, en modo
+   'conteo'), se carga la cantidad contada y el precio de venta, y
+   queda un registro aparte — no toca products.stock ni products.price.
+   Mismo patrón que Alquiler/Pagos: todo vive en un único registro de
+   app_settings ('stock_count'), leído y escrito entero. Ver
+   supabase-migration-stock-count.sql. */
+function stockCountId(){ return 'sc'+Date.now().toString(36)+Math.random().toString(36).slice(2,8); }
+function stockCountTotals(){
+  const items = state.stockCount.items||[];
+  return {
+    count: items.length,
+    qty: items.reduce((s,it)=>s+Number(it.qty||0),0),
+    money: items.reduce((s,it)=>s+Number(it.qty||0)*Number(it.price||0),0),
+  };
+}
+async function apiSyncStockCount(){
+  try{
+    const rows = await adminFetch('/app_settings?setting_key=eq.stock_count&select=setting_value', 'GET');
+    const row = rows && rows[0];
+    if(row){
+      const parsed = JSON.parse(row.setting_value);
+      state.stockCount = Object.assign({items:[]}, parsed);
+    }
+    stockCountLoaded = true;
+    saveState();
+    render();
+  }catch(e){
+    stockCountLoaded = true;
+    toast('Error cargando conteo de stock: '+e.message, 'err');
+    render();
+  }
+}
+async function apiSaveStockCount(){
+  try{
+    const val = JSON.stringify(state.stockCount);
+    const existing = await adminFetch('/app_settings?setting_key=eq.stock_count&select=id', 'GET');
+    if(existing && existing.length>0){
+      await adminFetch('/app_settings?setting_key=eq.stock_count', 'PATCH', {setting_value: val});
+    }else{
+      await adminFetch('/app_settings', 'POST', {setting_key:'stock_count', setting_value: val});
+    }
+  }catch(e){ toast('Error guardando conteo: '+e.message, 'err'); }
+}
+function openStockCountScanner(){
+  _barcodeScanMode = 'conteo';
+  const overlay = document.createElement("div");
+  overlay.className = "modal-overlay";
+  overlay.id = "barcode-scanner-overlay";
+  overlay.innerHTML = scannerModalHTML(
+    'Contar stock',
+    `<div id="barcode-scan-panel"><p id="barcode-scan-status" style="text-align:center; font-size:12.5px; color:rgba(255,255,255,0.5); margin:10px 0 0;">Apuntá la cámara al código de barras del producto…</p></div>`,
+    'Listo, terminar'
+  );
+  document.body.appendChild(overlay);
+  startBarcodeCamera();
+}
+function showStockCountEntryPanel(code){
+  const panel = document.getElementById('barcode-scan-panel');
+  if(!panel) return;
+  const product = state.products.find(p=>p.barcode===code);
+  const existingItem = (state.stockCount.items||[]).find(it=>it.barcode===code);
+  const defaultQty = existingItem ? existingItem.qty : 1;
+  const defaultPrice = existingItem ? existingItem.price : (product ? product.price : '');
+  const defaultName = existingItem ? existingItem.name : (product ? product.name : '');
+  panel.innerHTML = `
+    <div style="padding:10px 0 0;">
+      <div style="font-size:12px; color:rgba(255,255,255,0.5); margin-bottom:8px;">Código: <b style="color:var(--gold2);">${escapeHtml(code)}</b>${existingItem?' · <span style="color:var(--warn);">ya está en el conteo, se actualiza</span>':''}</div>
+      ${product ? `
+        <div style="display:flex; align-items:center; gap:10px; margin-bottom:10px;">
+          ${product.photo ? `<img src="${escapeHtml(product.photo)}" style="width:40px;height:40px;border-radius:8px;object-fit:cover;flex:none;">` : ''}
+          <span style="font-size:14px; font-weight:600;">${escapeHtml(product.name)}</span>
+        </div>
+        <input type="hidden" id="sc-name" value="${escapeHtml(product.name)}">
+      ` : `
+        <div style="font-size:12px; color:var(--warn); margin-bottom:8px;">Código no encontrado en el catálogo — cargalo como producto nuevo del conteo:</div>
+        <div class="form-group"><label>Nombre del producto</label><input id="sc-name" value="${escapeHtml(defaultName)}" placeholder="Ej: Alfajor Triple"></div>
+      `}
+      <div style="display:flex; gap:8px;">
+        <div class="form-group" style="flex:1;"><label>Cantidad contada</label><input id="sc-qty" type="number" min="0" value="${defaultQty}" inputmode="decimal"></div>
+        <div class="form-group" style="flex:1;"><label>Precio de venta</label><input id="sc-price" type="number" min="0" value="${defaultPrice}" inputmode="decimal"></div>
+      </div>
+      <div style="display:flex; gap:8px; margin-top:6px;">
+        <button class="btn-secondary" style="flex:1;" onclick="resumeStockCountScan()">Omitir</button>
+        <button class="btn-primary" style="flex:1;" onclick="confirmStockCountEntry('${code.replace(/'/g,"\\'")}', ${product?`'${product.id}'`:'null'})">Agregar al conteo</button>
+      </div>
+    </div>`;
+  setTimeout(()=>{ const i=document.getElementById('sc-qty'); if(i){ i.focus(); i.select(); } }, 50);
+}
+function resumeStockCountScan(){
+  const panel = document.getElementById('barcode-scan-panel');
+  if(panel) panel.innerHTML = `<p id="barcode-scan-status" style="text-align:center; font-size:12.5px; color:rgba(255,255,255,0.5); margin:10px 0;">Apuntá la cámara al código de barras del producto…</p>`;
+  startBarcodeCamera();
+}
+function confirmStockCountEntry(code, productId){
+  const name = (document.getElementById('sc-name')?.value||'').trim();
+  const qty = Number(document.getElementById('sc-qty')?.value);
+  const price = Number(document.getElementById('sc-price')?.value);
+  if(!name){ toast('Ingresá un nombre para el producto', 'err'); return; }
+  if(!(qty>=0)){ toast('Ingresá una cantidad válida', 'err'); return; }
+  if(!(price>=0)){ toast('Ingresá un precio válido', 'err'); return; }
+  const items = state.stockCount.items||(state.stockCount.items=[]);
+  const idx = items.findIndex(it=>it.barcode===code);
+  const entry = {id: idx>=0?items[idx].id:stockCountId(), barcode:code, productId: productId||null, name, qty, price, updatedAt:new Date().toISOString()};
+  if(idx>=0) items[idx] = entry; else items.push(entry);
+  saveState();
+  apiSaveStockCount();
+  toast('Agregado: '+name, 'ok');
+  resumeStockCountScan();
+}
+function openStockCountManualModal(itemId){
+  const item = itemId ? (state.stockCount.items||[]).find(it=>it.id===itemId) : null;
+  const overlay = document.createElement("div");
+  overlay.className = "modal-overlay";
+  overlay.id = "stockcount-manual-overlay";
+  overlay.innerHTML = `
+    <div class="modal-sheet">
+      <div class="modal-handle"></div>
+      <h3 class="modal-title">${item?'Editar item del conteo':'Agregar item al conteo'}</h3>
+      <div class="form-group"><label>Producto</label><input id="scm-name" value="${escapeHtml(item?item.name:'')}" placeholder="Nombre del producto"></div>
+      <div class="form-group"><label>Código de barras (opcional)</label><input id="scm-barcode" value="${escapeHtml(item?(item.barcode||''):'')}" placeholder="Opcional"></div>
+      <div style="display:flex; gap:8px;">
+        <div class="form-group" style="flex:1;"><label>Cantidad</label><input id="scm-qty" type="number" min="0" value="${item?item.qty:1}"></div>
+        <div class="form-group" style="flex:1;"><label>Precio de venta</label><input id="scm-price" type="number" min="0" value="${item?item.price:''}"></div>
+      </div>
+      <div style="display:flex; gap:10px; margin-top:6px;">
+        <button class="btn-secondary" style="flex:1;" onclick="closeStockCountManualModal()">Cancelar</button>
+        <button class="btn-primary" style="flex:1;" onclick="saveStockCountManualEntry(${item?`'${item.id}'`:'null'})">Guardar</button>
+      </div>
+    </div>`;
+  document.body.appendChild(overlay);
+}
+function closeStockCountManualModal(){ const el=document.getElementById("stockcount-manual-overlay"); if(el) el.remove(); }
+function saveStockCountManualEntry(itemId){
+  const name = (document.getElementById('scm-name').value||'').trim();
+  const barcode = (document.getElementById('scm-barcode').value||'').trim();
+  const qty = Number(document.getElementById('scm-qty').value);
+  const price = Number(document.getElementById('scm-price').value);
+  if(!name){ toast('Ingresá un nombre', 'err'); return; }
+  if(!(qty>=0)){ toast('Ingresá una cantidad válida', 'err'); return; }
+  if(!(price>=0)){ toast('Ingresá un precio válido', 'err'); return; }
+  const items = state.stockCount.items||(state.stockCount.items=[]);
+  if(itemId){
+    const idx = items.findIndex(it=>it.id===itemId);
+    if(idx>=0) items[idx] = Object.assign({}, items[idx], {name, barcode, qty, price, updatedAt:new Date().toISOString()});
+  } else {
+    items.push({id:stockCountId(), barcode, productId:null, name, qty, price, updatedAt:new Date().toISOString()});
+  }
+  closeStockCountManualModal();
+  saveState(); render();
+  apiSaveStockCount();
+}
+function deleteStockCountItem(itemId){
+  if(!confirm('¿Eliminar este item del conteo?')) return;
+  state.stockCount.items = (state.stockCount.items||[]).filter(it=>it.id!==itemId);
+  saveState(); render();
+  apiSaveStockCount();
+}
+function clearStockCount(){
+  if(!confirm('¿Vaciar todo el conteo de stock? Se borran todos los items cargados.')) return;
+  state.stockCount = {items:[]};
+  saveState(); render();
+  apiSaveStockCount();
+}
+function renderAdminConteo(){
+  if(!stockCountLoaded){ apiSyncStockCount(); return `<div style="padding:40px;text-align:center;color:rgba(255,255,255,0.4);">Cargando...</div>`; }
+  const items = state.stockCount.items||[];
+  const totals = stockCountTotals();
+  return `
+    <div style="padding:14px 16px;">
+      <p style="font-size:12.5px; color:rgba(255,255,255,0.55); margin-bottom:12px;">
+        Conteo físico de mercadería: escaneá cada producto, cargá la cantidad contada y el precio de venta. Este registro es independiente del stock que usa la caja para vender — sirve para saber cuánto tenés y cuánto vale.
+      </p>
+      <div style="display:flex; gap:10px; margin-bottom:14px;">
+        <button class="btn-primary" style="flex:1; display:flex; align-items:center; justify-content:center; gap:6px;" onclick="openStockCountScanner()">${ic('camera')} Escanear</button>
+        <button class="btn-secondary" style="flex:1;" onclick="openStockCountManualModal(null)">+ Agregar manual</button>
+      </div>
+      <div style="display:flex; gap:10px; margin-bottom:14px;">
+        <div style="flex:1; background:var(--glass); border:1px solid var(--glass-bd); border-radius:12px; padding:12px; text-align:center;">
+          <div style="font-size:11px; color:rgba(255,255,255,0.5);">Productos</div>
+          <div style="font-size:18px; font-weight:800; color:var(--gold2);">${totals.count}</div>
+        </div>
+        <div style="flex:1; background:var(--glass); border:1px solid var(--glass-bd); border-radius:12px; padding:12px; text-align:center;">
+          <div style="font-size:11px; color:rgba(255,255,255,0.5);">Cantidad total</div>
+          <div style="font-size:18px; font-weight:800; color:var(--gold2);">${totals.qty}</div>
+        </div>
+        <div style="flex:1; background:var(--glass); border:1px solid var(--glass-bd); border-radius:12px; padding:12px; text-align:center;">
+          <div style="font-size:11px; color:rgba(255,255,255,0.5);">Valor del stock</div>
+          <div style="font-size:15px; font-weight:800; color:var(--gold2);">${money(totals.money)}</div>
+        </div>
+      </div>
+      ${items.length ? `<button class="btn-secondary" style="width:100%; margin-bottom:10px; color:var(--danger); border-color:var(--danger);" onclick="clearStockCount()">Vaciar conteo</button>` : ''}
+      ${!items.length ? `<div style="text-align:center; padding:40px 20px; color:rgba(255,255,255,0.4);">Todavía no cargaste ningún producto. Escaneá el primero.</div>` : items.slice().reverse().map(it=>`
+        <div style="display:flex; align-items:center; gap:10px; padding:10px 12px; border-radius:12px; background:var(--glass); border:1px solid var(--glass-bd); margin-bottom:8px;">
+          <div style="flex:1; min-width:0;">
+            <div style="font-size:13.5px; font-weight:600; overflow:hidden; text-overflow:ellipsis; white-space:nowrap;">${escapeHtml(it.name)}</div>
+            <div style="font-size:11px; color:rgba(255,255,255,0.45);">${it.barcode?escapeHtml(it.barcode)+' · ':''}${it.qty} u. × ${money(it.price)} = ${money(it.qty*it.price)}</div>
+          </div>
+          <button class="icon-btn" onclick="openStockCountManualModal('${it.id}')">${ic('edit')}</button>
+          <button class="icon-btn" style="color:var(--danger);" onclick="deleteStockCountItem('${it.id}')">${ic('trash')}</button>
+        </div>
+      `).join('')}
+    </div>`;
 }
 
 /* ---------- PHOTO UPLOAD + FILTERS + AI BG REMOVAL + BACKGROUNDS ---------- */
@@ -7508,12 +7723,37 @@ function renderSectionBannerModalHTML(type){
           <span id="sb-active-label" style="font-size:12.5px; opacity:.7;">${d.active?'Activo':'Oculto'}</span>
         </label>
       </div>
-      <div style="display:flex; gap:10px; margin-top:6px;">
+      <button type="button" class="btn-secondary" style="width:100%; margin-top:2px;" onclick="previewSectionBanner('${type}')">👁 Vista previa</button>
+      <div style="display:flex; gap:10px; margin-top:8px;">
         <button class="btn-secondary" style="flex:1;" onclick="closeSectionBannerModal()">Cancelar</button>
         <button class="btn-primary" style="flex:1;" onclick="saveSectionBannerModal('${type}')">Guardar</button>
       </div>
     </div>
   `;
+}
+function previewSectionBanner(type){
+  const d = sectionBannerDraft;
+  const title = (document.getElementById("sb-title")||{}).value || "";
+  const subtitle = (document.getElementById("sb-subtitle")||{}).value || "";
+  const draftBanner = {
+    image: d.image||"", images: d.images||["","","",""], video: d.video||"",
+    layout: d.layout==='grid4'?'grid4':'single', title, subtitle, active: true,
+  };
+  const fallbackGradient = type==='novedad' ? 'linear-gradient(120deg,#1a3a6e,#0f1c45)' : 'linear-gradient(120deg,var(--gold2),var(--gold))';
+  const overlay = document.createElement("div");
+  overlay.className = "modal-overlay";
+  overlay.id = "secbanner-preview-overlay";
+  overlay.style.zIndex = 10000;
+  overlay.innerHTML = `
+    <div class="modal-sheet">
+      <div class="modal-handle"></div>
+      <h3 class="modal-title">Vista previa (así lo verán los clientes)</h3>
+      <div style="padding:0;">${renderSectionBannerHTML(draftBanner, fallbackGradient)}</div>
+      <p style="font-size:11.5px; opacity:.55; margin:0 0 12px; text-align:center;">Esto todavía no se guardó ni se publicó.</p>
+      <button class="btn-primary" style="width:100%;" onclick="document.getElementById('secbanner-preview-overlay').remove()">Cerrar</button>
+    </div>
+  `;
+  document.body.appendChild(overlay);
 }
 function onSectionBannerPhotoSelected(event){
   const file = event.target.files[0];
