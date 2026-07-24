@@ -370,7 +370,11 @@ let clienteEditando = null; // {phone,full_name,address,email} o null
 let compVentas = [];
 let compLoading = false;
 let compDetalle = null;
-let compFiltro = 'hoy'; // hoy | ayer | todos
+let compFiltro = 'hoy'; // hoy | ayer | 7d | todos | rango
+let compDesde = '';
+let compHasta = '';
+let compCliente = '';
+let compPago = 'todos'; // todos | efectivo | debito | credito | qr
 
 /* ── CIERRE X / Z ── */
 let cierrePreview = null; // {periodStart, periodEnd, total, count, byPayment}
@@ -943,19 +947,39 @@ function renderSeccionClientes(){
 async function cargarComprobantes(){
   compLoading = true; compDetalle = null; render();
   try{
-    let q = '/pos_sales?caja=eq.'+encodeURIComponent(caja)+'&order=created_at.desc&select=*&limit=200';
-    if(compFiltro==='hoy' || compFiltro==='ayer'){
+    let q = '/pos_sales?caja=eq.'+encodeURIComponent(caja)+'&order=created_at.desc&select=*&limit=500';
+    if(compFiltro==='hoy' || compFiltro==='ayer' || compFiltro==='7d'){
       const d = new Date();
       if(compFiltro==='ayer') d.setDate(d.getDate()-1);
+      if(compFiltro==='7d') d.setDate(d.getDate()-6);
       d.setHours(0,0,0,0);
-      const d2 = new Date(d); d2.setDate(d2.getDate()+1);
+      let d2;
+      if(compFiltro==='ayer'){ d2 = new Date(d); d2.setDate(d2.getDate()+1); }
+      else { d2 = new Date(); d2.setDate(d2.getDate()+1); d2.setHours(0,0,0,0); }
       q += '&created_at=gte.'+d.toISOString()+'&created_at=lt.'+d2.toISOString();
+    } else if(compFiltro==='rango'){
+      if(compDesde){ const d = new Date(compDesde+'T00:00:00'); q += '&created_at=gte.'+d.toISOString(); }
+      if(compHasta){ const d = new Date(compHasta+'T00:00:00'); d.setDate(d.getDate()+1); q += '&created_at=lt.'+d.toISOString(); }
     }
+    if(compPago !== 'todos'){ q += '&payment_method=eq.'+encodeURIComponent(compPago); }
+    const cli = compCliente.trim();
+    if(cli){ q += '&or=('+['client_name.ilike.*'+encodeURIComponent(cli)+'*','client_phone.ilike.*'+encodeURIComponent(cli)+'*'].join(',')+')'; }
     compVentas = await posFetch(q) || [];
   }catch(e){ toast('Error: '+e.message, 'err'); compVentas = []; }
   compLoading = false; render();
 }
 function setCompFiltro(f){ compFiltro = f; cargarComprobantes(); }
+function aplicarCompRango(){
+  const desde = document.getElementById('comp-desde'); const hasta = document.getElementById('comp-hasta');
+  compDesde = desde ? desde.value : ''; compHasta = hasta ? hasta.value : '';
+  compFiltro = 'rango'; cargarComprobantes();
+}
+function setCompPago(p){ compPago = p; cargarComprobantes(); }
+function buscarCompCliente(){
+  const inp = document.getElementById('comp-cliente');
+  compCliente = inp ? inp.value : compCliente;
+  cargarComprobantes();
+}
 function verComprobante(id){ compDetalle = compVentas.find(v=>v.id===id) || null; render(); }
 function cerrarComprobante(){ compDetalle = null; render(); }
 function reimprimirComprobante(){ if(compDetalle) printTicket(compDetalle); }
@@ -998,18 +1022,37 @@ function renderSeccionComprobantes(){
     <div class="cat-chips">
       <button class="cat-chip ${compFiltro==='hoy'?'active':''}" onclick="setCompFiltro('hoy')">Hoy</button>
       <button class="cat-chip ${compFiltro==='ayer'?'active':''}" onclick="setCompFiltro('ayer')">Ayer</button>
+      <button class="cat-chip ${compFiltro==='7d'?'active':''}" onclick="setCompFiltro('7d')">Últimos 7 días</button>
       <button class="cat-chip ${compFiltro==='todos'?'active':''}" onclick="setCompFiltro('todos')">Todos</button>
+      <button class="cat-chip ${compFiltro==='rango'?'active':''}" onclick="compFiltro='rango'; render();">Rango de fechas</button>
+    </div>
+    ${compFiltro==='rango' ? `
+    <div class="form-row" style="flex-direction:row; align-items:flex-end; gap:8px;">
+      <div class="form-row" style="flex:1;"><label>Desde</label><input id="comp-desde" type="date" value="${escAttr(compDesde)}"></div>
+      <div class="form-row" style="flex:1;"><label>Hasta</label><input id="comp-hasta" type="date" value="${escAttr(compHasta)}"></div>
+      <button class="btn-primary" onclick="aplicarCompRango()">Aplicar</button>
+    </div>` : ''}
+    <div class="search-inline">
+      <input id="comp-cliente" placeholder="Buscar por cliente (nombre o teléfono)..." value="${escAttr(compCliente)}" oninput="compCliente=this.value" onkeydown="if(event.key==='Enter') buscarCompCliente()">
+      <button class="btn-secondary" onclick="buscarCompCliente()">Buscar</button>
+    </div>
+    <div class="cat-chips">
+      <button class="cat-chip ${compPago==='todos'?'active':''}" onclick="setCompPago('todos')">Todos los medios</button>
+      ${Object.keys(PAY_LABELS).map(k=>`<button class="cat-chip ${compPago===k?'active':''}" onclick="setCompPago('${k}')">${esc(PAY_LABELS[k])}</button>`).join('')}
     </div>
     ${compLoading ? '<p style="color:var(--muted);">Cargando…</p>' : !compVentas.length ? `<div class="grid-empty">No hay ventas para este filtro</div>` : `
       <div class="comp-meta" style="color:var(--gold2); font-weight:700; font-size:14px;">Total: ${money(activas.reduce((s,v)=>s+Number(v.total||0),0))} (${activas.length} venta${activas.length!==1?'s':''})</div>
       <div class="list-wrap">
-        ${compVentas.map(v=>`<div class="list-row clickable ${v.status==='anulada'?'anulada':''}" onclick="verComprobante('${escAttr(v.id)}')">
+        ${compVentas.map(v=>{
+          const dt = new Date(v.created_at);
+          const fecha = (compFiltro==='hoy'||compFiltro==='ayer') ? dt.toLocaleTimeString('es-AR',{hour:'2-digit',minute:'2-digit'}) : dt.toLocaleString('es-AR',{day:'2-digit',month:'2-digit',hour:'2-digit',minute:'2-digit'});
+          return `<div class="list-row clickable ${v.status==='anulada'?'anulada':''}" onclick="verComprobante('${escAttr(v.id)}')">
           <div class="lr-info">
-            <div class="lr-title">${new Date(v.created_at).toLocaleTimeString('es-AR',{hour:'2-digit',minute:'2-digit'})} · ${esc(v.cajero||'')} ${v.status==='anulada'?'<span class="badge-anulada">ANULADA</span>':''}</div>
-            <div class="lr-sub">${esc(PAY_LABELS[v.payment_method]||v.payment_method)}</div>
+            <div class="lr-title">${fecha} · ${esc(v.cajero||'')} ${v.status==='anulada'?'<span class="badge-anulada">ANULADA</span>':''}</div>
+            <div class="lr-sub">${esc(PAY_LABELS[v.payment_method]||v.payment_method)}${v.client_name||v.client_phone?' · '+esc(v.client_name||v.client_phone):''}</div>
           </div>
           <div class="lr-amount">${money(v.total)}</div>
-        </div>`).join('')}
+        </div>`;}).join('')}
       </div>`
     }
   </div>`;

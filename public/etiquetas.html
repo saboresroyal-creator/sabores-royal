@@ -1,0 +1,288 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+<title>Sabores Royal — Etiquetas</title>
+<script src="https://unpkg.com/jsbarcode@3.11.6/dist/JsBarcode.all.min.js" defer></script>
+<style>
+:root {
+  --navy: #0f1c45;
+  --navy2: #1a2a5e;
+  --navy3: #22357a;
+  --gold: #c5a028;
+  --gold2: #e0bb4a;
+  --ok: #3ecf8e;
+  --danger: #e5566d;
+  --warn: #e0a83c;
+  --glass: rgba(255,255,255,.06);
+  --glass2: rgba(255,255,255,.10);
+  --bd: rgba(255,255,255,.12);
+  --muted: rgba(255,255,255,.45);
+  --text: #f0f2ff;
+}
+*, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+html, body { height: 100%; background: var(--navy); color: var(--text); font-family: system-ui, -apple-system, sans-serif; font-size: 16px; }
+#app { min-height: 100vh; display: flex; flex-direction: column; }
+button { font-family: inherit; cursor: pointer; border: none; background: none; color: inherit; }
+input { font-family: inherit; }
+
+.topbar {
+  display: flex; align-items: center; gap: 14px; padding: 12px 20px;
+  background: rgba(15,28,69,.9); border-bottom: 1px solid var(--bd);
+  position: sticky; top: 0; z-index: 10;
+}
+.topbar h1 { font-size: 16px; font-weight: 700; flex: 1; }
+.topbar .back { color: var(--gold2); font-size: 14px; }
+
+.select-wrap { padding: 16px; flex: 1; display: flex; flex-direction: column; gap: 12px; max-width: 720px; width: 100%; margin: 0 auto; }
+
+.search-inline { display: flex; gap: 8px; }
+.search-inline input {
+  flex: 1; background: var(--glass2); border: 2px solid var(--bd); border-radius: 12px;
+  padding: 13px 16px; color: var(--text); font-size: 15px; outline: none;
+}
+.search-inline input:focus { border-color: var(--gold); }
+
+.cat-chips { display: flex; gap: 8px; overflow-x: auto; padding-bottom: 2px; }
+.cat-chips::-webkit-scrollbar { display: none; }
+.cat-chip {
+  flex: none; padding: 8px 14px; border-radius: 20px; background: var(--glass);
+  border: 1px solid var(--bd); color: var(--muted); font-size: 13px; white-space: nowrap;
+}
+.cat-chip.active { background: var(--gold); color: #000; border-color: var(--gold); }
+
+.bulk-actions { display: flex; gap: 8px; }
+.btn-primary, .btn-secondary, .btn-danger {
+  padding: 12px 16px; border-radius: 12px; font-size: 14px; font-weight: 700; text-align: center;
+}
+.btn-primary { background: var(--gold); color: #000; }
+.btn-secondary { background: var(--glass); border: 1px solid var(--bd); color: var(--text); }
+.btn-danger { background: var(--danger); color: #fff; }
+.btn-primary:disabled { opacity: .4; pointer-events: none; }
+
+.prod-list { display: flex; flex-direction: column; gap: 8px; overflow-y: auto; }
+.prod-row {
+  display: flex; align-items: center; gap: 12px; padding: 12px; border-radius: 12px;
+  background: var(--glass); border: 1px solid var(--bd);
+}
+.prod-row.checked { border-color: var(--gold); background: var(--glass2); }
+.prod-check {
+  width: 22px; height: 22px; border-radius: 6px; border: 2px solid var(--bd); flex: none;
+  display: flex; align-items: center; justify-content: center; font-size: 14px;
+}
+.prod-row.checked .prod-check { background: var(--gold); border-color: var(--gold); color: #000; }
+.prod-info { flex: 1; min-width: 0; }
+.prod-name { font-size: 14px; font-weight: 600; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.prod-sub { font-size: 12px; color: var(--muted); }
+.prod-price { font-size: 14px; font-weight: 800; color: var(--gold2); flex: none; }
+.qty-stepper { display: flex; align-items: center; gap: 6px; flex: none; }
+.qty-stepper button { width: 26px; height: 26px; border-radius: 8px; background: var(--glass2); font-size: 15px; font-weight: 700; }
+.qty-stepper span { min-width: 18px; text-align: center; font-size: 13px; font-weight: 700; }
+
+.grid-empty { text-align: center; color: var(--muted); padding: 40px 20px; font-size: 14px; }
+
+.bottom-bar {
+  position: sticky; bottom: 0; padding: 14px 16px; background: rgba(15,28,69,.95);
+  border-top: 1px solid var(--bd); display: flex; align-items: center; gap: 12px;
+}
+.bottom-bar .count { flex: 1; font-size: 13px; color: var(--muted); }
+.bottom-bar .count b { color: var(--gold2); }
+
+/* ── HOJA DE IMPRESIÓN ── */
+.print-toolbar {
+  display: flex; gap: 10px; padding: 14px 16px; background: rgba(15,28,69,.95); border-bottom: 1px solid var(--bd);
+  position: sticky; top: 0; z-index: 10;
+}
+.sheet-wrap { background: #cfcabf; padding: 20px; flex: 1; display: flex; justify-content: center; }
+.sheet {
+  background: #fff; width: 210mm; min-height: 297mm; padding: 8mm;
+  display: flex; flex-wrap: wrap; gap: 4mm; align-content: flex-start;
+}
+.tag {
+  width: 60mm; height: 34mm; border: 1px dashed #999; border-radius: 2mm;
+  padding: 2mm 3mm; display: flex; flex-direction: column; align-items: center; justify-content: center;
+  text-align: center; color: #000; break-inside: avoid;
+}
+.tag-store { font-size: 7pt; font-weight: 700; letter-spacing: 1px; color: #555; text-transform: uppercase; }
+.tag-name { font-size: 9.5pt; font-weight: 700; line-height: 1.15; margin: 1mm 0; max-height: 8mm; overflow: hidden; }
+.tag-price { font-size: 15pt; font-weight: 800; }
+.tag-barcode { width: 100%; max-height: 11mm; margin-top: 1mm; }
+.tag-code { font-size: 7pt; color: #555; margin-top: 1mm; }
+
+@media print {
+  body { background: #fff; }
+  .topbar, .print-toolbar { display: none !important; }
+  .sheet-wrap { background: #fff; padding: 0; }
+  .sheet { width: auto; min-height: 0; padding: 0; }
+  @page { size: A4; margin: 8mm; }
+}
+</style>
+</head>
+<body>
+<div id="app">Cargando…</div>
+<script>
+const SUPABASE_KEY = 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6InRvcGd1bndlcWV6dGVkaGh0aGJsIiwicm9sZSI6ImFub24iLCJpYXQiOjE3ODI3NDczMjgsImV4cCI6MjA5ODMyMzMyOH0.KfZ8f8GlKoQoRxdPk-lrNDSTRcjd21z6d8CgITHf3WU';
+const SUPABASE_URL = (()=>{ try{ const r=JSON.parse(atob(SUPABASE_KEY.split('.')[1])).ref; return 'https://'+r+'.supabase.co'; }catch(e){ return 'https://topgunweqeztedhhthbl.supabase.co'; } })();
+
+async function posFetch(path){
+  const headers = {'Content-Type':'application/json','apikey':SUPABASE_KEY,'Authorization':'Bearer '+SUPABASE_KEY};
+  const res = await fetch(SUPABASE_URL + '/rest/v1' + path, { headers });
+  const text = await res.text();
+  if(!res.ok){ let err; try{ err=JSON.parse(text); }catch(e){ err={message:text}; } throw new Error(err.message || 'HTTP '+res.status); }
+  return text ? JSON.parse(text) : null;
+}
+
+let products = [];
+let loading = true;
+let loadError = '';
+let query = '';
+let activeCat = null; // null = todas
+let selected = {}; // id -> qty
+let screen = 'select'; // select | print
+
+function esc(s){ return String(s||'').replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;'); }
+function escAttr(s){ return esc(s).replace(/'/g,'&#39;'); }
+function money(n){ return '$' + Number(n||0).toLocaleString('es-AR',{minimumFractionDigits:2,maximumFractionDigits:2}); }
+
+async function init(){
+  try{
+    const rows = await posFetch('/products?select=id,name,price,stock,barcode,cat&order=name');
+    products = (rows||[]).map(p=>({id:p.id, name:p.name, price:Number(p.price)||0, stock:Number(p.stock)||0, barcode:p.barcode||'', cat:p.cat||'Otros'}));
+  }catch(e){ loadError = e.message; }
+  loading = false; render();
+}
+
+function categorias(){
+  const set = new Set(products.map(p=>p.cat));
+  return Array.from(set).sort((a,b)=>a.localeCompare(b,'es'));
+}
+function filteredProducts(){
+  const q = query.trim().toLowerCase();
+  return products.filter(p=>{
+    if(activeCat && p.cat !== activeCat) return false;
+    if(q && !(p.name.toLowerCase().includes(q) || (p.barcode||'').includes(q))) return false;
+    return true;
+  });
+}
+function toggleSelect(id){
+  if(selected[id]) delete selected[id]; else selected[id] = 1;
+  render();
+}
+function setQty(id, delta){
+  const cur = selected[id] || 1;
+  selected[id] = Math.max(1, Math.min(99, cur + delta));
+  render();
+}
+function seleccionarFiltrados(){
+  filteredProducts().forEach(p=>{ if(!selected[p.id]) selected[p.id] = 1; });
+  render();
+}
+function limpiarSeleccion(){ selected = {}; render(); }
+
+function selectedIds(){ return Object.keys(selected).filter(id=>selected[id]>0); }
+function totalEtiquetas(){ return selectedIds().reduce((s,id)=>s+(selected[id]||0), 0); }
+
+function generarHoja(){
+  if(!selectedIds().length) return;
+  screen = 'print'; render();
+  setTimeout(renderBarcodes, 0);
+}
+function volver(){ screen = 'select'; render(); }
+function doPrint(){ window.print(); }
+
+function renderBarcodes(){
+  if(typeof JsBarcode === 'undefined'){ setTimeout(renderBarcodes, 200); return; }
+  document.querySelectorAll('svg.tag-barcode').forEach(el=>{
+    const code = el.getAttribute('data-code');
+    if(!code) return;
+    try{ JsBarcode(el, code, {format:'CODE128', height:26, fontSize:9, margin:0, displayValue:true}); }
+    catch(e){ /* código no compatible con CODE128 (ej: letras raras) — se deja sin gráfico */ }
+  });
+}
+
+function renderSelect(){
+  const list = filteredProducts();
+  const cats = categorias();
+  const total = totalEtiquetas();
+  return `
+  <div class="topbar">
+    <a class="back" href="admin.html">&larr;</a>
+    <h1>Etiquetas de precio</h1>
+  </div>
+  <div class="select-wrap">
+    <div class="search-inline">
+      <input placeholder="Buscar producto o código..." value="${escAttr(query)}" oninput="query=this.value; render()">
+    </div>
+    <div class="cat-chips">
+      <button class="cat-chip ${activeCat===null?'active':''}" onclick="activeCat=null; render()">Todas</button>
+      ${cats.map(c=>`<button class="cat-chip ${activeCat===c?'active':''}" onclick="activeCat='${escAttr(c)}'; render()">${esc(c)}</button>`).join('')}
+    </div>
+    <div class="bulk-actions">
+      <button class="btn-secondary" style="flex:1;" onclick="seleccionarFiltrados()">+ Seleccionar todo lo filtrado</button>
+      <button class="btn-secondary" style="flex:1;" onclick="limpiarSeleccion()">Limpiar selección</button>
+    </div>
+    ${loading ? '<p style="color:var(--muted);">Cargando productos…</p>' :
+      loadError ? `<p style="color:var(--danger);">Error: ${esc(loadError)}</p>` :
+      !list.length ? `<div class="grid-empty">No hay productos para este filtro</div>` : `
+      <div class="prod-list">
+        ${list.map(p=>{
+          const on = !!selected[p.id];
+          return `<div class="prod-row ${on?'checked':''}">
+            <button class="prod-check" onclick="toggleSelect('${escAttr(p.id)}')">${on?'✓':''}</button>
+            <div class="prod-info" onclick="toggleSelect('${escAttr(p.id)}')">
+              <div class="prod-name">${esc(p.name)}</div>
+              <div class="prod-sub">${esc(p.cat)}${p.barcode?' · '+esc(p.barcode):' · sin código de barras'}</div>
+            </div>
+            <div class="prod-price">${money(p.price)}</div>
+            ${on ? `<div class="qty-stepper">
+              <button onclick="setQty('${escAttr(p.id)}',-1)">−</button>
+              <span>${selected[p.id]}</span>
+              <button onclick="setQty('${escAttr(p.id)}',1)">+</button>
+            </div>` : ''}
+          </div>`;
+        }).join('')}
+      </div>`
+    }
+  </div>
+  <div class="bottom-bar">
+    <div class="count">${total>0?`<b>${total}</b> etiqueta${total!==1?'s':''} seleccionada${total!==1?'s':''}`:'Elegí productos para imprimir'}</div>
+    <button class="btn-primary" ${total===0?'disabled':''} onclick="generarHoja()">Generar hoja</button>
+  </div>`;
+}
+
+function renderPrint(){
+  const tags = [];
+  selectedIds().forEach(id=>{
+    const p = products.find(x=>String(x.id)===String(id));
+    if(!p) return;
+    const qty = selected[id] || 1;
+    for(let i=0;i<qty;i++) tags.push(p);
+  });
+  return `
+  <div class="print-toolbar">
+    <button class="btn-secondary" onclick="volver()">&larr; Volver a elegir</button>
+    <button class="btn-primary" onclick="doPrint()">Imprimir</button>
+    <div style="flex:1;"></div>
+    <div style="align-self:center; font-size:13px; color:var(--muted);">${tags.length} etiqueta${tags.length!==1?'s':''}</div>
+  </div>
+  <div class="sheet-wrap">
+    <div class="sheet">
+      ${tags.map(p=>`<div class="tag">
+        <div class="tag-store">Sabores Royal</div>
+        <div class="tag-name">${esc(p.name)}</div>
+        <div class="tag-price">${money(p.price)}</div>
+        ${p.barcode ? `<svg class="tag-barcode" data-code="${escAttr(p.barcode)}"></svg>` : ''}
+      </div>`).join('')}
+    </div>
+  </div>`;
+}
+
+function render(){
+  document.getElementById('app').innerHTML = screen==='print' ? renderPrint() : renderSelect();
+}
+
+init();
+</script>
+</body>
+</html>

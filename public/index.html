@@ -2575,6 +2575,7 @@ function renderAdmin(){
     {key:"chats",         label:"Chats", badge:chatUnreadTotal},
     {key:"comprobantes",  label:"Comprobantes"},
     {key:"listaprecios",  label:"Listas de Precios"},
+    {key:"etiquetas",     label:"Etiquetas"},
     {key:"banners",       label:"Novedades/Ofertas"},
     {key:"sugerencias",   label:"Sugerencias", badge:unreadCount},
     {key:"config",        label:"Configuración"},
@@ -2641,6 +2642,7 @@ function renderAdmin(){
       ${tab==="chats" ? renderAdminChats() : ""}
       ${tab==="comprobantes" ? renderAdminComprobantes() : ""}
       ${tab==="listaprecios" ? renderAdminListaPrecios() : ""}
+      ${tab==="etiquetas" ? renderAdminEtiquetas() : ""}
       ${tab==="banners" ? renderAdminBanners() : ""}
       ${tab==="sugerencias" ? renderAdminSugerencias() : ""}
       ${tab==="config" ? renderAdminConfig() : ""}
@@ -3992,6 +3994,18 @@ function renderAdminCajaDiaria(){
     <h3 style="color:var(--white); font-size:16px; margin-bottom:8px;">Caja Diaria</h3>
     <p style="font-size:13px; color:rgba(255,255,255,0.55); max-width:320px; margin:0 auto 22px; line-height:1.5;">Se abre en una pestaña aparte — es la misma app de siempre, con los mismos datos, sincronizada con el servidor.</p>
     <a href="caja-diaria.html" target="_blank" rel="noopener" class="btn-primary" style="display:inline-flex; align-items:center; justify-content:center; gap:8px; max-width:280px; text-decoration:none;">${ic('receipt')} Abrir Caja Diaria ↗</a>
+  </div>`;
+}
+// Etiquetas de precio vive en su propio archivo (etiquetas.html), mismo
+// criterio que Caja Diaria: se embebe tal cual en la pestaña para no chocar
+// nombres compartidos con el resto del admin.
+function renderAdminEtiquetas(){
+  return `
+  <div style="padding:40px 24px; text-align:center;">
+    <div style="width:64px; height:64px; margin:0 auto 18px; border-radius:16px; background:var(--glass); border:1px solid var(--glass-bd); display:flex; align-items:center; justify-content:center; color:var(--gold2);">${ic('tag')}</div>
+    <h3 style="color:var(--white); font-size:16px; margin-bottom:8px;">Etiquetas de precio</h3>
+    <p style="font-size:13px; color:rgba(255,255,255,0.55); max-width:320px; margin:0 auto 22px; line-height:1.5;">Se abre en una pestaña aparte. Elegís productos y se genera una hoja A4 lista para imprimir y recortar.</p>
+    <a href="etiquetas.html" target="_blank" rel="noopener" class="btn-primary" style="display:inline-flex; align-items:center; justify-content:center; gap:8px; max-width:280px; text-decoration:none;">${ic('tag')} Abrir Etiquetas ↗</a>
   </div>`;
 }
 function renderAdminAlquiler(){
@@ -7427,13 +7441,13 @@ function deleteContentItem(type, idx){
 }
 
 /* ---------- ADMIN: BANNER DE SECCIÓN (novedades / ofertas) ---------- */
-let sectionBannerDraft = { image:"", title:"", subtitle:"", active:true };
+let sectionBannerDraft = { image:"", video:"", title:"", subtitle:"", active:true };
 let sectionBannerType = 'novedad';
 
 function normalizeSectionBannerDraft(existing){
   const imgs = (existing && Array.isArray(existing.images)) ? existing.images.slice(0,4) : [];
   while(imgs.length<4) imgs.push("");
-  return Object.assign({ image:"", title:"", subtitle:"", active:true, layout:'single' }, existing||{}, { images: imgs });
+  return Object.assign({ image:"", video:"", title:"", subtitle:"", active:true, layout:'single' }, existing||{}, { images: imgs });
 }
 function openSectionBannerModal(type){
   sectionBannerType = type;
@@ -7487,6 +7501,17 @@ function renderSectionBannerModalHTML(type){
         </div>
       </div>
       ${d.image ? `<button class="btn-secondary" style="margin-bottom:4px; width:100%; font-size:12.5px;" onclick="removeSectionBannerPhoto()">Quitar imagen</button>` : ''}
+      <div id="secbanner-video-preview">
+        ${d.video ? `<div class="photo-preview-wrap" style="aspect-ratio:16/7;"><video src="${d.video}" style="width:100%; height:100%; object-fit:cover; border-radius:12px;" muted loop autoplay playsinline></video></div>` : ''}
+      </div>
+      <div class="photo-upload-row">
+        <div class="photo-upload-box" style="aspect-ratio:16/7; flex:2;">
+          ${ic('upload')}<span>Video</span>
+          <input type="file" accept="video/*" onchange="onSectionBannerVideoSelected(event)">
+        </div>
+      </div>
+      ${d.video ? `<button class="btn-secondary" style="margin-bottom:4px; width:100%; font-size:12.5px;" onclick="removeSectionBannerVideo()">Quitar video</button>` : ''}
+      <p style="font-size:11px; opacity:.5; margin:-2px 0 10px;">Si subís un video, se muestra en vez de la imagen (recomendado: menos de 20 MB, pocos segundos, sin audio importante ya que se reproduce mudo).</p>
       `}
       <div class="form-group"><label>Título</label><input id="sb-title" value="${d.title||''}" placeholder="Ej: Temporada de verano"></div>
       <div class="form-group"><label>Subtítulo (opcional)</label><input id="sb-subtitle" value="${d.subtitle||''}" placeholder="Ej: Productos frescos todos los días"></div>
@@ -7520,6 +7545,23 @@ function removeSectionBannerPhoto(){
   const overlay = document.getElementById("secbanner-modal-overlay");
   if(overlay) overlay.innerHTML = renderSectionBannerModalHTML(sectionBannerType);
 }
+function onSectionBannerVideoSelected(event){
+  const file = event.target.files[0];
+  if(!file) return;
+  if(file.size > 20*1024*1024){ toast('El video no puede pesar más de 20 MB','err'); event.target.value=''; return; }
+  const reader = new FileReader();
+  reader.onload = (e)=>{
+    sectionBannerDraft.video = e.target.result;
+    const overlay = document.getElementById("secbanner-modal-overlay");
+    if(overlay) overlay.innerHTML = renderSectionBannerModalHTML(sectionBannerType);
+  };
+  reader.readAsDataURL(file);
+}
+function removeSectionBannerVideo(){
+  sectionBannerDraft.video = "";
+  const overlay = document.getElementById("secbanner-modal-overlay");
+  if(overlay) overlay.innerHTML = renderSectionBannerModalHTML(sectionBannerType);
+}
 function onSectionBannerGridPhotoSelected(event, i){
   const file = event.target.files[0];
   if(!file) return;
@@ -7547,6 +7589,7 @@ async function saveSectionBannerModal(type){
   const layout = sectionBannerDraft.layout==='grid4' ? 'grid4' : 'single';
   let image = "";
   let images = ["","","",""];
+  let video = "";
   if(layout==='grid4'){
     if(!title && !sectionBannerDraft.images.some(x=>x)){ toast("Agregá al menos un título o una foto","err"); return; }
     for(let i=0;i<4;i++){
@@ -7560,13 +7603,18 @@ async function saveSectionBannerModal(type){
     image = images.find(x=>x) || "";
   } else {
     image = sectionBannerDraft.image || "";
-    if(!title && !image){ toast("Agregá al menos un título o una imagen","err"); return; }
+    video = sectionBannerDraft.video || "";
+    if(!title && !image && !video){ toast("Agregá al menos un título, una imagen o un video","err"); return; }
     if(image && image.startsWith('data:')){
       try{ image = await uploadPhoto(image, 'secbanner_'+type+'_'+Date.now()); }
       catch(pe){ toast('Foto no se pudo subir: '+pe.message,'err'); }
     }
+    if(video && video.startsWith('data:')){
+      try{ video = await uploadPhoto(video, 'secbanner_'+type+'_vid_'+Date.now()); }
+      catch(pe){ toast('Video no se pudo subir: '+pe.message,'err'); }
+    }
   }
-  const banner = { image, images, layout, title, subtitle, active };
+  const banner = { image, images, video, layout, title, subtitle, active };
   if(type==='novedad'){ state.bannerNovedades = banner; }
   else{ state.bannerOfertas = banner; }
   saveState();
