@@ -19,6 +19,9 @@
   --bd: rgba(255,255,255,.12);
   --muted: rgba(255,255,255,.45);
   --text: #f0f2ff;
+  --shadow-sm: 0 2px 10px rgba(0,0,0,.25);
+  --shadow-md: 0 8px 26px rgba(0,0,0,.35);
+  --shadow-gold: 0 4px 14px rgba(197,160,40,.4);
 }
 *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
 html, body {
@@ -36,27 +39,50 @@ input { font-family: inherit; }
 /* ── TOPBAR ── */
 .topbar {
   display: flex; align-items: center; gap: 14px;
-  padding: 12px 20px; background: rgba(15,28,69,.9);
+  padding: 12px 24px;
+  background: linear-gradient(180deg, rgba(26,42,94,.96), rgba(15,28,69,.94));
   border-bottom: 1px solid var(--bd);
+  box-shadow: var(--shadow-sm);
+  position: relative; z-index: 5;
 }
-.topbar .caja-badge {
-  background: var(--gold); color: #000; font-weight: 800;
-  padding: 5px 12px; border-radius: 8px; font-size: 14px;
-}
-.topbar .cajero-name { font-weight: 700; color: var(--gold2); }
 .topbar .spacer { flex: 1; }
 .topbar button {
   background: var(--glass); border: 1px solid var(--bd); border-radius: 8px;
   padding: 8px 14px; font-size: 13px; color: var(--text);
 }
 .topbar button:hover { background: var(--glass2); }
-.brand-logo { border-radius: 8px; object-fit: cover; flex: none; }
+
+.brand { display: flex; align-items: center; gap: 12px; min-width: 0; }
+.brand-mark {
+  flex: none; border-radius: 11px; background: rgba(255,255,255,.04);
+  border: 1px solid var(--bd); box-shadow: var(--shadow-sm);
+  display: flex; align-items: center; justify-content: center; padding: 3px; overflow: hidden;
+}
+.brand-mark img { width: 100%; height: 100%; object-fit: contain; display: block; }
+.brand-text { display: flex; flex-direction: column; line-height: 1.2; min-width: 0; }
+.brand-name { font-size: 15px; font-weight: 800; letter-spacing: .2px; color: var(--text); white-space: nowrap; }
+.brand-sub { font-size: 10px; font-weight: 700; letter-spacing: 1.2px; text-transform: uppercase; color: var(--gold2); opacity: .85; }
+
+.topbar-meta { margin-left: auto; display: flex; align-items: center; gap: 8px; }
+.chip {
+  display: flex; align-items: center; gap: 6px; background: var(--glass);
+  border: 1px solid var(--bd); border-radius: 999px; padding: 7px 14px;
+  font-size: 12.5px; font-weight: 700; color: var(--text); white-space: nowrap;
+}
+.chip.chip-gold { color: var(--gold2); }
+
+/* ── LOGO (pantallas de login / selección de caja) ── */
+.logo-card {
+  flex: none; border-radius: 22%; overflow: hidden; background: var(--navy);
+  border: 1px solid rgba(255,255,255,.1); box-shadow: var(--shadow-md);
+}
+.logo-card img { width: 100%; height: 100%; object-fit: contain; display: block; }
 
 /* ── BANNER DE CAJA (oferta) ── */
 .pos-banner {
   position: relative; border-radius: 14px; overflow: hidden; flex: none;
   min-height: 90px; display: flex; align-items: flex-end; padding: 14px 16px;
-  background-size: cover; background-position: center;
+  background-size: cover; background-position: center; box-shadow: var(--shadow-sm);
 }
 .pos-banner::before {
   content: ''; position: absolute; inset: 0;
@@ -69,34 +95,46 @@ input { font-family: inherit; }
 /* ── SIDEBAR ── */
 .app-shell { flex: 1; display: flex; min-height: 0; }
 .sidebar {
-  width: 84px; flex: none; background: rgba(15,28,69,.95); border-right: 1px solid var(--bd);
-  display: flex; flex-direction: column; align-items: stretch; padding: 10px 6px; gap: 4px; overflow-y: auto;
+  width: 86px; flex: none; background: rgba(15,28,69,.97); border-right: 1px solid var(--bd);
+  box-shadow: 3px 0 14px rgba(0,0,0,.22);
+  display: flex; flex-direction: column; align-items: stretch; padding: 12px 6px; gap: 3px; overflow-y: auto;
 }
 .sidebar-btn {
-  display: flex; flex-direction: column; align-items: center; gap: 4px; padding: 10px 4px;
-  border-radius: 10px; font-size: 10.5px; font-weight: 700; color: var(--muted); text-align: center;
+  display: flex; flex-direction: column; align-items: center; gap: 5px; padding: 8px 4px 7px;
+  border-radius: 12px; font-size: 10px; font-weight: 700; color: var(--muted); text-align: center;
+  transition: color .15s;
 }
-.sidebar-btn .sb-icon { font-size: 20px; }
-.sidebar-btn.active { background: var(--gold); color: #000; }
-.sidebar-btn:hover:not(.active) { background: var(--glass2); color: var(--text); }
+.sidebar-btn .sb-icon {
+  width: 34px; height: 34px; border-radius: 10px; font-size: 16px;
+  display: flex; align-items: center; justify-content: center;
+  background: var(--glass); transition: background .15s, box-shadow .15s, transform .1s;
+}
+.sidebar-btn.active { color: var(--gold2); }
+.sidebar-btn.active .sb-icon { background: linear-gradient(135deg, var(--gold2), var(--gold)); color: #000; box-shadow: var(--shadow-gold); }
+.sidebar-btn:hover:not(.active) { color: var(--text); }
+.sidebar-btn:hover:not(.active) .sb-icon { background: var(--glass2); transform: translateY(-1px); }
 .sidebar-spacer { flex: 1; }
-.sidebar-foot-btn { font-size: 10px; color: var(--muted); padding: 8px 4px; border-radius: 8px; text-align: center; }
+.sidebar-foot-btn { font-size: 10px; color: var(--muted); padding: 8px 4px; border-radius: 8px; text-align: center; transition: background .15s, color .15s; }
 .sidebar-foot-btn:hover { background: var(--glass2); color: var(--text); }
 .main-col { flex: 1; display: flex; flex-direction: column; min-width: 0; overflow-y: auto; }
 
 /* ── SECCIONES (Clientes / Comprobantes / Cierre X-Z) ── */
 .section-wrap { flex: 1; display: flex; flex-direction: column; padding: 16px 20px 20px; gap: 12px; max-width: 700px; margin: 0 auto; width: 100%; }
-.section-title { color: var(--gold2); font-size: 18px; }
+.section-title { color: var(--gold2); font-size: 19px; font-weight: 800; letter-spacing: .2px; }
 .comp-meta { font-size: 12px; color: var(--muted); }
 .section-actions { display: flex; gap: 10px; margin-top: 8px; }
 .section-actions button { flex: 1; }
 
 .btn-primary, .btn-secondary, .btn-danger {
   padding: 11px 16px; border-radius: 10px; font-size: 14px; font-weight: 700;
+  transition: transform .08s, box-shadow .15s, background .15s;
 }
-.btn-primary { background: var(--gold); color: #000; }
+.btn-primary { background: linear-gradient(135deg, var(--gold2), var(--gold)); color: #000; box-shadow: 0 3px 10px rgba(197,160,40,.3); }
+.btn-primary:hover { box-shadow: 0 5px 16px rgba(197,160,40,.4); }
 .btn-secondary { background: var(--glass); border: 1px solid var(--bd); color: var(--text); }
-.btn-danger { background: var(--danger); color: #fff; }
+.btn-secondary:hover { background: var(--glass2); }
+.btn-danger { background: var(--danger); color: #fff; box-shadow: 0 3px 10px rgba(229,86,109,.3); }
+.btn-primary:active, .btn-secondary:active, .btn-danger:active { transform: scale(.97); }
 
 .search-inline { display: flex; gap: 8px; }
 .search-inline input {
@@ -114,7 +152,7 @@ input { font-family: inherit; }
 .form-row input:focus, .form-row select:focus { border-color: var(--gold); }
 .form-row select option { background: var(--navy2); }
 
-.list-wrap { display: flex; flex-direction: column; background: var(--glass); border: 1px solid var(--bd); border-radius: 12px; overflow: hidden; }
+.list-wrap { display: flex; flex-direction: column; background: var(--glass); border: 1px solid var(--bd); border-radius: 12px; overflow: hidden; box-shadow: var(--shadow-sm); }
 .list-row {
   display: flex; align-items: center; gap: 10px; padding: 12px 14px; border-bottom: 1px solid var(--bd);
 }
@@ -140,6 +178,13 @@ input { font-family: inherit; }
 .etq-qty { display: flex; align-items: center; gap: 6px; flex: none; }
 .etq-qty button { width: 26px; height: 26px; border-radius: 8px; background: var(--glass2); font-size: 15px; font-weight: 700; }
 .etq-qty span { min-width: 18px; text-align: center; font-size: 13px; font-weight: 700; }
+.etq-row.checked { flex-wrap: wrap; }
+.etq-extras { display: flex; align-items: center; gap: 8px; flex: none; margin-left: auto; }
+.etq-oferta-toggle {
+  flex: none; background: var(--glass2); border: 1.5px solid var(--bd); border-radius: 14px;
+  padding: 5px 10px; font-size: 11.5px; font-weight: 700; color: var(--text); white-space: nowrap;
+}
+.etq-oferta-toggle.active { background: #c0392b; border-color: #c0392b; color: #fff; }
 
 /* ── SELECT CAJA / LOGIN screens ── */
 .center-wrap {
@@ -151,9 +196,10 @@ input { font-family: inherit; }
 .big-choice {
   background: var(--glass); border: 1px solid var(--bd); border-radius: 16px;
   padding: 26px 40px; font-size: 20px; font-weight: 700; color: var(--text);
-  min-width: 160px; text-align: center;
+  min-width: 160px; text-align: center; box-shadow: var(--shadow-sm);
+  transition: transform .12s, box-shadow .12s, border-color .12s, background .12s;
 }
-.big-choice:hover { background: var(--glass2); border-color: var(--gold); }
+.big-choice:hover { background: var(--glass2); border-color: var(--gold); transform: translateY(-2px); box-shadow: var(--shadow-md); }
 
 .pin-dots { display: flex; gap: 14px; margin: 6px 0 4px; }
 .pin-dot {
@@ -164,8 +210,9 @@ input { font-family: inherit; }
 .keypad button {
   width: 74px; height: 60px; border-radius: 12px; background: var(--glass);
   border: 1px solid var(--bd); font-size: 22px; font-weight: 700;
+  box-shadow: var(--shadow-sm); transition: transform .08s, background .1s;
 }
-.keypad button:active { background: var(--glass2); }
+.keypad button:active { background: var(--glass2); transform: scale(.95); }
 .keypad button.wide { grid-column: span 1; font-size: 14px; color: var(--muted); }
 .pin-error { color: var(--danger); font-size: 13px; min-height: 18px; }
 
@@ -224,8 +271,10 @@ input { font-family: inherit; }
 .product-card {
   background: var(--glass); border: 1px solid var(--bd); border-radius: 12px;
   padding: 8px; display: flex; flex-direction: column; gap: 6px; text-align: left;
+  box-shadow: 0 1px 4px rgba(0,0,0,.2);
+  transition: transform .12s, box-shadow .12s, border-color .12s, background .12s;
 }
-.product-card:hover { border-color: var(--gold); background: var(--glass2); }
+.product-card:hover { border-color: var(--gold); background: var(--glass2); transform: translateY(-2px); box-shadow: var(--shadow-sm); }
 .product-card .pc-thumb { width: 100%; aspect-ratio: 1; border-radius: 8px; object-fit: cover; background: var(--glass2); }
 .product-card .pc-thumb-ph {
   width: 100%; aspect-ratio: 1; border-radius: 8px; background: var(--glass2);
@@ -240,7 +289,7 @@ input { font-family: inherit; }
 .product-card .pc-stock.low { color: var(--warn); }
 .product-card .pc-stock.none { color: var(--danger); }
 
-.cart-wrap { flex: 2; min-height: 120px; overflow-y: auto; background: var(--glass); border: 1px solid var(--bd); border-radius: 12px; }
+.cart-wrap { flex: 2; min-height: 120px; overflow-y: auto; background: var(--glass); border: 1px solid var(--bd); border-radius: 12px; box-shadow: var(--shadow-sm); }
 .cart-empty { text-align: center; padding: 40px 20px; color: var(--muted); font-size: 14px; }
 .cart-row {
   display: flex; align-items: center; gap: 10px; padding: 12px 14px;
@@ -266,8 +315,9 @@ input { font-family: inherit; }
 .pay-methods button {
   background: var(--glass); border: 1.5px solid var(--bd); border-radius: 10px;
   padding: 12px 6px; font-size: 12px; font-weight: 700; color: var(--text);
+  transition: background .15s, border-color .15s, box-shadow .15s;
 }
-.pay-methods button.active { background: var(--gold); color: #000; border-color: var(--gold); }
+.pay-methods button.active { background: linear-gradient(135deg, var(--gold2), var(--gold)); color: #000; border-color: var(--gold); box-shadow: var(--shadow-gold); }
 
 .client-toggle {
   background: none; border: none; color: var(--gold2); font-size: 13px;
@@ -293,10 +343,11 @@ input { font-family: inherit; }
 }
 
 .btn-cobrar {
-  background: var(--ok); color: #06281a; font-weight: 800; font-size: 18px;
+  background: linear-gradient(135deg, #4fe0a0, var(--ok)); color: #06281a; font-weight: 800; font-size: 18px;
   padding: 16px; border-radius: 12px; text-align: center;
+  box-shadow: 0 6px 18px rgba(62,207,142,.35); transition: transform .1s, box-shadow .15s;
 }
-.btn-cobrar:disabled { opacity: .4; }
+.btn-cobrar:disabled { opacity: .4; box-shadow: none; }
 .btn-cobrar:active { transform: scale(.98); }
 
 .banner { border-radius: 10px; padding: 10px 14px; font-size: 13px; font-weight: 600; }
@@ -310,7 +361,7 @@ input { font-family: inherit; }
 }
 .modal {
   width: 100%; max-width: 480px; max-height: 82vh; overflow-y: auto;
-  background: var(--navy2); border-radius: 18px; padding: 20px;
+  background: var(--navy2); border-radius: 18px; padding: 20px; box-shadow: var(--shadow-md);
 }
 .modal h2 { color: var(--gold2); font-size: 17px; margin-bottom: 14px; }
 .sale-row { display: flex; justify-content: space-between; padding: 9px 0; border-bottom: 1px solid var(--bd); font-size: 13px; }
@@ -344,7 +395,7 @@ const SUPABASE_URL = (()=>{ try{ const r=JSON.parse(atob(SUPABASE_KEY.split('.')
 async function posFetch(path, method, body, prefer){
   const headers = {'Content-Type':'application/json','apikey':SUPABASE_KEY,'Authorization':'Bearer '+SUPABASE_KEY};
   if(prefer) headers['Prefer'] = prefer;
-  const res = await fetch(SUPABASE_URL + '/rest/v1' + path, { method: method||'GET', headers, body: body?JSON.stringify(body):undefined });
+  const res = await fetch(SUPABASE_URL + '/rest/v1' + path, { method: method||'GET', headers, body: body?JSON.stringify(body):undefined, cache: 'no-store' });
   const text = await res.text();
   if(!res.ok){ let err; try{ err=JSON.parse(text); }catch(e){ err={message:text}; } throw new Error(err.message || 'HTTP '+res.status); }
   return text ? JSON.parse(text) : null;
@@ -405,6 +456,8 @@ const SECCIONES = [
 let etqQuery = '';
 let etqCat = null; // null = todas
 let etqSelected = {}; // id -> qty
+let etqOferta = {}; // id -> true si va con diseño de oferta
+let etqManual = []; // [{id, name, desc, price, barcode, qty, oferta}] — carteles de precio manuales, no ligados a un producto del catálogo
 
 /* ── ESCANEO POR CÁMARA (respaldo del lector USB) ──
    Versión recortada, standalone, de openBarcodeScannerModal() en
@@ -441,11 +494,13 @@ function toast(msg, type){
 
 /* ── SELECT CAJA ── */
 function logoHtml(size){
-  return `<img src="apple-touch-icon.png" class="brand-logo" style="width:${size}px; height:${size}px;" onerror="this.style.display='none'">`;
+  return `<div class="logo-card" style="width:${size}px; height:${size}px;">
+    <img src="apple-touch-icon.png" alt="Sabores Royal" onerror="this.parentElement.style.display='none'">
+  </div>`;
 }
 function renderSelectCaja(){
   return `<div class="center-wrap">
-    ${logoHtml(72)}
+    ${logoHtml(88)}
     <h1>¿Esta computadora es Caja 1 o Caja 2?</h1>
     <div class="big-choice-row">
       <button class="big-choice" onclick="chooseCaja('Caja 1')">Caja 1</button>
@@ -465,13 +520,13 @@ function renderLogin(){
   if(!cajero){
     const cajeros = posConfig.cajeros || [];
     if(!cajeros.length){
-      return `<div class="center-wrap">${logoHtml(56)}<h1>No hay cajeros configurados</h1>
+      return `<div class="center-wrap">${logoHtml(64)}<h1>No hay cajeros configurados</h1>
         <p style="color:var(--muted); font-size:13px; text-align:center; max-width:320px;">
           Agregalos desde el panel de administración, en Configuración.
         </p></div>`;
     }
     return `<div class="center-wrap">
-      ${logoHtml(56)}
+      ${logoHtml(64)}
       <h1>¿Quién está en ${cajaEsc()}?</h1>
       <div class="big-choice-row">
         ${cajeros.map(c=>`<button class="big-choice" onclick="pickCajero('${escAttr(c.nombre)}')">${esc(c.nombre)}</button>`).join('')}
@@ -479,7 +534,7 @@ function renderLogin(){
     </div>`;
   }
   return `<div class="center-wrap">
-    ${logoHtml(56)}
+    ${logoHtml(64)}
     <h1>PIN de ${esc(cajero)}</h1>
     <div class="pin-dots">${[0,1,2,3].map(i=>`<div class="pin-dot ${i<pinBuffer.length?'filled':''}"></div>`).join('')}</div>
     <div class="pin-error">${esc(pinError)}</div>
@@ -564,9 +619,19 @@ function setSection(s){
 function renderVenta(){
   return `
     <div class="topbar">
-      ${logoHtml(28)}
-      <span class="caja-badge">${cajaEsc()}</span>
-      <span class="cajero-name">${esc(cajero)}</span>
+      <div class="brand">
+        <div class="brand-mark" style="width:38px; height:38px;">
+          <img src="apple-touch-icon.png" alt="Sabores Royal" onerror="this.parentElement.style.display='none'">
+        </div>
+        <div class="brand-text">
+          <span class="brand-name">Sabores Royal</span>
+          <span class="brand-sub">Punto de venta</span>
+        </div>
+      </div>
+      <div class="topbar-meta">
+        <span class="chip">🏬 ${cajaEsc()}</span>
+        <span class="chip chip-gold">🧑‍💼 ${esc(cajero)}</span>
+      </div>
     </div>
     <div class="app-shell">
       <div class="sidebar">
@@ -591,6 +656,7 @@ function renderSeccionVender(){
   const categories = getCategories();
   return `
     <div class="venta-wrap">
+      <h2 class="section-title">Vender</h2>
       ${saleError ? `<div class="banner err">${esc(saleError)}</div>` : ''}
       ${posBanner && posBanner.active && posBanner.image ? `
         <div class="pos-banner" style="background-image:url('${escAttr(posBanner.image)}')">
@@ -1089,22 +1155,61 @@ function etqFiltered(){
     return true;
   });
 }
-function etqToggle(id){ if(etqSelected[id]) delete etqSelected[id]; else etqSelected[id] = 1; render(); }
+function etqToggle(id){ if(etqSelected[id]){ delete etqSelected[id]; delete etqOferta[id]; } else etqSelected[id] = 1; render(); }
 function etqSetQty(id, delta){ const cur = etqSelected[id] || 1; etqSelected[id] = Math.max(1, Math.min(99, cur + delta)); render(); }
+function etqToggleOferta(id){ etqOferta[id] = !etqOferta[id]; render(); }
 function etqSelectAllFiltered(){ etqFiltered().forEach(p=>{ if(!etqSelected[p.id]) etqSelected[p.id] = 1; }); render(); }
-function etqClear(){ etqSelected = {}; render(); }
+function etqClear(){ etqSelected = {}; etqOferta = {}; etqManual = []; render(); }
 function etqSelectedIds(){ return Object.keys(etqSelected).filter(id=>etqSelected[id]>0); }
-function etqTotal(){ return etqSelectedIds().reduce((s,id)=>s+(etqSelected[id]||0), 0); }
+function etqTotal(){ return etqSelectedIds().reduce((s,id)=>s+(etqSelected[id]||0), 0) + etqManual.reduce((s,m)=>s+(m.qty||1), 0); }
+
+/* ── ETIQUETAS: cartel de precio manual (producto no cargado en el catálogo) ── */
+function openManualTagModal(){
+  const root = document.getElementById('modal-root');
+  root.innerHTML = `<div class="modal-bg" onclick="if(event.target===this) closeModal()"><div class="modal">
+    <h2>Cartel de precio manual</h2>
+    <div class="form-row"><label>Nombre del producto</label><input id="mt-name" placeholder="Ej: Bombón suelto"></div>
+    <div class="form-row" style="margin-top:10px;"><label>Descripción (opcional)</label><input id="mt-desc" placeholder="Ej: Relleno de dulce de leche"></div>
+    <div class="form-row" style="margin-top:10px;"><label>Precio</label><input id="mt-price" type="number" step="0.01" placeholder="0.00"></div>
+    <div class="form-row" style="margin-top:10px;"><label>Código de barras (opcional)</label><input id="mt-barcode" placeholder="Ej: 7791234567890"></div>
+    <div class="form-row" style="margin-top:10px;"><label>Cantidad de carteles</label><input id="mt-qty" type="number" min="1" max="99" value="1"></div>
+    <div class="section-actions" style="margin-top:16px;">
+      <button class="btn-secondary" onclick="closeModal()">Cancelar</button>
+      <button class="btn-primary" onclick="saveManualTag()">Agregar</button>
+    </div>
+  </div></div>`;
+  setTimeout(()=>{ const el = document.getElementById('mt-name'); if(el) el.focus(); }, 50);
+}
+function saveManualTag(){
+  const name = (document.getElementById('mt-name')||{}).value?.trim();
+  const desc = (document.getElementById('mt-desc')||{}).value?.trim() || '';
+  const price = Number((document.getElementById('mt-price')||{}).value) || 0;
+  const barcode = (document.getElementById('mt-barcode')||{}).value?.trim() || '';
+  const qty = Math.max(1, Math.min(99, Number((document.getElementById('mt-qty')||{}).value) || 1));
+  if(!name || !price){ toast('Cargá al menos nombre y precio', 'err'); return; }
+  etqManual.push({id:'m'+Date.now()+Math.random().toString(36).slice(2,6), name, desc, price, barcode, qty, oferta:false});
+  closeModal();
+  render();
+}
+function etqManualRemove(id){ etqManual = etqManual.filter(m=>m.id!==id); render(); }
+function etqManualSetQty(id, delta){ const m = etqManual.find(x=>x.id===id); if(!m) return; m.qty = Math.max(1, Math.min(99, (m.qty||1)+delta)); render(); }
+function etqManualToggleOferta(id){ const m = etqManual.find(x=>x.id===id); if(!m) return; m.oferta = !m.oferta; render(); }
+function closeModal(){ const root = document.getElementById('modal-root'); if(root) root.innerHTML = ''; }
 
 function imprimirEtiquetas(){
   const ids = etqSelectedIds();
-  if(!ids.length) return;
+  if(!ids.length && !etqManual.length) return;
   const tags = [];
   ids.forEach(id=>{
     const p = products.find(x=>String(x.id)===String(id));
     if(!p) return;
     const qty = etqSelected[id] || 1;
-    for(let i=0;i<qty;i++) tags.push(p);
+    const oferta = !!etqOferta[id];
+    for(let i=0;i<qty;i++) tags.push({p, oferta});
+  });
+  etqManual.forEach(m=>{
+    const qty = m.qty || 1;
+    for(let i=0;i<qty;i++) tags.push({p:{name:m.name, desc:m.desc, price:m.price, barcode:m.barcode}, oferta:!!m.oferta});
   });
   const win = window.open('', '_blank', 'width=900,height=700');
   if(!win) return;
@@ -1116,19 +1221,26 @@ function imprimirEtiquetas(){
       .toolbar button{ font-family:system-ui,sans-serif; font-size:13px; font-weight:700; padding:9px 16px; border-radius:10px; border:none; cursor:pointer; background:#c5a028; color:#000; }
       .sheet-wrap{ padding:20px; display:flex; justify-content:center; }
       .sheet{ background:#fff; width:210mm; min-height:297mm; padding:8mm; display:flex; flex-wrap:wrap; gap:4mm; align-content:flex-start; }
-      .tag{ width:60mm; height:34mm; border:1px dashed #999; border-radius:2mm; padding:2mm 3mm; display:flex; flex-direction:column; align-items:center; justify-content:center; text-align:center; color:#000; break-inside:avoid; font-family:system-ui,sans-serif; }
+      .tag{ width:60mm; height:34mm; border:1px dashed #999; border-radius:2mm; padding:2mm 3mm; display:flex; flex-direction:column; align-items:center; justify-content:center; text-align:center; color:#000; break-inside:avoid; font-family:system-ui,sans-serif; position:relative; overflow:hidden; }
       .tag-store{ font-size:7pt; font-weight:700; letter-spacing:1px; color:#555; text-transform:uppercase; }
       .tag-name{ font-size:9.5pt; font-weight:700; line-height:1.15; margin:1mm 0; max-height:8mm; overflow:hidden; }
+      .tag-desc{ font-size:6.5pt; color:#555; line-height:1.1; max-height:6mm; overflow:hidden; margin-bottom:0.5mm; }
       .tag-price{ font-size:15pt; font-weight:800; }
       .tag-barcode{ width:100%; max-height:11mm; margin-top:1mm; }
       .tag-code{ font-size:7pt; color:#555; margin-top:1mm; }
+      .tag-oferta{ border:1.5px solid #c0392b; background:#fff4f0; }
+      .tag-oferta .tag-store{ color:#a8231a; }
+      .tag-oferta .tag-price{ color:#c0392b; font-size:17pt; }
+      .tag-oferta-badge{ position:absolute; top:0; left:0; right:0; background:#c0392b; color:#fff; font-size:7pt; font-weight:800; letter-spacing:1px; text-align:center; padding:0.9mm 0; white-space:nowrap; }
       @media print{ body{background:#fff;} .toolbar{display:none;} .sheet-wrap{background:#fff; padding:0;} .sheet{width:auto; min-height:0; padding:0;} @page{size:A4; margin:8mm;} }
     </style></head><body>
     <div class="toolbar"><button onclick="window.print()">Imprimir</button><span style="color:#fff; font-size:12px; opacity:.8;">${tags.length} etiqueta${tags.length!==1?'s':''}</span></div>
     <div class="sheet-wrap"><div class="sheet">
-      ${tags.map(p=>`<div class="tag">
+      ${tags.map(({p,oferta})=>`<div class="tag ${oferta?'tag-oferta':''}">
+        ${oferta ? `<div class="tag-oferta-badge">¡OFERTA!</div>` : ''}
         <div class="tag-store">${esc(fiscal.razonSocial||'Sabores Royal')}</div>
         <div class="tag-name">${esc(p.name)}</div>
+        ${p.desc ? `<div class="tag-desc">${esc(p.desc)}</div>` : ''}
         <div class="tag-price">${money(p.price)}</div>
         ${p.barcode ? `<svg class="tag-barcode" data-code="${escAttr(p.barcode)}"></svg>` : ''}
       </div>`).join('')}
@@ -1160,12 +1272,34 @@ function renderSeccionEtiquetas(){
     </div>
     <div class="section-actions">
       <button class="btn-secondary" onclick="etqSelectAllFiltered()">+ Seleccionar todo lo filtrado</button>
+      <button class="btn-secondary" onclick="openManualTagModal()">+ Cartel manual (sin cargar)</button>
       <button class="btn-secondary" onclick="etqClear()">Limpiar selección</button>
     </div>
+    ${etqManual.length ? `
+      <div class="list-wrap" style="margin-bottom:10px;">
+        ${etqManual.map(m=>`<div class="list-row etq-row checked">
+          <div class="lr-info">
+            <div class="lr-title">${esc(m.name)} <span style="opacity:.6; font-weight:400;">(manual)</span></div>
+            <div class="lr-sub">${esc(m.desc)||'sin descripción'}${m.barcode?' · '+esc(m.barcode):' · sin código de barras'}</div>
+          </div>
+          <div class="lr-amount">${money(m.price)}</div>
+          <div class="etq-extras">
+            <button class="etq-oferta-toggle ${m.oferta?'active':''}" onclick="etqManualToggleOferta('${escAttr(m.id)}')">🔥 Oferta</button>
+            <div class="etq-qty">
+              <button onclick="etqManualSetQty('${escAttr(m.id)}',-1)">−</button>
+              <span>${m.qty}</span>
+              <button onclick="etqManualSetQty('${escAttr(m.id)}',1)">+</button>
+            </div>
+            <button onclick="etqManualRemove('${escAttr(m.id)}')" title="Quitar" style="width:26px; height:26px; border-radius:8px; background:var(--glass2); font-size:13px; font-weight:700; flex:none;">✕</button>
+          </div>
+        </div>`).join('')}
+      </div>
+    ` : ''}
     ${!list.length ? `<div class="grid-empty">No hay productos para este filtro</div>` : `
       <div class="list-wrap">
         ${list.map(p=>{
           const on = !!etqSelected[p.id];
+          const oferta = !!etqOferta[p.id];
           return `<div class="list-row etq-row ${on?'checked':''}">
             <button class="etq-check" onclick="etqToggle('${escAttr(p.id)}')">${on?'✓':''}</button>
             <div class="lr-info" onclick="etqToggle('${escAttr(p.id)}')" style="cursor:pointer;">
@@ -1173,10 +1307,13 @@ function renderSeccionEtiquetas(){
               <div class="lr-sub">${esc(p.cat)}${p.barcode?' · '+esc(p.barcode):' · sin código de barras'}</div>
             </div>
             <div class="lr-amount">${money(p.price)}</div>
-            ${on ? `<div class="etq-qty">
-              <button onclick="etqSetQty('${escAttr(p.id)}',-1)">−</button>
-              <span>${etqSelected[p.id]}</span>
-              <button onclick="etqSetQty('${escAttr(p.id)}',1)">+</button>
+            ${on ? `<div class="etq-extras">
+              <button class="etq-oferta-toggle ${oferta?'active':''}" onclick="etqToggleOferta('${escAttr(p.id)}')">🔥 Oferta</button>
+              <div class="etq-qty">
+                <button onclick="etqSetQty('${escAttr(p.id)}',-1)">−</button>
+                <span>${etqSelected[p.id]}</span>
+                <button onclick="etqSetQty('${escAttr(p.id)}',1)">+</button>
+              </div>
             </div>` : ''}
           </div>`;
         }).join('')}
@@ -1269,7 +1406,7 @@ async function init(){
   try{
     const [settingsRows, productRows] = await Promise.all([
       posFetch('/app_settings?setting_key=in.(pos_config,fiscal_config,pos_banner)&select=setting_key,setting_value'),
-      posFetch('/products?select=id,name,price,stock,barcode,cat,photo_url,photo_clean_url&order=name'),
+      posFetch('/products?select=id,name,description,price,stock,barcode,cat,photo_url,photo_clean_url&order=name'),
     ]);
     (settingsRows||[]).forEach(row=>{
       try{
@@ -1279,7 +1416,7 @@ async function init(){
         if(row.setting_key === 'pos_banner' && parsed) posBanner = parsed;
       }catch(e){}
     });
-    products = (productRows||[]).map(p=>({id:p.id, name:p.name, price:Number(p.price)||0, stock:Number(p.stock)||0, barcode:p.barcode||'', cat:p.cat||'Otros', photo_url:p.photo_url||'', photo_clean_url:p.photo_clean_url||''}));
+    products = (productRows||[]).map(p=>({id:p.id, name:p.name, desc:p.description||'', price:Number(p.price)||0, stock:Number(p.stock)||0, barcode:p.barcode||'', cat:p.cat||'Otros', photo_url:p.photo_url||'', photo_clean_url:p.photo_clean_url||''}));
   }catch(e){
     toast('No se pudo conectar: ' + e.message, 'err');
   }
