@@ -165,12 +165,15 @@ img{display:block; max-width:100%;}
 .pc-img svg{width:34px; height:34px; opacity:.25;}
 .pc-stock-low{position:absolute; top:6px; left:6px; background:var(--warn); color:var(--navy);
   font-size:9px; font-weight:700; padding:2px 7px; border-radius:10px;}
+.pc-stock-out{position:absolute; top:6px; left:6px; background:var(--danger); color:#fff;
+  font-size:9px; font-weight:700; padding:2px 7px; border-radius:10px;}
 .pc-body{padding:10px 11px 12px;}
 .pc-body h4{font-size:12.5px; font-weight:600; color:var(--white); line-height:1.3; margin-bottom:4px;
   display:-webkit-box; -webkit-line-clamp:2; -webkit-box-orient:vertical; overflow:hidden;}
 .pc-price{font-size:15px; font-weight:700; color:var(--gold2);}
 .pc-add{margin-top:8px; width:100%; padding:7px; border-radius:10px; background:var(--gold); color:var(--navy);
   font-weight:700; font-size:12px;}
+.pc-add:disabled{background:rgba(255,255,255,0.08); color:rgba(255,255,255,0.35);}
 
 .empty-state{padding:60px 30px; text-align:center; color:rgba(255,255,255,0.4);}
 .empty-state svg{width:50px; height:50px; opacity:.3; margin:0 auto 12px;}
@@ -319,6 +322,8 @@ img{display:block; max-width:100%;}
 .prod-row-v2-price-col{flex:1; min-width:0;}
 .prod-row-v2-price-label{display:block; font-size:9px; color:rgba(255,255,255,0.4); font-weight:700; text-transform:uppercase; margin-bottom:3px;}
 .prod-row-v2-price-col input{width:100%; padding:7px 8px; border-radius:8px; background:var(--glass); border:1px solid var(--glass-bd); font-weight:700; font-size:12.5px; text-align:center;}
+.prod-row-v2.is-hidden{opacity:.55;}
+.badge-oculto{background:rgba(229,86,109,0.18); color:var(--danger); font-size:9px; font-weight:800; padding:2px 7px; border-radius:8px; letter-spacing:.3px; margin-left:4px;}
 
 .fab{position:fixed; bottom:24px; right:calc(50% - 240px + 18px); width:54px; height:54px; border-radius:50%;
   background:var(--gold); color:var(--navy); display:flex; align-items:center; justify-content:center;
@@ -533,7 +538,7 @@ function ic(name){
 
 /* ---------- CELIACO ---------- */
 function renderCeliaco(){
-  const products = state.products.filter(p=>p.sinTacc);
+  const products = state.products.filter(p=>p.sinTacc && !p.hidden);
   return `
   <div class="screen">
     <div class="topbar">
@@ -548,20 +553,10 @@ function renderCeliaco(){
       ${products.map(p=>`
         <div class="product-card" onclick="openProduct('${p.id}')">
           <div class="pc-img">
-            ${(isLowStock(p) && p.stock>0) ? `<span class="pc-stock-low">¡Últimas ${p.stock}!</span>`:''}
+            ${pcImgBadgeHtml(p)}
             ${p.photo ? `<img src="${p.photo}" alt="" loading="lazy">` : ic('box')}
           </div>
-          <div class="pc-body">
-            <h4>${p.name}</h4>
-            ${p.sellByWeight ? `
-              <div class="pc-price">${pcWeightPriceHtml(p)}</div>
-              <button class="pc-add" onclick="event.stopPropagation(); openProduct('${p.id}')">Elegir cantidad</button>
-            ` : `
-              <div class="pc-price">${pcPriceHtml(p)}</div>
-              ${p.displayQty && p.displayDiscount && !(state.currentClientPhone && state.clients[state.currentClientPhone] && state.clients[state.currentClientPhone].wholesale) ? `<div style="font-size:10px;color:#5dade2;margin-top:2px;">Caja x${p.displayQty}: <b>-${p.displayDiscount}%</b></div>` : ''}
-              <button class="pc-add" onclick="event.stopPropagation(); addToCart('${p.id}',1)">Agregar</button>
-            `}
-          </div>
+          <div class="pc-body">${pcCardBodyHtml(p)}</div>
         </div>`).join('')}
     </div>
   </div>`;
@@ -674,9 +669,13 @@ let state = {
   rentLedger: {monthlyAmount:1500000, movements:[]},
   supplierDebts: {movements:[]},
   supplierChecks: {movements:[]},
+  taxDues: {items:[]},
+  paymentAgreements: {items:[]},
   adminPagosSub: 'deudas',
   adminPagosProveedor: null,
+  adminPagosAcuerdoId: null,
   stockCount: {items: []},
+  barcodeCatalog: {},
 };
 
 let cmpDB = {proveedores:[], listas:[], pedidos:[]};
@@ -687,7 +686,11 @@ let _cmpAiFilename = '';
 let rentLoaded = false;
 let supplierDebtsLoaded = false;
 let supplierChecksLoaded = false;
+let taxDuesLoaded = false;
+let paymentAgreementsLoaded = false;
 let stockCountLoaded = false;
+let barcodeCatalogLoaded = false;
+let _pmEditingExisting = false;
 
 function saveState(){
   try{ localStorage.setItem(STORAGE_KEY, JSON.stringify(state)); }catch(e){}
@@ -730,6 +733,7 @@ async function supaFetch(path, method, body){
     method: method||'GET',
     headers,
     body: body ? JSON.stringify(body) : undefined,
+    cache: 'no-store',
   });
   const text = await res.text();
   if(!res.ok){
@@ -840,7 +844,7 @@ async function adminFetch(path, method, body, prefer, _retried){
   };
   if(prefer) headers['Prefer'] = prefer;
   else if(method === 'POST' || method === 'PATCH') headers['Prefer'] = 'return=representation';
-  const res = await fetch(url, { method: method||'GET', headers, body: body?JSON.stringify(body):undefined });
+  const res = await fetch(url, { method: method||'GET', headers, body: body?JSON.stringify(body):undefined, cache: 'no-store' });
   if(res.status === 401 && !_retried && await adminTryRefresh()){
     return adminFetch(path, method, body, prefer, true);
   }
@@ -859,6 +863,7 @@ async function rpcFetch(name, args){
     method: 'POST',
     headers: {'Content-Type':'application/json', 'apikey':SUPABASE_KEY, 'Authorization':'Bearer '+SUPABASE_KEY, 'Prefer':'return=representation'},
     body: JSON.stringify(args||{}),
+    cache: 'no-store',
   });
   const text = await res.text();
   if(!res.ok){
@@ -898,6 +903,7 @@ async function apiSyncProducts(){
       promoPrice: p.promo_price ? Number(p.promo_price) : null,
       promoUntil: p.promo_until||null,
       barcode: p.barcode||"",
+      hidden: p.hidden||false,
     };});
     const pendingOnly = state.products.filter(p=>_pendingSaves.has(p.id));
     const newProducts = [...apiMapped, ...pendingOnly];
@@ -1052,6 +1058,32 @@ async function apiSaveSetting(key, value){
   }catch(e){ console.warn('Error guardando '+key+':', e); toast('Error guardando: '+e.message, 'err'); }
 }
 
+// Catálogo código de barras → nombre/precio, que se arma solo con lo que
+// se va cargando (en Nuevo Producto y en Conteo de Stock). Así, cuando un
+// código ya visto reaparece —el producto se había contado pero todavía no
+// estaba a la venta, o se había borrado y se vuelve a cargar— el alta de
+// producto se autocompleta y solo queda por completar el resto. Datos
+// sensibles del negocio (precios de cosas que ni siquiera están en venta
+// todavía), así que queda excluido de la lectura pública, igual que
+// rent_ledger/stock_count. Ver supabase-migration-barcode-catalog.sql.
+async function apiSyncBarcodeCatalog(){
+  try{
+    const rows = await adminFetch('/app_settings?setting_key=eq.barcode_catalog&select=setting_value', 'GET');
+    const row = rows && rows[0];
+    if(row){
+      const parsed = JSON.parse(row.setting_value);
+      state.barcodeCatalog = (parsed && typeof parsed==='object') ? parsed : {};
+      saveState();
+    }
+  }catch(e){ console.warn('Error cargando catálogo de códigos:', e); }
+}
+function upsertBarcodeCatalog(barcode, name, price){
+  if(!barcode || !name) return;
+  state.barcodeCatalog[barcode] = {name, price: Number(price)||0, updatedAt: new Date().toISOString()};
+  saveState();
+  apiSaveSetting('barcode_catalog', state.barcodeCatalog);
+}
+
 // Sub-administradores: ahora son usuarios reales de Supabase Auth
 // (creados a mano en el Dashboard) vinculados vía admin_link_user.
 // Ya no se guardan contraseñas acá.
@@ -1171,6 +1203,7 @@ async function apiSaveProduct(product){
       promo_price: product.promoPrice||null,
       promo_until: product.promoUntil||null,
       barcode: product.barcode||null,
+      hidden: product.hidden||false,
     };
     if(product._apiId){
       await adminFetch('/products?id=eq.' + product._apiId, 'PATCH', body);
@@ -1894,8 +1927,8 @@ function renderCatalogResults(section){
   // La tarjeta "Sin Azúcar" muestra todo producto marcado sin azúcar, esté
   // filado en la sección "sinazucar" o en cualquier otra (natural, market, etc).
   const baseProducts = section==="sinazucar"
-    ? state.products.filter(p=>p.sinAzucar || p.section===section)
-    : state.products.filter(p=>p.section===section);
+    ? state.products.filter(p=>!p.hidden && (p.sinAzucar || p.section===section))
+    : state.products.filter(p=>!p.hidden && p.section===section);
   let products = baseProducts;
   if(activeCat) products = products.filter(p=>p.cat===activeCat);
   if(sinTaccOnly) products = products.filter(p=>p.sinTacc);
@@ -1917,20 +1950,10 @@ function renderCatalogResults(section){
         ${products.map(p=>`
           <div class="product-card" onclick="openProduct('${p.id}')">
             <div class="pc-img">
-              ${(isLowStock(p) && p.stock>0) ? `<span class="pc-stock-low">¡Últimas ${p.stock}!</span>`:''}
+              ${pcImgBadgeHtml(p)}
               ${p.photo ? `<img src="${p.photo}" alt="" loading="lazy">` : ic('box')}
             </div>
-            <div class="pc-body">
-              <h4>${p.name}</h4>
-              ${p.sellByWeight ? `
-                <div class="pc-price">${pcWeightPriceHtml(p)}</div>
-                <button class="pc-add" onclick="event.stopPropagation(); openProduct('${p.id}')">Elegir cantidad</button>
-              ` : `
-                <div class="pc-price">${pcPriceHtml(p)}</div>
-                ${p.displayQty && p.displayDiscount && !(state.currentClientPhone && state.clients[state.currentClientPhone] && state.clients[state.currentClientPhone].wholesale) ? `<div style="font-size:10px;color:#5dade2;margin-top:2px;">Caja x${p.displayQty}: <b>-${p.displayDiscount}%</b></div>` : ''}
-                <button class="pc-add" onclick="event.stopPropagation(); addToCart('${p.id}',1)">Agregar</button>
-              `}
-            </div>
+            <div class="pc-body">${pcCardBodyHtml(p)}</div>
           </div>
         `).join('')}
       </div>
@@ -1948,7 +1971,7 @@ function onSearchInput(val){
   if(q.length < 2){ sugEl.style.display='none'; return; }
   const re = new RegExp(q.replace(/[.*+?^${}()|[\]\\]/g,'\\$&'),'gi');
   const matches = state.products.filter(p=>
-    p.name.toLowerCase().includes(q) || (p.cat||'').toLowerCase().includes(q)
+    !p.hidden && (p.name.toLowerCase().includes(q) || (p.cat||'').toLowerCase().includes(q))
   ).slice(0,6);
   if(!matches.length){ sugEl.style.display='none'; return; }
   sugEl.innerHTML = matches.map(p=>`
@@ -1968,7 +1991,7 @@ function toggleSinAzucarFilter(){ state.route.sinAzucarOnly = !state.route.sinAz
 /* ---------- PRODUCT DETAIL ---------- */
 function renderProductDetail(id){
   const p = state.products.find(pr=>pr.id===id);
-  if(!p) return renderHome();
+  if(!p || p.hidden) return renderHome();
   if(p.sellByWeight){
     const grams = state.route.grams || p.minGrams || 50;
     const pricePerKgEff = effectivePriceForWeight(p);
@@ -2002,6 +2025,7 @@ function renderProductDetail(id){
     </div>`;
   }
   const qty = state.route.qty || 1;
+  const outOfStock = isOutOfStock(p);
   const _unitPr = effectivePrice(p);
   const _clW = state.currentClientPhone ? state.clients[state.currentClientPhone] : null;
   const _isWholesale = !!(_clW && _clW.wholesale);
@@ -2020,15 +2044,21 @@ function renderProductDetail(id){
       ${!_isWholesale && p.displayQty && p.displayDiscount ? `<div style="background:${_hasDisp?'rgba(39,174,96,0.15)':'rgba(52,152,219,0.12)'};border:1px solid ${_hasDisp?'rgba(39,174,96,0.4)':'rgba(52,152,219,0.3)'};border-radius:10px;padding:10px 12px;margin:8px 0;font-size:13px;">${_hasDisp?`<span style="color:#2ecc71;font-weight:700;">✓ Precio display aplicado</span>`:`<span style="color:#5dade2;font-weight:700;">📦 Comprá ${p.displayQty} unidades</span> →`} <b>${money(Math.round(applyClientDiscount(_unitPr*(1-p.displayDiscount/100))))}/u</b> <span style="background:#e67e22;color:#fff;font-size:9px;font-weight:800;border-radius:6px;padding:2px 6px;">-${p.displayDiscount}%</span></div>` : ''}
       ${p.sinAzucar ? `<span style="background:#b8860b;color:#fff;font-size:10px;font-weight:800;border-radius:8px;padding:3px 10px;display:inline-block;margin-bottom:6px;cursor:pointer;" onclick="nav('catalog',{section:'sinazucar'})">SIN AZÚCAR · SUGAR FREE</span>` : ''}
       <p class="pd-desc">${p.desc||''}</p>
-      <div class="qty-row">
-        <button class="qty-btn" onclick="changeDetailQty(-1)">−</button>
-        <input type="number" class="qty-val" value="${qty}" min="1" max="${p.stock}" onchange="setDetailQty(this.value)" style="width:56px;padding:4px 6px;border-radius:8px;background:var(--glass);border:1px solid var(--glass-bd);color:var(--white);-moz-appearance:textfield;">
-        <button class="qty-btn" onclick="changeDetailQty(1)">+</button>
-        <span style="font-size:12px; color:rgba(255,255,255,0.5);">${p.stock} disponibles</span>
-      </div>
+      ${outOfStock ? `
+        <div style="background:rgba(229,86,109,0.12); border:1px solid rgba(229,86,109,0.35); border-radius:10px; padding:10px 12px; font-size:13px; font-weight:700; color:var(--danger);">Sin stock por el momento</div>
+      ` : `
+        <div class="qty-row">
+          <button class="qty-btn" onclick="changeDetailQty(-1)">−</button>
+          <input type="number" class="qty-val" value="${qty}" min="1" max="${p.stock}" onchange="setDetailQty(this.value)" style="width:56px;padding:4px 6px;border-radius:8px;background:var(--glass);border:1px solid var(--glass-bd);color:var(--white);-moz-appearance:textfield;">
+          <button class="qty-btn" onclick="changeDetailQty(1)">+</button>
+          <span style="font-size:12px; color:rgba(255,255,255,0.5);">${p.stock} disponibles</span>
+        </div>
+      `}
     </div>
     <div class="sticky-cta">
-      <button class="btn-primary" onclick="addToCart('${p.id}', ${qty}); nav('catalog',{section:'${p.section}'})"><svg width="28" height="28" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" style="flex-shrink:0"><circle cx="9" cy="20" r="1.4"/><circle cx="18" cy="20" r="1.4"/><path d="M3 4h2l2.4 12.2a2 2 0 0 0 2 1.8h7.2a2 2 0 0 0 2-1.6L21 8H6"/></svg> Agregar al carrito — ${money(applyClientDiscount(_lineTotal))}</button>
+      ${outOfStock
+        ? `<button class="btn-primary" disabled style="opacity:.4;">Sin stock</button>`
+        : `<button class="btn-primary" onclick="addToCart('${p.id}', ${qty}); nav('catalog',{section:'${p.section}'})"><svg width="28" height="28" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" style="flex-shrink:0"><circle cx="9" cy="20" r="1.4"/><circle cx="18" cy="20" r="1.4"/><path d="M3 4h2l2.4 12.2a2 2 0 0 0 2 1.8h7.2a2 2 0 0 0 2-1.6L21 8H6"/></svg> Agregar al carrito — ${money(applyClientDiscount(_lineTotal))}</button>`}
     </div>
   </div>`;
 }
@@ -2097,6 +2127,33 @@ function pcPriceHtml(p){
     return `<span style="text-decoration:line-through;opacity:.4;font-size:10px;">${money(p.price)}</span> ${money(promo)}${discBadge(badgePct,true)}`;
   }
   return money(p.price);
+}
+// Productos pesables no llevan un "sin stock" basado en unidades (mismo
+// criterio que isLowStock, que ya los excluye del aviso de stock bajo).
+function isOutOfStock(p){ return !p.sellByWeight && p.stock<=0; }
+function pcImgBadgeHtml(p){
+  if(isOutOfStock(p)) return `<span class="pc-stock-out">Sin stock</span>`;
+  if(isLowStock(p) && p.stock>0) return `<span class="pc-stock-low">¡Últimas ${p.stock}!</span>`;
+  return '';
+}
+// Cuerpo (nombre + precio + botón) de una tarjeta de producto en las
+// grillas de cliente — compartido entre el catálogo y Apto Celíaco para
+// no repetir la lógica de "sin stock" en cada uno.
+function pcCardBodyHtml(p){
+  const outOfStock = isOutOfStock(p);
+  return `
+    <h4>${p.name}</h4>
+    ${p.sellByWeight ? `
+      <div class="pc-price">${pcWeightPriceHtml(p)}</div>
+      <button class="pc-add" onclick="event.stopPropagation(); openProduct('${p.id}')">Elegir cantidad</button>
+    ` : `
+      <div class="pc-price">${pcPriceHtml(p)}</div>
+      ${p.displayQty && p.displayDiscount && !outOfStock && !(state.currentClientPhone && state.clients[state.currentClientPhone] && state.clients[state.currentClientPhone].wholesale) ? `<div style="font-size:10px;color:#5dade2;margin-top:2px;">Caja x${p.displayQty}: <b>-${p.displayDiscount}%</b></div>` : ''}
+      ${outOfStock
+        ? `<button class="pc-add" disabled>Sin stock</button>`
+        : `<button class="pc-add" onclick="event.stopPropagation(); addToCart('${p.id}',1)">Agregar</button>`}
+    `}
+  `;
 }
 function pcWeightPriceHtml(p){
   const base = effectivePriceForWeight(p);
@@ -2568,7 +2625,7 @@ function renderAdmin(){
   const lowStockCount = state.products.filter(isLowStock).length;
   const noBarcodeCount = state.products.filter(p=>!p.barcode).length;
   const pendingOrdersCount = state.orders.filter(o=>o.status==="Pendiente").length;
-  const checksDueSoon = checksDueSoonCount(7);
+  const checksDueSoon = pagosDueSoonCount(7);
   const ALL_TABS = [
     {key:"pedidos",       label:"Pedidos", badge:pendingOrdersCount},
     {key:"productos",     label:"Productos", badge:lowStockCount},
@@ -2591,6 +2648,7 @@ function renderAdmin(){
     ? ALL_TABS
     : ALL_TABS.filter(t => t.key !== 'config' && t.key !== 'comparador' && t.key !== 'alquiler' && t.key !== 'cajadiaria' && t.key !== 'pagos' && (state.adminLoggedPerms||[]).includes(t.key));
   const tab = tabs.find(t=>t.key===state.adminTab) ? state.adminTab : (tabs[0]?.key||"pedidos");
+  if(tab==="productos" && !barcodeCatalogLoaded){ barcodeCatalogLoaded = true; apiSyncBarcodeCatalog(); }
   return `
   <div class="screen">
     <div class="topbar">
@@ -3606,6 +3664,26 @@ function checksDueSoonCount(days){
     c.estado!=='cobrado' && c.fechaVencimiento && c.fechaVencimiento>=today && c.fechaVencimiento<=limit
   ).length;
 }
+// Suma "months" meses a una fecha "YYYY-MM-DD", recortando al último día
+// del mes destino si hace falta (ej: 31 ene + 1 mes = 28/29 feb, no 3 mar).
+function addMonthsClamped(iso, months){
+  const [y,m,d] = iso.split('-').map(Number);
+  const total = (m-1) + months;
+  const targetY = y + Math.floor(total/12);
+  const targetM = ((total%12)+12)%12;
+  const daysInTarget = new Date(targetY, targetM+1, 0).getDate();
+  const targetD = Math.min(d, daysInTarget);
+  return `${targetY}-${String(targetM+1).padStart(2,'0')}-${String(targetD).padStart(2,'0')}`;
+}
+function pagosDueSoonCount(days){
+  const today = new Date().toISOString().slice(0,10);
+  const limit = new Date(Date.now()+days*86400000).toISOString().slice(0,10);
+  const inRange = date => date && date>=today && date<=limit;
+  const taxes = (state.taxDues.items||[]).filter(t=>inRange(t.vencimiento)).length;
+  const cuotas = (state.paymentAgreements.items||[]).reduce((s,a)=>
+    s + (a.cuotas||[]).filter(c=>c.estado!=='pagado' && inRange(c.vencimiento)).length, 0);
+  return checksDueSoonCount(days) + taxes + cuotas;
+}
 
 async function apiSyncSupplierDebts(){
   try{
@@ -3660,6 +3738,39 @@ async function apiSaveSupplierChecks(){
       await adminFetch('/app_settings', 'POST', {setting_key:'supplier_checks', setting_value: val});
     }
   }catch(e){ toast('Error guardando cheques: '+e.message, 'err'); }
+}
+
+async function apiSyncTaxDues(){
+  try{
+    const rows = await adminFetch('/app_settings?setting_key=eq.tax_dues&select=setting_value', 'GET');
+    const row = rows && rows[0];
+    if(row){
+      const parsed = JSON.parse(row.setting_value);
+      state.taxDues = Object.assign({items:[]}, parsed);
+    }
+    taxDuesLoaded = true;
+    saveState(); render();
+  }catch(e){
+    taxDuesLoaded = true;
+    toast('Error cargando impuestos: '+e.message, 'err');
+    render();
+  }
+}
+async function apiSyncPaymentAgreements(){
+  try{
+    const rows = await adminFetch('/app_settings?setting_key=eq.payment_agreements&select=setting_value', 'GET');
+    const row = rows && rows[0];
+    if(row){
+      const parsed = JSON.parse(row.setting_value);
+      state.paymentAgreements = Object.assign({items:[]}, parsed);
+    }
+    paymentAgreementsLoaded = true;
+    saveState(); render();
+  }catch(e){
+    paymentAgreementsLoaded = true;
+    toast('Error cargando acuerdos: '+e.message, 'err');
+    render();
+  }
 }
 
 function openSupplierDebtModal(proveedorPrefill){
@@ -3831,18 +3942,191 @@ async function deleteSupplierCheck(id){
 function openSupplierProveedor(proveedor){ state.adminPagosProveedor = proveedor; render(); }
 function closeSupplierProveedor(){ state.adminPagosProveedor = null; render(); }
 
+/* ── IMPUESTOS: se cargan una vez con su próximo vencimiento; al marcarlos
+   pagados no quedan como "pagados" — se les suma un mes (recortando al
+   último día del mes si hace falta) y vuelven a aparecer como pendientes
+   el ciclo siguiente, sin que haya que recargarlos a mano cada mes. ── */
+function openTaxDueModal(id){
+  const item = id ? state.taxDues.items.find(t=>t.id===id) : null;
+  const overlay = document.createElement("div");
+  overlay.className = "modal-overlay";
+  overlay.id = "tax-due-modal-overlay";
+  const today = new Date().toISOString().slice(0,10);
+  overlay.innerHTML = `
+    <div class="modal-sheet">
+      <div class="modal-handle"></div>
+      <h3 class="modal-title">${item ? 'Editar impuesto' : 'Nuevo impuesto'}</h3>
+      <p style="font-size:12px; color:rgba(255,255,255,0.5); margin:-4px 0 10px;">Se carga una sola vez — al marcarlo pagado, el sistema arma solo el vencimiento del mes siguiente.</p>
+      <div class="form-group"><label>Nombre</label><input id="td-nombre" value="${item?escapeHtml(item.nombre):''}" placeholder="Ej: Monotributo"></div>
+      <div class="form-group"><label>Monto estimado</label><input id="td-monto" type="number" value="${item?item.monto:''}" placeholder="Ej: 45000"></div>
+      <div class="form-group"><label>Próximo vencimiento</label><input id="td-vencimiento" type="date" value="${item?item.vencimiento:today}"></div>
+      <div style="display:flex; gap:10px; margin-top:6px;">
+        <button class="btn-secondary" style="flex:1;" onclick="closeTaxDueModal()">Cancelar</button>
+        <button class="btn-primary" style="flex:1;" onclick="saveTaxDue('${item?item.id:''}')">Guardar</button>
+      </div>
+    </div>`;
+  document.body.appendChild(overlay);
+}
+function closeTaxDueModal(){ const el=document.getElementById("tax-due-modal-overlay"); if(el) el.remove(); }
+async function saveTaxDue(id){
+  const nombre = document.getElementById("td-nombre").value.trim();
+  const monto = Number(document.getElementById("td-monto").value);
+  const vencimiento = document.getElementById("td-vencimiento").value;
+  if(!nombre){ toast("Ingresá el nombre del impuesto", "err"); return; }
+  if(!monto || monto<=0){ toast("Ingresá un monto válido", "err"); return; }
+  if(!vencimiento){ toast("Ingresá la fecha de vencimiento", "err"); return; }
+  if(id){
+    const item = state.taxDues.items.find(t=>t.id===id);
+    if(item){ item.nombre=nombre; item.monto=monto; item.vencimiento=vencimiento; }
+  }else{
+    state.taxDues.items.push({id:paymentsId('td'), nombre, monto, vencimiento, historial:[]});
+  }
+  closeTaxDueModal();
+  saveState(); render();
+  try{ await apiSaveSetting('tax_dues', state.taxDues); toast("Impuesto guardado", "ok"); }
+  catch(e){ toast("Error al guardar: "+e.message, "err"); }
+}
+async function markTaxDuePaid(id){
+  const item = state.taxDues.items.find(t=>t.id===id);
+  if(!item) return;
+  item.historial = item.historial || [];
+  item.historial.push({fecha: item.vencimiento, monto: item.monto});
+  item.vencimiento = addMonthsClamped(item.vencimiento, 1);
+  saveState(); render();
+  try{ await apiSaveSetting('tax_dues', state.taxDues); toast('Marcado como pagado — próximo vencimiento: '+fmtDateAR(item.vencimiento), 'ok'); }
+  catch(e){ toast("Error al guardar: "+e.message, "err"); }
+}
+async function deleteTaxDue(id){
+  if(!confirm("¿Eliminar este impuesto? Se deja de trackear su vencimiento.")) return;
+  state.taxDues.items = state.taxDues.items.filter(t=>t.id!==id);
+  saveState(); render();
+  try{ await apiSaveSetting('tax_dues', state.taxDues); } catch(e){ toast("Error al guardar: "+e.message, "err"); }
+}
+
+/* ── ACUERDOS A PAGAR: planes de pago (AFIP/ARBA/Municipalidad, etc.)
+   repartidos en cuotas — mismo mecanismo de reparto que los cheques, pero
+   con vencimientos mensuales en vez de a mano fila por fila. ── */
+function agreementSaldoPendiente(agreement){
+  return (agreement.cuotas||[]).filter(c=>c.estado!=='pagado').reduce((s,c)=>s+c.monto,0);
+}
+function agreementTotalPendienteGeneral(){
+  return (state.paymentAgreements.items||[]).reduce((s,a)=>s+agreementSaldoPendiente(a),0);
+}
+function openAgreementModal(){
+  const overlay = document.createElement("div");
+  overlay.className = "modal-overlay";
+  overlay.id = "agreement-modal-overlay";
+  const today = new Date().toISOString().slice(0,10);
+  overlay.innerHTML = `
+    <div class="modal-sheet">
+      <div class="modal-handle"></div>
+      <h3 class="modal-title">Nuevo acuerdo de pago</h3>
+      <p style="font-size:12px; color:rgba(255,255,255,0.5); margin:-4px 0 10px;">Ej: plan de facilidades AFIP/ARBA. Repartí el monto total en cuotas mensuales.</p>
+      <div class="form-group"><label>Organismo</label><input id="ag-organismo" placeholder="Ej: AFIP"></div>
+      <div class="form-group"><label>Concepto</label><input id="ag-concepto" placeholder="Ej: Plan de facilidades RG 5321"></div>
+      <div style="display:flex; gap:10px;">
+        <div class="form-group" style="flex:1;"><label>Monto total</label><input id="ag-total" type="number" placeholder="Ej: 1200000" oninput="rebuildAgreementSplitRows()"></div>
+        <div class="form-group" style="flex:1;"><label>Cantidad de cuotas</label><input id="ag-cantidad" type="number" min="1" max="60" value="1" oninput="rebuildAgreementSplitRows()"></div>
+      </div>
+      <div class="form-group"><label>Vencimiento 1° cuota</label><input id="ag-primera" type="date" value="${today}" onchange="rebuildAgreementSplitRows()"></div>
+      <div id="ag-rows"></div>
+      <div style="display:flex; gap:10px; margin-top:6px;">
+        <button class="btn-secondary" style="flex:1;" onclick="closeAgreementModal()">Cancelar</button>
+        <button class="btn-primary" style="flex:1;" onclick="saveAgreement()">Guardar</button>
+      </div>
+    </div>`;
+  document.body.appendChild(overlay);
+  rebuildAgreementSplitRows();
+}
+function closeAgreementModal(){ const el=document.getElementById("agreement-modal-overlay"); if(el) el.remove(); }
+// Redibuja las filas de cuotas según "monto total" / "cantidad" / "1° cuota",
+// sin pisar lo que el usuario ya haya tocado a mano en filas que sigan existiendo.
+function rebuildAgreementSplitRows(){
+  const rowsEl = document.getElementById('ag-rows');
+  if(!rowsEl) return;
+  const total = Number(document.getElementById('ag-total')?.value) || 0;
+  const n = Math.max(1, Math.min(60, Number(document.getElementById('ag-cantidad')?.value) || 1));
+  const primera = document.getElementById('ag-primera')?.value || new Date().toISOString().slice(0,10);
+  const per = n>0 ? Math.round((total/n)*100)/100 : 0;
+  const prevRows = [...rowsEl.querySelectorAll('[data-row]')].map(row=>({
+    monto: row.querySelector('.ag-row-monto')?.value || '',
+    vto: row.querySelector('.ag-row-vto')?.value || '',
+  }));
+  let html = '';
+  for(let i=0;i<n;i++){
+    const prev = prevRows[i];
+    const defaultVto = i===0 ? primera : addMonthsClamped(primera, i);
+    html += `
+      <div data-row style="display:flex; gap:8px; align-items:flex-end; margin-bottom:10px;">
+        <div style="flex:none; width:56px; font-size:12px; color:rgba(255,255,255,0.5); padding-bottom:11px;">Cuota ${i+1}</div>
+        <div style="flex:1;"><label style="font-size:11px; color:rgba(255,255,255,0.5); display:block; margin-bottom:4px;">Monto</label>
+          <input class="ag-row-monto" type="number" value="${prev&&prev.monto!==''?prev.monto:(per||'')}" style="width:100%; padding:10px; border-radius:10px; background:var(--glass); border:1px solid var(--glass-bd); color:var(--cream);"></div>
+        <div style="flex:1;"><label style="font-size:11px; color:rgba(255,255,255,0.5); display:block; margin-bottom:4px;">Vencimiento</label>
+          <input class="ag-row-vto" type="date" value="${prev&&prev.vto?prev.vto:defaultVto}" style="width:100%; padding:10px; border-radius:10px; background:var(--glass); border:1px solid var(--glass-bd); color:var(--cream);"></div>
+      </div>`;
+  }
+  rowsEl.innerHTML = html;
+}
+async function saveAgreement(){
+  const organismo = document.getElementById("ag-organismo").value.trim();
+  const concepto = document.getElementById("ag-concepto").value.trim();
+  if(!organismo){ toast("Ingresá el organismo", "err"); return; }
+  const cuotas = [...document.querySelectorAll('#ag-rows [data-row]')].map(row=>({
+    monto: Number(row.querySelector('.ag-row-monto').value),
+    vencimiento: row.querySelector('.ag-row-vto').value,
+  })).filter(c=>c.monto>0 && c.vencimiento).map((c,i)=>({
+    id:paymentsId('ac'), nro:i+1, monto:c.monto, vencimiento:c.vencimiento, estado:'pendiente',
+  }));
+  if(cuotas.length===0){ toast("Completá monto y vencimiento de al menos una cuota", "err"); return; }
+  const montoTotal = cuotas.reduce((s,c)=>s+c.monto,0);
+  state.paymentAgreements.items.push({
+    id:paymentsId('agr'), organismo, concepto, montoTotal, createdAt:new Date().toISOString().slice(0,10), cuotas,
+  });
+  closeAgreementModal();
+  saveState(); render();
+  try{ await apiSaveSetting('payment_agreements', state.paymentAgreements); toast("Acuerdo registrado", "ok"); }
+  catch(e){ toast("Error al guardar: "+e.message, "err"); }
+}
+async function setAgreementCuotaEstado(agreementId, cuotaId, estado){
+  const agreement = state.paymentAgreements.items.find(a=>a.id===agreementId);
+  const cuota = agreement && agreement.cuotas.find(c=>c.id===cuotaId);
+  if(!cuota) return;
+  cuota.estado = estado;
+  saveState(); render();
+  try{ await apiSaveSetting('payment_agreements', state.paymentAgreements); } catch(e){ toast("Error al guardar: "+e.message, "err"); }
+}
+async function deleteAgreement(id){
+  if(!confirm("¿Eliminar este acuerdo y todas sus cuotas?")) return;
+  state.paymentAgreements.items = state.paymentAgreements.items.filter(a=>a.id!==id);
+  state.adminPagosAcuerdoId = null;
+  saveState(); render();
+  try{ await apiSaveSetting('payment_agreements', state.paymentAgreements); } catch(e){ toast("Error al guardar: "+e.message, "err"); }
+}
+function openAgreementDetail(id){ state.adminPagosAcuerdoId = id; render(); }
+function closeAgreementDetail(){ state.adminPagosAcuerdoId = null; render(); }
+
 function renderAdminPagos(){
   if(!supplierDebtsLoaded){ apiSyncSupplierDebts(); }
   if(!supplierChecksLoaded){ apiSyncSupplierChecks(); }
-  if(!supplierDebtsLoaded || !supplierChecksLoaded){ return `<div style="padding:40px;text-align:center;color:rgba(255,255,255,0.4);">Cargando...</div>`; }
+  if(!taxDuesLoaded){ apiSyncTaxDues(); }
+  if(!paymentAgreementsLoaded){ apiSyncPaymentAgreements(); }
+  if(!supplierDebtsLoaded || !supplierChecksLoaded || !taxDuesLoaded || !paymentAgreementsLoaded){
+    return `<div style="padding:40px;text-align:center;color:rgba(255,255,255,0.4);">Cargando...</div>`;
+  }
   const sub = state.adminPagosSub||'deudas';
   return `
-  <div style="padding:12px 16px 0; display:flex; gap:8px;">
+  <div style="padding:12px 16px 0; display:flex; gap:8px; flex-wrap:wrap;">
     <button class="chip ${sub==='deudas'?'active':''}" onclick="state.adminPagosSub='deudas'; state.adminPagosProveedor=null; render()">Deudas</button>
     <button class="chip ${sub==='cheques'?'active':''}" onclick="state.adminPagosSub='cheques'; render()">Cheques</button>
+    <button class="chip ${sub==='impuestos'?'active':''}" onclick="state.adminPagosSub='impuestos'; render()">Impuestos</button>
+    <button class="chip ${sub==='acuerdos'?'active':''}" onclick="state.adminPagosSub='acuerdos'; state.adminPagosAcuerdoId=null; render()">Acuerdos</button>
     <button class="chip ${sub==='calendario'?'active':''}" onclick="state.adminPagosSub='calendario'; render()">Calendario</button>
   </div>
-  ${sub==='deudas' ? renderAdminPagosDeudas() : sub==='calendario' ? renderAdminPagosCalendario() : renderAdminPagosCheques()}`;
+  ${sub==='deudas' ? renderAdminPagosDeudas()
+    : sub==='cheques' ? renderAdminPagosCheques()
+    : sub==='impuestos' ? renderAdminPagosImpuestos()
+    : sub==='acuerdos' ? renderAdminPagosAcuerdos()
+    : renderAdminPagosCalendario()}`;
 }
 
 function renderAdminPagosDeudas(){
@@ -3948,20 +4232,143 @@ function renderAdminPagosCheques(){
   </div>`;
 }
 
+function renderAdminPagosImpuestos(){
+  const today = new Date().toISOString().slice(0,10);
+  const items = [...(state.taxDues.items||[])].sort((a,b)=>(a.vencimiento||'').localeCompare(b.vencimiento||''));
+  const totalMensual = items.reduce((s,t)=>s+t.monto, 0);
+  return `
+  <div style="padding:16px;">
+    <div style="background:var(--glass); border:1px solid var(--glass-bd); border-radius:16px; padding:20px; text-align:center; margin-bottom:16px;">
+      <div style="font-size:12px; color:rgba(255,255,255,0.5); text-transform:uppercase; letter-spacing:.5px;">Total impuestos cargados</div>
+      <div style="font-size:32px; font-weight:800; color:var(--white); margin:8px 0;">${money(totalMensual)}</div>
+    </div>
+    <button class="btn-primary" style="width:100%; margin-bottom:16px;" onclick="openTaxDueModal()">+ Agregar impuesto</button>
+    ${items.length===0 ? `<div style="padding:30px; text-align:center; color:rgba(255,255,255,0.4);">Sin impuestos cargados todavía.</div>` : items.map(t=>{
+      const dueSoon = t.vencimiento && t.vencimiento<=new Date(Date.now()+7*86400000).toISOString().slice(0,10);
+      const isPast = t.vencimiento < today;
+      const color = isPast ? 'var(--danger)' : dueSoon ? 'var(--warn)' : 'rgba(255,255,255,0.6)';
+      const badge = dateBadgeParts(t.vencimiento);
+      return `
+      <div style="padding:12px 14px; background:var(--glass); border:1px solid var(--glass-bd); border-radius:12px; margin-bottom:8px;">
+        <div style="display:flex; align-items:center; gap:12px; margin-bottom:8px;">
+          <div style="flex:none; width:46px; padding:5px 2px; border-radius:10px; background:rgba(255,255,255,0.06); border:1.5px solid ${color}; color:${color}; text-align:center;">
+            <div style="font-size:18px; font-weight:800; line-height:1.1;">${badge.day}</div>
+            <div style="font-size:9px; font-weight:700; letter-spacing:.5px;">${badge.month}</div>
+          </div>
+          <div style="flex:1; min-width:0; cursor:pointer;" onclick="openTaxDueModal('${t.id}')">
+            <div style="font-size:13px; font-weight:600; color:var(--white);">${escapeHtml(t.nombre)}</div>
+            <div style="font-size:11px; color:${isPast?'var(--danger)':'rgba(255,255,255,0.4)'};">Vence ${fmtDateAR(t.vencimiento)}${isPast?' · vencido':''}</div>
+          </div>
+          <div style="font-size:14px; font-weight:700; color:var(--white);">${money(t.monto)}</div>
+          <button class="icon-btn" onclick="deleteTaxDue('${t.id}')">${ic('trash')}</button>
+        </div>
+        <button class="btn-secondary" style="width:100%; padding:8px; font-size:12.5px;" onclick="markTaxDuePaid('${t.id}')">Marcar pagado → pasa al mes siguiente</button>
+      </div>`;
+    }).join('')}
+  </div>`;
+}
+
+function renderAdminPagosAcuerdos(){
+  if(state.adminPagosAcuerdoId) return renderAdminPagosAcuerdoDetail(state.adminPagosAcuerdoId);
+  const agreements = [...(state.paymentAgreements.items||[])];
+  const total = agreementTotalPendienteGeneral();
+  return `
+  <div style="padding:16px;">
+    <div style="background:var(--glass); border:1px solid var(--glass-bd); border-radius:16px; padding:20px; text-align:center; margin-bottom:16px;">
+      <div style="font-size:12px; color:rgba(255,255,255,0.5); text-transform:uppercase; letter-spacing:.5px;">Saldo total en acuerdos</div>
+      <div style="font-size:32px; font-weight:800; color:${total>0?'var(--danger)':'var(--ok)'}; margin:8px 0;">${money(total)}</div>
+    </div>
+    <button class="btn-primary" style="width:100%; margin-bottom:16px;" onclick="openAgreementModal()">+ Nuevo acuerdo</button>
+    ${agreements.length===0 ? `<div style="padding:30px; text-align:center; color:rgba(255,255,255,0.4);">Sin acuerdos cargados todavía.</div>` : agreements.map(a=>{
+      const saldo = agreementSaldoPendiente(a);
+      const cuotasPend = (a.cuotas||[]).filter(c=>c.estado!=='pagado').length;
+      return `
+      <div style="display:flex; justify-content:space-between; align-items:center; gap:10px; padding:14px; background:var(--glass); border:1px solid var(--glass-bd); border-radius:12px; margin-bottom:8px; cursor:pointer;" onclick="openAgreementDetail('${a.id}')">
+        <div style="min-width:0;">
+          <div style="font-size:13.5px; font-weight:600; color:var(--white);">${escapeHtml(a.organismo)}${a.concepto?` · ${escapeHtml(a.concepto)}`:''}</div>
+          <div style="font-size:11px; color:rgba(255,255,255,0.4);">${cuotasPend} cuota${cuotasPend!==1?'s':''} pendiente${cuotasPend!==1?'s':''}</div>
+        </div>
+        <div style="font-size:14px; font-weight:700; color:${saldo>0?'var(--danger)':'var(--ok)'};">${money(saldo)}</div>
+      </div>`;
+    }).join('')}
+  </div>`;
+}
+
+function renderAdminPagosAcuerdoDetail(id){
+  const a = (state.paymentAgreements.items||[]).find(x=>x.id===id);
+  if(!a){ state.adminPagosAcuerdoId = null; return renderAdminPagosAcuerdos(); }
+  const saldo = agreementSaldoPendiente(a);
+  const cuotas = [...(a.cuotas||[])].sort((x,y)=>(x.vencimiento||'').localeCompare(y.vencimiento||''));
+  const today = new Date().toISOString().slice(0,10);
+  return `
+  <div style="padding:16px;">
+    <div style="display:flex; align-items:center; gap:8px; margin-bottom:12px;">
+      <button onclick="closeAgreementDetail()" style="background:none; border:none; color:var(--white); cursor:pointer; padding:4px 8px; font-size:18px;">←</button>
+      <h3 style="font-size:15px; color:var(--white);">${escapeHtml(a.organismo)}${a.concepto?` · ${escapeHtml(a.concepto)}`:''}</h3>
+    </div>
+    <div style="background:var(--glass); border:1px solid var(--glass-bd); border-radius:16px; padding:20px; text-align:center; margin-bottom:16px;">
+      <div style="font-size:12px; color:rgba(255,255,255,0.5); text-transform:uppercase; letter-spacing:.5px;">Saldo pendiente</div>
+      <div style="font-size:28px; font-weight:800; color:${saldo>0?'var(--danger)':'var(--ok)'}; margin:8px 0;">${money(saldo)}</div>
+      <div style="font-size:11px; color:rgba(255,255,255,0.4);">Monto total del acuerdo: ${money(a.montoTotal)}</div>
+    </div>
+    <button class="btn-secondary" style="width:100%; margin-bottom:16px; color:var(--danger);" onclick="deleteAgreement('${a.id}')">Eliminar acuerdo</button>
+    <div style="font-size:13px; font-weight:700; color:rgba(255,255,255,0.6); margin-bottom:8px; text-transform:uppercase; letter-spacing:.4px;">Cuotas</div>
+    ${cuotas.map(c=>{
+      const isPast = c.estado!=='pagado' && c.vencimiento < today;
+      const color = c.estado==='pagado' ? 'var(--ok)' : isPast ? 'var(--danger)' : 'rgba(255,255,255,0.6)';
+      const badge = dateBadgeParts(c.vencimiento);
+      return `
+      <div style="padding:12px 14px; background:var(--glass); border:1px solid var(--glass-bd); border-radius:12px; margin-bottom:8px;">
+        <div style="display:flex; align-items:center; gap:12px; margin-bottom:8px;">
+          <div style="flex:none; width:46px; padding:5px 2px; border-radius:10px; background:rgba(255,255,255,0.06); border:1.5px solid ${color}; color:${color}; text-align:center;">
+            <div style="font-size:18px; font-weight:800; line-height:1.1;">${badge.day}</div>
+            <div style="font-size:9px; font-weight:700; letter-spacing:.5px;">${badge.month}</div>
+          </div>
+          <div style="flex:1; min-width:0;">
+            <div style="font-size:13px; font-weight:600; color:var(--white);">Cuota ${c.nro}</div>
+            <div style="font-size:11px; color:rgba(255,255,255,0.4);">Vence ${fmtDateAR(c.vencimiento)}${isPast?' · vencida':''}</div>
+          </div>
+          <div style="font-size:14px; font-weight:700; color:var(--white);">${money(c.monto)}</div>
+        </div>
+        <div style="display:flex; gap:6px;">
+          ${['pendiente','pagado'].map(e=>`<button class="chip ${c.estado===e?'active':''}" style="padding:5px 12px; font-size:11px;" onclick="setAgreementCuotaEstado('${a.id}','${c.id}','${e}')">${e==='pendiente'?'Pendiente':'Pagada'}</button>`).join('')}
+        </div>
+      </div>`;
+    }).join('')}
+  </div>`;
+}
+
+// Junta cheques + impuestos + cuotas de acuerdos en una sola línea de
+// tiempo de vencimientos, agrupados por fecha (mismo semáforo de colores
+// que ya usaban los cheques solos).
 function renderAdminPagosCalendario(){
   const today = new Date().toISOString().slice(0,10);
-  const checks = (state.supplierChecks.movements||[]).filter(c=>c.estado!=='cobrado' && c.fechaVencimiento);
+  const entries = [];
+  (state.supplierChecks.movements||[]).forEach(c=>{
+    if(c.estado==='cobrado' || !c.fechaVencimiento) return;
+    entries.push({date:c.fechaVencimiento, amount:c.amount, label:`Cheque · ${c.proveedor}${c.nroCheque?` · Nro ${c.nroCheque}`:''}`});
+  });
+  (state.taxDues.items||[]).forEach(t=>{
+    if(!t.vencimiento) return;
+    entries.push({date:t.vencimiento, amount:t.monto, label:`Impuesto · ${t.nombre}`});
+  });
+  (state.paymentAgreements.items||[]).forEach(a=>{
+    (a.cuotas||[]).forEach(c=>{
+      if(c.estado==='pagado' || !c.vencimiento) return;
+      entries.push({date:c.vencimiento, amount:c.monto, label:`${a.organismo}${a.concepto?` · ${a.concepto}`:''} · Cuota ${c.nro}`});
+    });
+  });
   const byDate = {};
-  checks.forEach(c=>{ (byDate[c.fechaVencimiento] = byDate[c.fechaVencimiento]||[]).push(c); });
+  entries.forEach(e=>{ (byDate[e.date] = byDate[e.date]||[]).push(e); });
   const dates = Object.keys(byDate).sort();
   if(dates.length===0){
-    return `<div class="empty-state">${ic('receipt')}<p>No hay cheques pendientes o vencidos para mostrar en el calendario.</p></div>`;
+    return `<div class="empty-state">${ic('receipt')}<p>No hay vencimientos pendientes para mostrar en el calendario.</p></div>`;
   }
   return `
   <div style="padding:16px;">
     ${dates.map(date=>{
       const items = byDate[date].sort((a,b)=> b.amount-a.amount);
-      const total = items.reduce((s,c)=>s+c.amount, 0);
+      const total = items.reduce((s,e)=>s+e.amount, 0);
       const isPast = date < today;
       const badge = dateBadgeParts(date);
       const color = isPast ? 'var(--danger)' : (date <= new Date(Date.now()+7*86400000).toISOString().slice(0,10) ? 'var(--warn)' : 'rgba(255,255,255,0.6)');
@@ -3975,10 +4382,10 @@ function renderAdminPagosCalendario(){
           <div style="flex:1; font-size:13px; font-weight:700; color:${isPast?'var(--danger)':'var(--white)'};">${fmtDateAR(date)}${isPast?' · vencido':''}</div>
           <div style="font-size:15px; font-weight:800; color:var(--gold2);">${money(total)}</div>
         </div>
-        ${items.map(c=>`
+        ${items.map(e=>`
           <div style="display:flex; justify-content:space-between; align-items:center; gap:10px; padding:9px 12px 9px 58px; font-size:12.5px; color:rgba(255,255,255,0.75);">
-            <span>${escapeHtml(c.proveedor)}${c.nroCheque?` · Nro ${escapeHtml(c.nroCheque)}`:''}</span>
-            <span style="font-weight:700; color:var(--white); flex:none;">${money(c.amount)}</span>
+            <span>${escapeHtml(e.label)}</span>
+            <span style="font-weight:700; color:var(--white); flex:none;">${money(e.amount)}</span>
           </div>`).join('')}
       </div>`;
     }).join('')}
@@ -4713,11 +5120,11 @@ function renderAdminProductos(){
     return `<div class="empty-state">${ic('box')}<p>${state.adminProductLowStockOnly?'Ningún producto con stock bajo.':(q?`Sin resultados para "${q}"`:'No hay productos que coincidan con el filtro.')}</p></div>`;
   }
   return productos.map(p=>`
-    <div class="prod-row-v2">
+    <div class="prod-row-v2 ${p.hidden?'is-hidden':''}">
       <div class="prod-row-v2-top">
         <img src="${p.photo||''}" loading="lazy" onerror="this.style.opacity=0">
         <div class="prod-row-v2-info">
-          <h4>${p.name}${p.sellByWeight?' <span style="font-size:9px; color:#6db8e8;">(x kg)</span>':''}</h4>
+          <h4>${p.name}${p.sellByWeight?' <span style="font-size:9px; color:#6db8e8;">(x kg)</span>':''}${p.hidden?' <span class="badge-oculto">OCULTO</span>':''}</h4>
           <p>Stock: ${p.stock} · ${SECTION_META[p.section]?.label||p.section}${p.sub?` · ${p.sub}`:''} ${isLowStock(p)?`<span style="color:${p.stock===0?'var(--danger)':'var(--warn)'}; font-weight:700;">· ${p.stock===0?'Sin stock':'Stock bajo'}</span>`:''}</p>
         </div>
       </div>
@@ -4739,6 +5146,7 @@ function renderAdminProductos(){
           `}
         </div>
         <div class="prod-row-actions">
+          <button class="icon-btn" style="font-size:14px; ${p.hidden?'color:var(--danger); border-color:var(--danger);':''}" title="${p.hidden?'Oculto — tocá para mostrarlo a los clientes':'Visible — tocá para ocultarlo de los clientes'}" onclick="toggleProductHidden('${p.id}')">${p.hidden?'🙈':'👁️'}</button>
           <button class="icon-btn" style="${p.barcode?'':'color:var(--warn); border-color:var(--warn);'}" title="${p.barcode?'Código: '+p.barcode:'Sin código de barras'}" onclick="openBarcodeScannerModal(code=>updateProductBarcode('${p.id}', code))">${ic('camera')}</button>
           <button class="icon-btn" onclick="openProductModal('${p.id}')">${ic('edit')}</button>
           <button class="icon-btn" onclick="deleteProduct('${p.id}')">${ic('trash')}</button>
@@ -4746,6 +5154,15 @@ function renderAdminProductos(){
       </div>
     </div>
   `).join('');
+}
+function toggleProductHidden(id){
+  const p = state.products.find(pr=>pr.id===id);
+  if(!p) return;
+  p.hidden = !p.hidden;
+  saveState();
+  apiSaveProduct(p);
+  renderAdminProductosInPlace();
+  toast(p.hidden ? "Producto oculto para los clientes" : "Producto visible para los clientes", "ok");
 }
 function renderAdminProductosInPlace(){
   const el = document.getElementById('admin-productos-list');
@@ -4807,6 +5224,7 @@ function applyWholesalePct(suffix){
 }
 function openProductModal(id){
   const p = id ? state.products.find(pr=>pr.id===id) : null;
+  _pmEditingExisting = !!p;
   // Si la foto guardada tiene el sello Sin TACC puesto, arrancamos la edición
   // desde photoClean (la versión sin sello guardada aparte) en vez de la foto
   // final — así el toggle puede apagar el sello sin perder el resto de la
@@ -4875,9 +5293,10 @@ function openProductModal(id){
       <div class="form-group"><label>Stock</label><input id="pm-stock" type="number" value="${p?p.stock:''}" placeholder="0"></div>
       <div class="form-group"><label>Código de barras</label>
         <div style="display:flex; gap:8px;">
-          <input id="pm-barcode" value="${p&&p.barcode?p.barcode:''}" placeholder="Escaneá o escribí el código" style="flex:1;">
-          <button type="button" class="icon-btn" style="flex:none; width:44px;" title="Escanear" onclick="openBarcodeScannerModal(code=>{ document.getElementById('pm-barcode').value=code; })">${ic('camera')}</button>
+          <input id="pm-barcode" value="${p&&p.barcode?p.barcode:''}" placeholder="Escaneá o escribí el código" oninput="onProductModalBarcodeInput()" style="flex:1;">
+          <button type="button" class="icon-btn" style="flex:none; width:44px;" title="Escanear" onclick="openBarcodeScannerModal(code=>{ document.getElementById('pm-barcode').value=code; onProductModalBarcodeInput(); })">${ic('camera')}</button>
         </div>
+        <p id="pm-barcode-hint" style="font-size:11px; color:var(--gold2); margin-top:4px; display:none;"></p>
       </div>
       <div class="form-group"><label>Descripción</label><textarea id="pm-desc" placeholder="Descripción breve">${p?p.desc:''}</textarea></div>
 
@@ -4895,6 +5314,13 @@ function openProductModal(id){
             <span style="font-size:13.5px;">Sugar free</span>
           </div>
           <button type="button" class="toggle ${p&&p.sinAzucar?'on':''}" id="pm-sinazucar-toggle" onclick="toggleSinAzucarField()"></button>
+        </div>
+        <div class="settings-row" style="border-radius:12px; background:rgba(229,86,109,0.1); border:1.5px solid rgba(229,86,109,0.35); border-bottom:1.5px solid rgba(229,86,109,0.35);">
+          <div style="display:flex; align-items:center; gap:8px;">
+            <span style="background:var(--danger); color:#fff; font-size:9px; font-weight:800; padding:2px 8px; border-radius:8px; letter-spacing:.4px;">OCULTO</span>
+            <span style="font-size:13.5px;">No lo ven los clientes</span>
+          </div>
+          <button type="button" class="toggle ${p&&p.hidden?'on':''}" id="pm-hidden-toggle" onclick="this.classList.toggle('on')"></button>
         </div>
       </div>
 
@@ -4960,6 +5386,22 @@ function closeProductModal(){
   const el = document.getElementById("product-modal-overlay");
   if(el) el.remove();
 }
+// Autocompleta nombre y precio si el código de barras ya está en
+// barcodeCatalog — pero solo al dar de alta un producto nuevo (no al
+// editar uno existente), y solo pisa campos que todavía están vacíos,
+// para no sobrescribir algo que ya se estaba tipeando a mano.
+function onProductModalBarcodeInput(){
+  if(_pmEditingExisting) return;
+  const code = (document.getElementById('pm-barcode')?.value||'').trim();
+  const hint = document.getElementById('pm-barcode-hint');
+  const entry = code ? state.barcodeCatalog[code] : null;
+  if(!entry){ if(hint) hint.style.display = 'none'; return; }
+  const nameInput = document.getElementById('pm-name');
+  const priceInput = document.getElementById('pm-price');
+  if(nameInput && !nameInput.value.trim()) nameInput.value = entry.name;
+  if(priceInput && !priceInput.value.trim() && entry.price) priceInput.value = entry.price;
+  if(hint){ hint.textContent = 'Autocompletado desde el catálogo de códigos ("'+entry.name+'")'; hint.style.display = 'block'; }
+}
 function saveProductModal(id){
   const name = document.getElementById("pm-name").value.trim();
   const section = document.getElementById("pm-section").value;
@@ -4974,6 +5416,7 @@ function saveProductModal(id){
   const sellByWeight = document.getElementById("pm-sellbyweight-toggle").classList.contains("on");
   const sinTacc = document.getElementById("pm-sintacc-toggle").classList.contains("on");
   const sinAzucar = document.getElementById("pm-sinazucar-toggle").classList.contains("on");
+  const hidden = document.getElementById("pm-hidden-toggle").classList.contains("on");
   const displayQty = Number(document.getElementById("pm-display-qty").value)||null;
   const displayDiscount = Number(document.getElementById("pm-display-discount").value)||null;
   const promoPriceRaw = document.getElementById("pm-promo-price").value.trim();
@@ -4998,18 +5441,19 @@ function saveProductModal(id){
   let savedProduct;
   if(id){
     const p = state.products.find(pr=>pr.id===id);
-    Object.assign(p, {name, section, cat, sub, price, wholesalePrice, stock, desc, barcode, sellByWeight, pricePerKg, wholesalePricePerKg, minGrams, sinTacc, sinAzucar, displayQty, displayDiscount, promoPrice, promoUntil, photo:adminPhotoDraft.current||p.photo, photoClean});
+    Object.assign(p, {name, section, cat, sub, price, wholesalePrice, stock, desc, barcode, sellByWeight, pricePerKg, wholesalePricePerKg, minGrams, sinTacc, sinAzucar, hidden, displayQty, displayDiscount, promoPrice, promoUntil, photo:adminPhotoDraft.current||p.photo, photoClean});
     savedProduct = p;
   }else{
     savedProduct = {
       id: "p"+Date.now(), section, cat, sub, name, price, wholesalePrice, stock, desc, barcode,
-      sellByWeight, pricePerKg, wholesalePricePerKg, minGrams, sinTacc, sinAzucar, displayQty, displayDiscount, promoPrice, promoUntil,
+      sellByWeight, pricePerKg, wholesalePricePerKg, minGrams, sinTacc, sinAzucar, hidden, displayQty, displayDiscount, promoPrice, promoUntil,
       photo: adminPhotoDraft.current||"", photoClean
     };
     state.products.push(savedProduct);
   }
   saveState();
   apiSaveProduct(savedProduct);
+  if(barcode) upsertBarcodeCatalog(barcode, name, price);
   closeProductModal();
   render();
   toast("Producto guardado", "ok");
@@ -5392,6 +5836,7 @@ function confirmStockCountEntry(code, productId){
   if(idx>=0) items[idx] = entry; else items.push(entry);
   saveState();
   apiSaveStockCount();
+  upsertBarcodeCatalog(code, name, price);
   toast('Agregado: '+name, 'ok');
   resumeStockCountScan();
 }
@@ -5436,6 +5881,7 @@ function saveStockCountManualEntry(itemId){
   closeStockCountManualModal();
   saveState(); render();
   apiSaveStockCount();
+  if(barcode) upsertBarcodeCatalog(barcode, name, price);
 }
 function deleteStockCountItem(itemId){
   if(!confirm('¿Eliminar este item del conteo?')) return;
