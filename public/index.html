@@ -1970,9 +1970,13 @@ function onSearchInput(val){
   const q = val.trim().toLowerCase();
   if(q.length < 2){ sugEl.style.display='none'; return; }
   const re = new RegExp(q.replace(/[.*+?^${}()|[\]\\]/g,'\\$&'),'gi');
+  // Ordenado alfabético antes de recortar: sin esto, cuál de varios
+  // productos con nombres parecidos entra en las primeras 6 sugerencias
+  // depende del orden en que Supabase devuelve las filas (no garantizado),
+  // y un producto recién editado puede quedar afuera sin motivo aparente.
   const matches = state.products.filter(p=>
     !p.hidden && (p.name.toLowerCase().includes(q) || (p.cat||'').toLowerCase().includes(q))
-  ).slice(0,6);
+  ).sort((a,b)=>a.name.localeCompare(b.name,'es')).slice(0,12);
   if(!matches.length){ sugEl.style.display='none'; return; }
   sugEl.innerHTML = matches.map(p=>`
     <div class="search-sug-item" onmousedown="openProduct('${p.id}')">
