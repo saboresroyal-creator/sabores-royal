@@ -626,6 +626,7 @@ let state = {
   orders: [],
   posSales: [],
   clients: {},
+  clientsSeenMigrated: false,
   currentClientPhone: null,
   route: {screen:"home"},
   adminAuthed: false,
@@ -712,6 +713,13 @@ function loadState(){
         }
       });
       state = Object.assign(state, parsed);
+      // La primera vez que corre esta versión, marca como "vistos" a todos los
+      // clientes ya existentes para no bombardear con notificaciones de
+      // "nuevo cliente" a gente que ya estaba en la base hace tiempo.
+      if(!state.clientsSeenMigrated){
+        Object.values(state.clients).forEach(c=>{ if(c.seen===undefined) c.seen = true; });
+        state.clientsSeenMigrated = true;
+      }
     }
   }catch(e){}
 }
@@ -2630,12 +2638,13 @@ function renderAdmin(){
   const noBarcodeCount = state.products.filter(p=>!p.barcode).length;
   const pendingOrdersCount = state.orders.filter(o=>o.status==="Pendiente").length;
   const checksDueSoon = pagosDueSoonCount(7);
+  const newClientsCount = Object.values(state.clients).filter(c=>!c.seen).length;
   const ALL_TABS = [
     {key:"pedidos",       label:"Pedidos", badge:pendingOrdersCount},
     {key:"productos",     label:"Productos", badge:lowStockCount},
     {key:"conteo",        label:"Conteo de Stock"},
     {key:"categorias",    label:"Categorías"},
-    {key:"clientes",      label:"Clientes"},
+    {key:"clientes",      label:"Clientes", badge:newClientsCount},
     {key:"estadisticas",  label:"Estadísticas"},
     {key:"chats",         label:"Chats", badge:chatUnreadTotal},
     {key:"comprobantes",  label:"Comprobantes"},
@@ -6325,7 +6334,11 @@ async function removePhotoBackgroundAI(){
 
 /* ---------- ADMIN: CATEGORIAS ---------- */
 function renderAdminCategorias(){
-  return Object.keys(SECTION_META).map(section=>{
+  return `
+    <div style="padding:12px 16px 0;">
+      <button class="btn-primary" style="width:100%;" onclick="openGlobalPromoModal()">🏷️ Oferta para todo el catálogo</button>
+    </div>
+  ` + Object.keys(SECTION_META).map(section=>{
     const cats = state.categories[section]||{};
     return `
     <div style="padding:12px 16px 0;">
@@ -6441,7 +6454,65 @@ function clearCategoryPromo(section, cat, sub){
   saveState();
   closeCategoryPromoModal();
   render();
-  toast("Oferta quitada", "ok");
+  toast(`Oferta quitada de ${products.length} producto${products.length===1?'':'s'}`, "ok");
+}
+
+/* ---------- ADMIN: OFERTA PARA TODO EL CATÁLOGO ---------- */
+// Mismo mecanismo que applyCategoryPromo/clearCategoryPromo, pero sin
+// filtrar por section/cat/sub: aplica a todos los productos de state.products.
+function openGlobalPromoModal(){
+  const overlay = document.createElement("div");
+  overlay.className = "modal-overlay";
+  overlay.id = "category-promo-overlay";
+  overlay.innerHTML = renderGlobalPromoModal();
+  document.body.appendChild(overlay);
+}
+function renderGlobalPromoModal(){
+  const count = state.products.length;
+  const today = new Date().toISOString().slice(0,10);
+  return `
+    <div class="modal-sheet">
+      <div class="modal-handle"></div>
+      <h3 class="modal-title">Oferta para todo el catálogo</h3>
+      <p style="padding:0 16px 14px; font-size:13px; color:rgba(255,255,255,0.6);">Todas las secciones · ${count} producto${count===1?'':'s'}. Se muestra en el catálogo con precio tachado, igual que una oferta individual, y vuelve solo al precio normal cuando venza.</p>
+      <div class="form-group"><label>Descuento (%)</label><input id="globalpromo-pct" type="number" min="1" max="90" placeholder="Ej: 20"></div>
+      <div class="form-group"><label>Válido hasta</label><input id="globalpromo-until" type="date" min="${today}" value="${today}"></div>
+      <div style="display:flex; gap:10px; margin-bottom:10px;">
+        <button class="btn-secondary" style="flex:1;" onclick="closeCategoryPromoModal()">Cancelar</button>
+        <button class="btn-primary" style="flex:1;" onclick="applyGlobalPromo()">Aplicar a ${count}</button>
+      </div>
+      <button class="btn-secondary" style="width:100%; color:var(--danger);" onclick="clearGlobalPromo()">Quitar oferta de todo el catálogo</button>
+    </div>
+  `;
+}
+function applyGlobalPromo(){
+  const pct = Number(document.getElementById("globalpromo-pct").value);
+  const until = document.getElementById("globalpromo-until").value;
+  if(!pct || pct<=0 || pct>=100){ toast("Ingresá un descuento válido (1-99%)", "err"); return; }
+  if(!until){ toast("Elegí hasta cuándo dura la oferta", "err"); return; }
+  const products = state.products;
+  products.forEach(p=>{
+    p.promoPrice = Math.round(p.price * (1 - pct/100));
+    p.promoUntil = until;
+    apiSaveProduct(p);
+  });
+  saveState();
+  closeCategoryPromoModal();
+  render();
+  toast(`Oferta del ${pct}% aplicada a ${products.length} productos`, "ok");
+}
+function clearGlobalPromo(){
+  const products = state.products;
+  if(!confirm(`¿Quitar la oferta de los ${products.length} productos del catálogo?`)) return;
+  products.forEach(p=>{
+    p.promoPrice = null;
+    p.promoUntil = null;
+    apiSaveProduct(p);
+  });
+  saveState();
+  closeCategoryPromoModal();
+  render();
+  toast("Oferta general eliminada", "ok");
 }
 
 /* ---------- ADMIN: CLIENTES ---------- */
@@ -6456,7 +6527,7 @@ function renderAdminClientes(){
     return `<div class="client-row" style="cursor:pointer;" onclick="openAdminClientDetail('${c.phone}')">
       <div class="client-rank">${i+1}</div>
       <div class="client-row-body">
-        <h4>${escapeHtml(c.name)} ${c.wholesale?`<span class="tier-badge" style="background:rgba(60,150,220,0.25); color:#6db8e8;">Mayorista</span>`:''}</h4>
+        <h4>${escapeHtml(c.name)} ${!c.seen?`<span class="tier-badge" style="background:rgba(230,60,60,0.25); color:#ff8a8a;">Nuevo</span>`:''} ${c.wholesale?`<span class="tier-badge" style="background:rgba(60,150,220,0.25); color:#6db8e8;">Mayorista</span>`:''}</h4>
         <p>${escapeHtml(c.phone)}${c.doc?` · DNI/CUIT ${escapeHtml(c.doc)}`:''} · <span class="tier-badge tier-${tier.key}" style="margin-left:4px;">${tier.label}</span>${c.discountPct?` · <span style="color:var(--gold2); font-weight:600;">${c.discountPct}% desc.</span>`:''}
         </p>
       </div>
@@ -6469,6 +6540,8 @@ function renderAdminClientes(){
 }
 function openAdminClientDetail(phone){
   state.adminClientDetailPhone = phone;
+  const c = state.clients[phone];
+  if(c && !c.seen){ c.seen = true; saveState(); }
   render();
 }
 function closeAdminClientDetail(){
