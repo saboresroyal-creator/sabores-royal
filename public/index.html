@@ -126,18 +126,28 @@ img{display:block; max-width:100%;}
 .offers-banner b{color:var(--gold2); font-weight:700;}
 
 .home-promo-banner{
-  margin:0 16px 16px; padding:16px 18px; border-radius:16px; cursor:pointer;
-  background:linear-gradient(120deg,#ffe066,#ffd400);
-  box-shadow:0 6px 20px rgba(255,212,0,0.45);
+  margin:0 16px 16px; padding:18px; border-radius:18px; cursor:pointer;
+  background:linear-gradient(120deg,#ff4d3d,#ff1f1f 55%,#c60000);
+  box-shadow:0 10px 28px rgba(255,20,20,0.5);
+  border:2px solid #ffd400;
   display:flex; align-items:center; gap:14px;
-  animation:homePromoGlow 2.4s ease-in-out infinite;
+  animation:homePromoGlow 1.8s ease-in-out infinite;
 }
-.home-promo-banner .hpb-icon{font-size:28px; flex:none; line-height:1;}
+.home-promo-banner .hpb-pct{
+  flex:none; display:flex; flex-direction:column; align-items:center; justify-content:center;
+  background:linear-gradient(160deg,#ffe066,#ffd400); color:#c60000; border-radius:14px;
+  padding:8px 10px; min-width:66px; line-height:1; box-shadow:0 3px 10px rgba(0,0,0,0.25);
+}
+.home-promo-banner .hpb-pct-num{font-size:28px; font-weight:900; letter-spacing:-0.02em;}
+.home-promo-banner .hpb-pct-off{font-size:11px; font-weight:800; letter-spacing:.06em; margin-top:1px;}
 .home-promo-banner .hpb-body{flex:1; min-width:0;}
-.home-promo-banner .hpb-title{color:#c62222; font-size:15px; font-weight:800; text-wrap:balance;}
-.home-promo-banner .hpb-sub{color:#c62222; opacity:.85; font-size:12px; margin-top:2px;}
-.home-promo-banner .hpb-arrow{color:#c62222; font-size:20px; flex:none;}
-@keyframes homePromoGlow{0%,100%{box-shadow:0 6px 20px rgba(255,212,0,0.45);} 50%{box-shadow:0 6px 28px rgba(255,212,0,0.8);}}
+.home-promo-banner .hpb-title{color:#fff; font-size:17px; font-weight:800; text-wrap:balance; text-shadow:0 1px 4px rgba(0,0,0,0.25);}
+.home-promo-banner .hpb-sub{color:#ffe4e4; opacity:.95; font-size:12.5px; margin-top:3px;}
+.home-promo-banner .hpb-arrow{color:#fff; font-size:24px; font-weight:700; flex:none;}
+@keyframes homePromoGlow{
+  0%,100%{box-shadow:0 10px 28px rgba(255,20,20,0.5); transform:scale(1);}
+  50%{box-shadow:0 16px 42px rgba(255,20,20,0.9); transform:scale(1.015);}
+}
 @media (prefers-reduced-motion: reduce){ .home-promo-banner{animation:none;} }
 
 /* ---------- BOTTOM NAV ---------- */
@@ -1582,10 +1592,13 @@ function homePromoBannerHtml(){
   const maxPct = Math.max(...promoProducts.map(p=>Math.round((1-activePromo(p)/p.price)*100)));
   return `
     <div class="home-promo-banner" onclick="nav('ofertas')">
-      <span class="hpb-icon">🔥</span>
+      <div class="hpb-pct">
+        <span class="hpb-pct-num">${maxPct}%</span>
+        <span class="hpb-pct-off">OFF</span>
+      </div>
       <div class="hpb-body">
-        <div class="hpb-title">Hasta ${maxPct}% OFF por tiempo limitado</div>
-        <div class="hpb-sub">${promoProducts.length} producto${promoProducts.length===1?'':'s'} en oferta — tocá para ver</div>
+        <div class="hpb-title">🔥 Oferta por tiempo limitado</div>
+        <div class="hpb-sub">${promoProducts.length} producto${promoProducts.length===1?'':'s'} con descuento — tocá para ver</div>
       </div>
       <span class="hpb-arrow">→</span>
     </div>
