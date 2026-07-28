@@ -6838,11 +6838,19 @@ function confirmDeleteClient(phone){
   const c = state.clients[phone];
   if(!c) return;
   if(!confirm(`¿Eliminar a ${c.name} (${c.phone})? Esto borra su perfil y puntos acumulados. No borra sus pedidos o comprobantes ya generados.`)) return;
+  // Mayorista y descuento especial se guardan aparte (listas en
+  // app_settings, no en la tabla clients) — si no se sacan de ahí
+  // también, la próxima sincronización las vuelve a ver en esas listas
+  // y recrea al cliente en blanco, como si nunca se hubiera borrado.
+  const wasWholesale = !!c.wholesale;
+  const hadDiscount = !!c.discountPct;
   delete state.clients[phone];
   if(state.currentClientPhone === phone) state.currentClientPhone = null;
   saveState();
   render();
   apiDeleteClient(phone);
+  if(wasWholesale) apiSaveWholesaleClients();
+  if(hadDiscount) apiSaveClientDiscounts();
   toast("Cliente eliminado", "ok");
 }
 // Sin esto, el cliente borrado volvía a aparecer solo con la próxima
