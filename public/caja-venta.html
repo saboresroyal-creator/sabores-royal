@@ -1,6 +1,7 @@
 <!DOCTYPE html>
 <html lang="es">
 <head>
+<script defer src="/_vercel/insights/script.js"></script>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
 <title>Sabores Royal — Caja</title>
@@ -422,6 +423,18 @@ let clientName = '';
 let activeCategory = null; // null = "Todas"
 let section = 'vender'; // vender | clientes | comprobantes | cierreX | cierreZ
 
+// Los celulares argentinos necesitan el "9" después del 54 en formato
+// internacional. Si acá no se normaliza igual que en index.html, un mismo
+// cliente termina con dos filas distintas en `clients` (una por cada
+// formato de teléfono) y aparece duplicado en la solapa Clientes del admin.
+function normalizePhone(raw){
+  const digits = (raw||'').replace(/\D/g,'');
+  if(!digits) return '';
+  if(digits.startsWith("549")) return "+"+digits;
+  if(digits.startsWith("54")) return "+549"+digits.slice(2);
+  return "+549"+digits;
+}
+
 /* ── CLIENTES ── */
 let clienteQuery = '';
 let clienteResults = [];
@@ -779,7 +792,7 @@ async function confirmSale(){
     // Solo se manda el cliente si se cargó algo — así una venta sin cliente
     // sigue funcionando igual aunque todavía no se haya corrido la migración
     // que le agrega esos dos parámetros a create_pos_sale().
-    if(clientPhone.trim()){ rpcBody.p_client_phone = clientPhone.trim(); rpcBody.p_client_name = clientName.trim(); }
+    if(clientPhone.trim()){ rpcBody.p_client_phone = normalizePhone(clientPhone.trim()); rpcBody.p_client_name = clientName.trim(); }
     const rows = await posFetch('/rpc/create_pos_sale', 'POST', rpcBody, 'return=representation');
     const sale = Array.isArray(rows) ? rows[0] : rows;
     cart.forEach(it=>{ const p = products.find(x=>x.id===it.id); if(p) p.stock -= it.qty; });
@@ -959,7 +972,7 @@ function seleccionarClienteParaVenta(c){
 }
 function usarClienteIdx(i){ seleccionarClienteParaVenta(clienteResults[i]); }
 async function guardarCliente(){
-  const phone = document.getElementById('cli-phone').value.trim();
+  const phone = normalizePhone(document.getElementById('cli-phone').value.trim());
   const name = document.getElementById('cli-name').value.trim();
   const address = document.getElementById('cli-address').value.trim();
   const email = document.getElementById('cli-email').value.trim();
