@@ -2316,7 +2316,7 @@ async function submitOrder(){
     // ahí se abre WhatsApp.
     console.warn('No se pudo guardar el pedido en el servidor, se manda igual por WhatsApp:', e);
     const order = placeOrderLocalFallback({name, phone, address}, discPct);
-    await confirmOrderNotSaved();
+    await confirmOrderNotSaved(e);
     const msg = buildOrderWAMessage(order, true);
     window.open(waLink(msg), "_blank");
     nav("success", {order});
@@ -2325,16 +2325,20 @@ async function submitOrder(){
 // Modal bloqueante (hay que tocar el botón para cerrarlo) que avisa que el
 // pedido no se pudo guardar en el servidor y solo quedó en este celular —
 // se usa antes de abrir WhatsApp para que el cliente no se lo pierda.
-function confirmOrderNotSaved(){
+// Muestra el mensaje de error técnico (además del aviso en criollo) para
+// poder diagnosticar con solo pedir una captura de pantalla.
+function confirmOrderNotSaved(err){
   return new Promise(resolve=>{
     const overlay = document.createElement("div");
     overlay.className = "modal-overlay";
     overlay.id = "order-fail-overlay";
+    const errText = escapeHtml((err && (err.message||String(err))) || 'sin detalle');
     overlay.innerHTML = `
       <div class="modal-sheet">
         <div class="modal-handle"></div>
         <h3 class="modal-title" style="color:var(--danger);">⚠️ Tu pedido no se guardó solo</h3>
         <p style="padding:0 16px 14px; font-size:14px; line-height:1.5;">Hubo un problema de conexión y el pedido <b>no llegó al sistema de la tienda</b>. Lo vas a mandar igual por WhatsApp a continuación — <b>esperá que te confirmen por ese medio</b> antes de darlo por hecho.</p>
+        <p style="margin:0 16px 14px; padding:8px 10px; border-radius:8px; background:rgba(255,255,255,0.06); font-family:monospace; font-size:11px; line-height:1.4; word-break:break-word; color:rgba(255,255,255,0.6);">${errText}</p>
         <div style="padding:0 16px 16px;">
           <button class="btn-primary" style="width:100%;" id="order-fail-ack">Entendido, mandar por WhatsApp</button>
         </div>
@@ -2552,21 +2556,23 @@ async function completeRegistration(){
     // pero nunca aparece en Clientes del admin. Un modal bloqueante en vez
     // de un simple console.warn para que no se pierda el aviso.
     console.warn("Registro en Supabase:", e);
-    await confirmClientNotSaved();
+    await confirmClientNotSaved(e);
   }
 }
 // Igual que confirmOrderNotSaved pero para el alta de cliente: avisa que
 // el perfil no llegó al servidor y va a vivir solo en este celular.
-function confirmClientNotSaved(){
+function confirmClientNotSaved(err){
   return new Promise(resolve=>{
     const overlay = document.createElement("div");
     overlay.className = "modal-overlay";
     overlay.id = "client-fail-overlay";
+    const errText = escapeHtml((err && (err.message||String(err))) || 'sin detalle');
     overlay.innerHTML = `
       <div class="modal-sheet">
         <div class="modal-handle"></div>
         <h3 class="modal-title" style="color:var(--danger);">⚠️ No se guardó tu registro</h3>
         <p style="padding:0 16px 14px; font-size:14px; line-height:1.5;">Hubo un problema de conexión y tu perfil <b>no quedó guardado en el sistema de la tienda</b>. Podés seguir comprando, pero tus datos y puntos van a vivir solo en este celular hasta que lo intentes de nuevo — cerrá sesión y volvé a ingresar tu teléfono más tarde.</p>
+        <p style="margin:0 16px 14px; padding:8px 10px; border-radius:8px; background:rgba(255,255,255,0.06); font-family:monospace; font-size:11px; line-height:1.4; word-break:break-word; color:rgba(255,255,255,0.6);">${errText}</p>
         <div style="padding:0 16px 16px;">
           <button class="btn-primary" style="width:100%;" id="client-fail-ack">Entendido</button>
         </div>
