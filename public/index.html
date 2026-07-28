@@ -6575,10 +6575,11 @@ function renderAdminCategorias(){
           <div class="cat-tree-head">
             <span>${cat}</span>
             <button class="icon-btn" title="Oferta por tiempo limitado para toda la categoría" onclick="openCategoryPromoModal('${section}','${cat}',null)">🏷️</button>
+            <button class="icon-btn" title="Ajustar % mayorista para toda la categoría" onclick="openCategoryWholesaleModal('${section}','${cat}',null)">💲</button>
             <button class="icon-btn" onclick="deleteCategory('${section}','${cat}')">${ic('trash')}</button>
           </div>
           <div class="cat-tree-subs">
-            ${(cats[cat]||[]).slice().sort((a,b)=>a.localeCompare(b,'es')).map(sub=>`<span class="subcat-chip">${sub} <button title="Oferta por tiempo limitado" onclick="openCategoryPromoModal('${section}','${cat}','${sub}')">🏷️</button> <button onclick="deleteSubcat('${section}','${cat}','${sub}')">×</button></span>`).join('')}
+            ${(cats[cat]||[]).slice().sort((a,b)=>a.localeCompare(b,'es')).map(sub=>`<span class="subcat-chip">${sub} <button title="Oferta por tiempo limitado" onclick="openCategoryPromoModal('${section}','${cat}','${sub}')">🏷️</button> <button title="Ajustar % mayorista" onclick="openCategoryWholesaleModal('${section}','${cat}','${sub}')">💲</button> <button onclick="deleteSubcat('${section}','${cat}','${sub}')">×</button></span>`).join('')}
             <button class="subcat-chip" onclick="addSubcat('${section}','${cat}')" style="color:var(--gold2);">${ic('plus')} Agregar</button>
           </div>
         </div>
@@ -6682,6 +6683,68 @@ function clearCategoryPromo(section, cat, sub){
   closeCategoryPromoModal();
   render();
   toast(`Oferta quitada de ${products.length} producto${products.length===1?'':'s'}`, "ok");
+}
+
+/* ---------- ADMIN: AJUSTAR % MAYORISTA POR CATEGORÍA/SUBCATEGORÍA ---------- */
+// Suma (o resta, si es negativo) puntos porcentuales al descuento mayorista
+// que ya tenga cargado cada producto del grupo — no lo reemplaza por un %
+// fijo para todos, porque distintos productos de una misma categoría suelen
+// partir de descuentos distintos. Solo toca los que YA tienen precio
+// mayorista cargado (no le inventa uno a los que no venden a mayorista).
+function openCategoryWholesaleModal(section, cat, sub){
+  const overlay = document.createElement("div");
+  overlay.className = "modal-overlay";
+  overlay.id = "category-wholesale-overlay";
+  overlay.innerHTML = renderCategoryWholesaleModal(section, cat, sub);
+  document.body.appendChild(overlay);
+}
+function renderCategoryWholesaleModal(section, cat, sub){
+  const group = productsInCategoryGroup(section, cat, sub);
+  const withWholesale = group.filter(p => p.sellByWeight ? !!p.wholesalePricePerKg : !!p.wholesalePrice);
+  const label = sub ? `${cat} → ${sub}` : cat;
+  return `
+    <div class="modal-sheet">
+      <div class="modal-handle"></div>
+      <h3 class="modal-title">Ajustar % mayorista</h3>
+      <p style="padding:0 16px 14px; font-size:13px; color:rgba(255,255,255,0.6);">${label} · ${withWholesale.length} de ${group.length} producto${group.length===1?'':'s'} ya tiene precio mayorista cargado — se ajustan solo esos, sumando este número a su % actual (cada uno puede partir de un % distinto).</p>
+      <div class="form-group"><label>Puntos porcentuales a sumar (negativo para bajar el descuento)</label><input id="catws-delta" type="number" step="1" placeholder="Ej: 5, o -5"></div>
+      <div style="display:flex; gap:10px; margin-bottom:10px;">
+        <button class="btn-secondary" style="flex:1;" onclick="closeCategoryWholesaleModal()">Cancelar</button>
+        <button class="btn-primary" style="flex:1;" onclick="applyCategoryWholesaleAdjust('${section}','${cat}',${sub?`'${sub}'`:'null'})">Aplicar a ${withWholesale.length}</button>
+      </div>
+    </div>
+  `;
+}
+function closeCategoryWholesaleModal(){
+  const el = document.getElementById("category-wholesale-overlay");
+  if(el) el.remove();
+}
+function applyCategoryWholesaleAdjust(section, cat, sub){
+  const raw = document.getElementById("catws-delta").value;
+  const delta = Number(raw);
+  if(raw.trim()==="" || isNaN(delta) || delta===0){ toast("Ingresá cuántos puntos porcentuales sumar (o restar con -)", "err"); return; }
+  const group = productsInCategoryGroup(section, cat, sub);
+  let count = 0;
+  group.forEach(p=>{
+    if(p.sellByWeight){
+      if(!p.wholesalePricePerKg || !(p.pricePerKg>0)) return;
+      const currentPct = (1 - p.wholesalePricePerKg/p.pricePerKg) * 100;
+      const newPct = Math.min(99, Math.max(1, Math.round(currentPct + delta)));
+      p.wholesalePricePerKg = Math.round(p.pricePerKg * (1 - newPct/100));
+    }else{
+      if(!p.wholesalePrice || !(p.price>0)) return;
+      const currentPct = (1 - p.wholesalePrice/p.price) * 100;
+      const newPct = Math.min(99, Math.max(1, Math.round(currentPct + delta)));
+      p.wholesalePrice = Math.round(p.price * (1 - newPct/100));
+    }
+    apiSaveProduct(p);
+    count++;
+  });
+  if(count===0){ toast("Ningún producto de este grupo tiene precio mayorista cargado todavía", "err"); return; }
+  saveState();
+  closeCategoryWholesaleModal();
+  render();
+  toast(`${delta>0?'+':''}${delta} punto${Math.abs(delta)===1?'':'s'} porcentual${Math.abs(delta)===1?'':'es'} de descuento mayorista en ${count} producto${count===1?'':'s'}`, "ok");
 }
 
 /* ---------- ADMIN: OFERTA PARA TODO EL CATÁLOGO ---------- */
