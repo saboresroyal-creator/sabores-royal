@@ -1858,8 +1858,8 @@ function renderClientWelcome(){
         <div style="${fieldStyle}"><span style="${labelStyle}">Nombre completo *</span><input id="reg-name" placeholder="Ej: María González" autocomplete="name" style="${inputStyle}"></div>
         <div style="${fieldStyle}"><span style="${labelStyle}">Teléfono *</span>
           <div style="display:flex; gap:10px; align-items:center;">
-            <div style="padding:16px 16px; border-radius:18px; background:rgba(255,255,255,0.07); border:1.5px solid rgba(255,255,255,0.13); color:var(--gold2); font-weight:700; font-size:15px; flex:none;">+54</div>
-            <input id="reg-phone" value="${phone.replace('+54','')}" placeholder="11 1234 5678" type="tel" autocomplete="tel" style="${inputStyle}">
+            <div style="padding:16px 16px; border-radius:18px; background:rgba(255,255,255,0.07); border:1.5px solid rgba(255,255,255,0.13); color:var(--gold2); font-weight:700; font-size:15px; flex:none;">+549</div>
+            <input id="reg-phone" value="${phone.replace(/^\+?549?/,'')}" placeholder="11 1234 5678" type="tel" autocomplete="tel" style="${inputStyle}">
           </div>
         </div>
         <div style="${fieldStyle}"><span style="${labelStyle}">Email (opcional)</span><input id="reg-email" placeholder="tucorreo@mail.com" type="email" autocomplete="email" style="${inputStyle}"></div>
@@ -1886,7 +1886,7 @@ function renderClientWelcome(){
       <div style="${fieldStyle}">
         <span style="${labelStyle}">Tu número de teléfono</span>
         <div style="display:flex; gap:10px; align-items:center;">
-          <div style="padding:16px 16px; border-radius:18px; background:rgba(255,255,255,0.07); border:1.5px solid rgba(255,255,255,0.13); color:var(--gold2); font-weight:700; font-size:15px; flex:none;">+54</div>
+          <div style="padding:16px 16px; border-radius:18px; background:rgba(255,255,255,0.07); border:1.5px solid rgba(255,255,255,0.13); color:var(--gold2); font-weight:700; font-size:15px; flex:none;">+549</div>
           <input id="acc-phone" placeholder="11 1234 5678" type="tel" inputmode="numeric" autocomplete="tel" style="${inputStyle}" onkeydown="if(event.key==='Enter') loginAccount()">
         </div>
       </div>
@@ -2409,7 +2409,7 @@ function renderCheckout(){
     <div class="topbar"><button class="back" onclick="nav('cart')">${ic('chevron')}</button><h2>Tus datos</h2></div>
     <div class="form-group"><label>Nombre completo</label><input id="ck-name" value="${saved?saved.name:''}" placeholder="Tu nombre"></div>
     <div class="form-group"><label>Teléfono</label><div style="display:flex; gap:8px;">
-      <div style="padding:13px 14px; border-radius:12px; background:var(--glass); border:1px solid var(--glass-bd); color:var(--cream); font-weight:700;">+54</div>
+      <div style="padding:13px 14px; border-radius:12px; background:var(--glass); border:1px solid var(--glass-bd); color:var(--cream); font-weight:700;">+549</div>
       <input id="ck-phone" value="${savedPhoneDigits}" placeholder="11 1234 5678" style="flex:1;">
     </div></div>
     <div class="form-group"><label>Dirección de entrega (opcional)</label><input id="ck-address" value="${saved?saved.address:''}" placeholder="Calle, número, barrio"></div>
@@ -2535,7 +2535,7 @@ function renderOrdersLookup(){
   <div class="screen">
     <div class="topbar"><button class="back" onclick="nav('home')">${ic('chevron')}</button><h2>Mis Pedidos</h2></div>
     <div class="form-group"><label>Buscar por teléfono</label><div style="display:flex; gap:8px;">
-      <div style="padding:13px 14px; border-radius:12px; background:var(--glass); border:1px solid var(--glass-bd); color:var(--cream); font-weight:700;">+54</div>
+      <div style="padding:13px 14px; border-radius:12px; background:var(--glass); border:1px solid var(--glass-bd); color:var(--cream); font-weight:700;">+549</div>
       <input id="lookup-phone" value="${phone.replace(/^\+?549?/,'')}" placeholder="11 1234 5678" style="flex:1;">
     </div></div>
     <div style="padding:0 16px 16px;"><button class="btn-outline-gold" onclick="lookupOrders()">Buscar pedidos</button></div>
@@ -2573,7 +2573,7 @@ function renderAccount(){
         <p style="padding:0 16px 14px; font-size:12.5px; color:rgba(255,255,255,0.55);">No encontramos una cuenta con ese teléfono. Completá tus datos para crear tu cuenta Royal.</p>
         <div class="form-group"><label>Nombre y apellido</label><input id="reg-name" placeholder="Tu nombre completo"></div>
         <div class="form-group"><label>Teléfono</label><div style="display:flex; gap:8px;">
-          <div style="padding:13px 14px; border-radius:12px; background:var(--glass); border:1px solid var(--glass-bd); color:var(--cream); font-weight:700;">+54</div>
+          <div style="padding:13px 14px; border-radius:12px; background:var(--glass); border:1px solid var(--glass-bd); color:var(--cream); font-weight:700;">+549</div>
           <input id="reg-phone" placeholder="11 1234 5678" value="${(state.route.accPhone||'').replace(/^\+?549?/,'')}" style="flex:1;">
         </div></div>
         <div class="form-group"><label>DNI / CUIT</label><input id="reg-doc" placeholder="Ej: 12345678 o 30-71234567-8"></div>
@@ -2591,7 +2591,7 @@ function renderAccount(){
     <div class="screen">
       <div class="topbar"><button class="back" onclick="nav('home')">${ic('chevron')}</button><h2>Mi Cuenta</h2></div>
       <div class="form-group"><label>Tu teléfono</label><div style="display:flex; gap:8px;">
-        <div style="padding:13px 14px; border-radius:12px; background:var(--glass); border:1px solid var(--glass-bd); color:var(--cream); font-weight:700;">+54</div>
+        <div style="padding:13px 14px; border-radius:12px; background:var(--glass); border:1px solid var(--glass-bd); color:var(--cream); font-weight:700;">+549</div>
         <input id="acc-phone" placeholder="11 1234 5678" style="flex:1;">
       </div></div>
       <div style="padding:0 16px;"><button class="btn-primary" onclick="loginAccount()">Ingresar</button></div>
@@ -2662,11 +2662,13 @@ async function loginAccount(){
 // internacional (+549341... en vez de +54341...) para que WhatsApp los
 // reconozca — sin esto, el mismo número real podía normalizarse distinto
 // según cómo se haya tipeado, y terminaba creando un cliente duplicado
-// cada vez.
+// cada vez. Mucha gente ya escribe su celular CON ese "9" adelante (así
+// se marca en Argentina: "9 341 6833210"), así que hay que sacarlo antes
+// de agregar el nuestro — si no, queda "5499..." con el 9 duplicado.
 function normalizePhone(raw){
-  const digits = raw.replace(/\D/g,'');
-  if(digits.startsWith("549")) return "+"+digits;
-  if(digits.startsWith("54")) return "+549"+digits.slice(2);
+  let digits = (raw||'').replace(/\D/g,'');
+  if(digits.startsWith("54")) digits = digits.slice(2);
+  if(digits.startsWith("9")) digits = digits.slice(1);
   return "+549"+digits;
 }
 async function completeRegistration(){
