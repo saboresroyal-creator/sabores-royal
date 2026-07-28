@@ -1,6 +1,7 @@
 <!DOCTYPE html>
 <html lang="es">
 <head>
+<script defer src="/_vercel/insights/script.js"></script>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
 <title>Sabores Royal — Dashboard de Cajas</title>
@@ -208,6 +209,29 @@ select option { background: var(--surface2); }
 
 /* ── DIVIDER ── */
 .divider { height:1px; background:var(--border); margin:16px 0; }
+
+/* ── MODAL EXPORTAR ── */
+.modal-bg {
+  position: fixed; inset: 0; background: rgba(5,5,8,.75); z-index: 200;
+  display: flex; align-items: center; justify-content: center; padding: 20px;
+}
+.modal {
+  width: 100%; max-width: 380px; background: var(--surface);
+  border: 1px solid var(--border); border-radius: 14px; padding: 22px;
+}
+.modal h2 { font-family: var(--display); font-size: 16px; color: var(--gold); margin-bottom: 4px; }
+.modal p.hint { font-size: 12px; color: var(--muted); margin-bottom: 16px; }
+.export-check-row {
+  display: flex; align-items: center; gap: 10px;
+  padding: 10px 4px; border-bottom: 1px solid var(--border);
+  cursor: pointer;
+}
+.export-check-row:last-of-type { border-bottom: none; }
+.export-check-row input[type="checkbox"] { width: 16px; height: 16px; accent-color: var(--gold); cursor: pointer; }
+.export-check-row label { margin: 0; font-size: 13px; color: var(--text); text-transform: none; letter-spacing: 0; cursor: pointer; }
+.export-check-row span.sub { display:block; font-size:11px; color:var(--muted); margin-top:2px; }
+.modal-actions { display: flex; gap: 10px; margin-top: 18px; }
+.modal-actions .btn { flex: 1; justify-content: center; }
 
 /* ── GASTOS LIST ── */
 .gasto-row {
@@ -495,7 +519,7 @@ tr:hover td { background:var(--surface2); }
 
   <!-- BOTÓN EXPORTAR EXCEL -->
   <div style="display:flex;justify-content:flex-end;margin-bottom:10px;">
-    <button class="btn btn-green" onclick="exportarExcel()" style="font-size:12px;padding:7px 16px;display:flex;align-items:center;gap:6px;">
+    <button class="btn btn-green" onclick="abrirModalExportar()" style="font-size:12px;padding:7px 16px;display:flex;align-items:center;gap:6px;">
       <span style="font-size:15px;">📥</span> Exportar Excel
     </button>
   </div>
@@ -1520,94 +1544,122 @@ function getRangeActual() {
 
 function n(v) { return parseFloat(v)||0; }
 
-function exportarExcel() {
+// ── MODAL: elegir secciones a exportar ──
+function abrirModalExportar() {
+  document.getElementById('modalExportar').style.display = 'flex';
+}
+function cerrarModalExportar() {
+  document.getElementById('modalExportar').style.display = 'none';
+}
+function confirmarExportarExcel() {
+  const opts = {
+    resumen: document.getElementById('chkExpResumen').checked,
+    detalle: document.getElementById('chkExpDetalle').checked,
+    gastos: document.getElementById('chkExpGastos').checked,
+  };
+  if(!opts.resumen && !opts.detalle && !opts.gastos){
+    alert('Elegí al menos una sección para exportar.');
+    return;
+  }
+  cerrarModalExportar();
+  exportarExcel(opts);
+}
+
+function exportarExcel(opts) {
+  opts = opts || { resumen:true, detalle:true, gastos:true };
   const range = getRangeActual();
   if(!range.length) { alert('Seleccioná un período primero.'); return; }
   const nombres = ['Caja 1','Caja 2','Caja Central','Caja 3','Caja 4'];
   const wb = XLSX.utils.book_new();
 
   // ── HOJA 1: Resumen diario (todas las cajas) ──
-  const resumenRows = [
-    ['Fecha','Efectivo Total','Tarjeta Total','Negro Total','% Negro','Venta Total','Gastos Total','Tickets','Resultado Neto']
-  ];
-  range.filter(d=>state.dias[d]).forEach(d=>{
-    const s = dayStats(d);
-    const fecha = d.slice(8)+'/'+d.slice(5,7)+'/'+d.slice(0,4);
-    resumenRows.push([
-      fecha,
-      s.efectivo, s.tarjeta, s.negro,
-      s.total>0?+(s.negro/s.total*100).toFixed(1):0,
-      s.total, s.gastos, s.tickets,
-      s.total-s.gastos
-    ]);
-  });
-  // Fila totales
-  if(resumenRows.length>1){
-    const data = resumenRows.slice(1);
-    resumenRows.push([
-      'TOTALES',
-      data.reduce((a,r)=>a+r[1],0),
-      data.reduce((a,r)=>a+r[2],0),
-      data.reduce((a,r)=>a+r[3],0),
-      '',
-      data.reduce((a,r)=>a+r[5],0),
-      data.reduce((a,r)=>a+r[6],0),
-      data.reduce((a,r)=>a+r[7],0),
-      data.reduce((a,r)=>a+r[8],0),
-    ]);
-  }
-  const wsResumen = XLSX.utils.aoa_to_sheet(resumenRows);
-  wsResumen['!cols'] = [{wch:12},{wch:16},{wch:16},{wch:14},{wch:10},{wch:16},{wch:14},{wch:10},{wch:16}];
-  XLSX.utils.book_append_sheet(wb, wsResumen, 'Resumen Diario');
-
-  // ── HOJAS POR CAJA ──
-  [0,1,3,4].forEach(ci => {
-    const nombre = nombres[ci];
-    const cajaRows = [
-      ['Fecha','Cajero','Efectivo','Tarjeta','Negro','% Negro','Total','Gastos','Tickets']
+  if(opts.resumen){
+    const resumenRows = [
+      ['Fecha','Efectivo Total','Tarjeta Total','Negro Total','% Negro','Venta Total','Gastos Total','Tickets','Resultado Neto']
     ];
-    range.filter(d=>state.dias[d]&&state.dias[d].cajas[ci]).forEach(d=>{
-      const cs = dayCajaStats(d,ci);
+    range.filter(d=>state.dias[d]).forEach(d=>{
+      const s = dayStats(d);
       const fecha = d.slice(8)+'/'+d.slice(5,7)+'/'+d.slice(0,4);
-      cajaRows.push([
-        fecha, cs.cajero, cs.efectivo, cs.tarjeta, cs.negro,
-        cs.total>0?+(cs.negro/cs.total*100).toFixed(1):0,
-        cs.total, cs.gastos, cs.tickets
+      resumenRows.push([
+        fecha,
+        s.efectivo, s.tarjeta, s.negro,
+        s.total>0?+(s.negro/s.total*100).toFixed(1):0,
+        s.total, s.gastos, s.tickets,
+        s.total-s.gastos
       ]);
     });
-    // Totales
-    if(cajaRows.length>1){
-      const data = cajaRows.slice(1);
-      cajaRows.push([
-        'TOTALES','',
+    // Fila totales
+    if(resumenRows.length>1){
+      const data = resumenRows.slice(1);
+      resumenRows.push([
+        'TOTALES',
+        data.reduce((a,r)=>a+r[1],0),
         data.reduce((a,r)=>a+r[2],0),
         data.reduce((a,r)=>a+r[3],0),
-        data.reduce((a,r)=>a+r[4],0),
         '',
+        data.reduce((a,r)=>a+r[5],0),
         data.reduce((a,r)=>a+r[6],0),
         data.reduce((a,r)=>a+r[7],0),
         data.reduce((a,r)=>a+r[8],0),
       ]);
     }
-    const ws = XLSX.utils.aoa_to_sheet(cajaRows);
-    ws['!cols'] = [{wch:12},{wch:14},{wch:14},{wch:14},{wch:12},{wch:10},{wch:14},{wch:12},{wch:10}];
-    XLSX.utils.book_append_sheet(wb, ws, nombre);
-  });
+    const wsResumen = XLSX.utils.aoa_to_sheet(resumenRows);
+    wsResumen['!cols'] = [{wch:12},{wch:16},{wch:16},{wch:14},{wch:10},{wch:16},{wch:14},{wch:10},{wch:16}];
+    XLSX.utils.book_append_sheet(wb, wsResumen, 'Resumen Diario');
+  }
+
+  // ── HOJAS POR CAJA ──
+  if(opts.detalle){
+    [0,1,3,4].forEach(ci => {
+      const nombre = nombres[ci];
+      const cajaRows = [
+        ['Fecha','Cajero','Efectivo','Tarjeta','Negro','% Negro','Total','Gastos','Tickets']
+      ];
+      range.filter(d=>state.dias[d]&&state.dias[d].cajas[ci]).forEach(d=>{
+        const cs = dayCajaStats(d,ci);
+        const fecha = d.slice(8)+'/'+d.slice(5,7)+'/'+d.slice(0,4);
+        cajaRows.push([
+          fecha, cs.cajero, cs.efectivo, cs.tarjeta, cs.negro,
+          cs.total>0?+(cs.negro/cs.total*100).toFixed(1):0,
+          cs.total, cs.gastos, cs.tickets
+        ]);
+      });
+      // Totales
+      if(cajaRows.length>1){
+        const data = cajaRows.slice(1);
+        cajaRows.push([
+          'TOTALES','',
+          data.reduce((a,r)=>a+r[2],0),
+          data.reduce((a,r)=>a+r[3],0),
+          data.reduce((a,r)=>a+r[4],0),
+          '',
+          data.reduce((a,r)=>a+r[6],0),
+          data.reduce((a,r)=>a+r[7],0),
+          data.reduce((a,r)=>a+r[8],0),
+        ]);
+      }
+      const ws = XLSX.utils.aoa_to_sheet(cajaRows);
+      ws['!cols'] = [{wch:12},{wch:14},{wch:14},{wch:14},{wch:12},{wch:10},{wch:14},{wch:12},{wch:10}];
+      XLSX.utils.book_append_sheet(wb, ws, nombre);
+    });
+  }
 
   // ── HOJA GASTOS del período ──
-  const gastosRows = [['Fecha','Caja','Concepto','Monto']];
-  range.filter(d=>state.dias[d]).forEach(d=>{
-    const day=state.dias[d];
-    const fecha = d.slice(8)+'/'+d.slice(5,7)+'/'+d.slice(0,4);
-    day.cajas.forEach((c,i)=>{
-      (c.gastos||[]).forEach(g=>{
-        gastosRows.push([fecha, nombres[i]||'Caja '+(i+1), g.concepto||'', parseFloat(g.monto)||0]);
+  if(opts.gastos){
+    const gastosRows = [['Fecha','Caja','Concepto','Monto']];
+    range.filter(d=>state.dias[d]).forEach(d=>{
+      const day=state.dias[d];
+      const fecha = d.slice(8)+'/'+d.slice(5,7)+'/'+d.slice(0,4);
+      day.cajas.forEach((c,i)=>{
+        (c.gastos||[]).forEach(g=>{
+          gastosRows.push([fecha, nombres[i]||'Caja '+(i+1), g.concepto||'', parseFloat(g.monto)||0]);
+        });
       });
     });
-  });
-  const wsGastos = XLSX.utils.aoa_to_sheet(gastosRows);
-  wsGastos['!cols'] = [{wch:12},{wch:14},{wch:28},{wch:14}];
-  XLSX.utils.book_append_sheet(wb, wsGastos, 'Gastos');
+    const wsGastos = XLSX.utils.aoa_to_sheet(gastosRows);
+    wsGastos['!cols'] = [{wch:12},{wch:14},{wch:28},{wch:14}];
+    XLSX.utils.book_append_sheet(wb, wsGastos, 'Gastos');
+  }
 
   const periodo = currentPeriod==='dia'?'hoy':currentPeriod==='semana'?'7dias':currentPeriod==='mes'?'30dias':'rango';
   const vista = currentCajaVista==='todas'?'todas':nombres[parseInt(currentCajaVista.replace('caja',''))]||'caja';
@@ -2031,5 +2083,39 @@ async function init() {
 
 init();
 </script>
+
+<!-- ══════════════════════════════════════════
+     MODAL: EXPORTAR EXCEL (elegir secciones)
+══════════════════════════════════════════ -->
+<div class="modal-bg" id="modalExportar" style="display:none;" onclick="if(event.target===this) cerrarModalExportar()">
+  <div class="modal">
+    <h2>📥 Exportar Excel</h2>
+    <p class="hint">Elegí qué incluir en el archivo del período seleccionado.</p>
+
+    <div class="export-check-row" onclick="document.getElementById('chkExpResumen').click()">
+      <input type="checkbox" id="chkExpResumen" checked onclick="event.stopPropagation()">
+      <label for="chkExpResumen" onclick="event.stopPropagation()">Estadísticas
+        <span class="sub">Resumen diario: efectivo, tarjeta, negro, total, tickets</span>
+      </label>
+    </div>
+    <div class="export-check-row" onclick="document.getElementById('chkExpDetalle').click()">
+      <input type="checkbox" id="chkExpDetalle" checked onclick="event.stopPropagation()">
+      <label for="chkExpDetalle" onclick="event.stopPropagation()">Detalle por caja
+        <span class="sub">Una hoja por cada caja (Caja 1, 2, 3, 4)</span>
+      </label>
+    </div>
+    <div class="export-check-row" onclick="document.getElementById('chkExpGastos').click()">
+      <input type="checkbox" id="chkExpGastos" checked onclick="event.stopPropagation()">
+      <label for="chkExpGastos" onclick="event.stopPropagation()">Gastos
+        <span class="sub">Listado de gastos cargados en el período</span>
+      </label>
+    </div>
+
+    <div class="modal-actions">
+      <button class="btn btn-ghost" onclick="cerrarModalExportar()">Cancelar</button>
+      <button class="btn btn-green" onclick="confirmarExportarExcel()">Exportar</button>
+    </div>
+  </div>
+</div>
 </body>
 </html>
