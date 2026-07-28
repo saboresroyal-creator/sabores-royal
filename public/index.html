@@ -2546,7 +2546,35 @@ async function completeRegistration(){
   toast("¡Bienvenido, "+name+"! 👑", "ok");
   try{
     await rpcFetch('find_or_create_client', {p_phone: phone, p_name: name, p_address: address||city||null, p_email: email||null});
-  }catch(e){ console.warn("Registro en Supabase:", e); }
+  }catch(e){
+    // Mismo problema que con los pedidos: si esto falla en silencio, el
+    // cliente sigue usando la app como si nada (todo queda en su celular)
+    // pero nunca aparece en Clientes del admin. Un modal bloqueante en vez
+    // de un simple console.warn para que no se pierda el aviso.
+    console.warn("Registro en Supabase:", e);
+    await confirmClientNotSaved();
+  }
+}
+// Igual que confirmOrderNotSaved pero para el alta de cliente: avisa que
+// el perfil no llegó al servidor y va a vivir solo en este celular.
+function confirmClientNotSaved(){
+  return new Promise(resolve=>{
+    const overlay = document.createElement("div");
+    overlay.className = "modal-overlay";
+    overlay.id = "client-fail-overlay";
+    overlay.innerHTML = `
+      <div class="modal-sheet">
+        <div class="modal-handle"></div>
+        <h3 class="modal-title" style="color:var(--danger);">⚠️ No se guardó tu registro</h3>
+        <p style="padding:0 16px 14px; font-size:14px; line-height:1.5;">Hubo un problema de conexión y tu perfil <b>no quedó guardado en el sistema de la tienda</b>. Podés seguir comprando, pero tus datos y puntos van a vivir solo en este celular hasta que lo intentes de nuevo — cerrá sesión y volvé a ingresar tu teléfono más tarde.</p>
+        <div style="padding:0 16px 16px;">
+          <button class="btn-primary" style="width:100%;" id="client-fail-ack">Entendido</button>
+        </div>
+      </div>
+    `;
+    document.body.appendChild(overlay);
+    document.getElementById("client-fail-ack").onclick = ()=>{ overlay.remove(); resolve(); };
+  });
 }
 function openEditProfileModal(){
   const client = state.clients[state.currentClientPhone];
