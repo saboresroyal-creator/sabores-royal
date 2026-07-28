@@ -2440,14 +2440,22 @@ async function submitOrder(){
   state.currentClientPhone = phone;
   const clientForDiscount = state.clients[phone];
   const discPct = clientForDiscount && clientForDiscount.discountPct ? Number(clientForDiscount.discountPct) : 0;
+  // Reservamos la pestaña de WhatsApp ACÁ, antes de cualquier await: en
+  // iOS/Safari (y varios navegadores mobile) un window.open() que se llama
+  // después de una llamada de red ya no cuenta como "toque del usuario" y
+  // el navegador lo bloquea en silencio, sin ningún error — el pedido se
+  // guardaba bien pero WhatsApp nunca se abría. Guardando la referencia acá
+  // y recién asignándole la URL más abajo evita el bloqueo.
+  const waWin = window.open('', '_blank');
   try{
     const order = await placeOrder({name, phone, address}, discPct);
     saveState();
     const msg = buildOrderWAMessage(order);
-    window.open(waLink(msg), "_blank");
+    openWaWindow(waWin, msg);
     nav("success", {order});
   }catch(e){
     if((e.message||'').startsWith('sin_stock')){
+      if(waWin && !waWin.closed) waWin.close();
       toast('No hay stock suficiente de "'+e.message.split(':').slice(1).join(':')+'". Ajustá el carrito e intentá de nuevo.', 'err');
       return;
     }
@@ -2462,9 +2470,17 @@ async function submitOrder(){
     const order = placeOrderLocalFallback({name, phone, address}, discPct);
     await confirmOrderNotSaved(e);
     const msg = buildOrderWAMessage(order, true);
-    window.open(waLink(msg), "_blank");
+    openWaWindow(waWin, msg);
     nav("success", {order});
   }
+}
+// Asigna la URL de WhatsApp a una pestaña ya abierta (ver comentario en
+// submitOrder). Si por lo que sea no se pudo reservar antes (bloqueador de
+// pop-ups estricto), como último recurso intenta abrirla ahora.
+function openWaWindow(win, msg){
+  const link = waLink(msg);
+  if(win && !win.closed){ win.location.href = link; }
+  else{ window.open(link, "_blank"); }
 }
 // Modal bloqueante (hay que tocar el botón para cerrarlo) que avisa que el
 // pedido no se pudo guardar en el servidor y solo quedó en este celular —
