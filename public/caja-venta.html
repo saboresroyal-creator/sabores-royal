@@ -427,11 +427,14 @@ let section = 'vender'; // vender | clientes | comprobantes | cierreX | cierreZ
 // internacional. Si acá no se normaliza igual que en index.html, un mismo
 // cliente termina con dos filas distintas en `clients` (una por cada
 // formato de teléfono) y aparece duplicado en la solapa Clientes del admin.
+// Mucha gente ya escribe su celular CON el "9" adelante (así se marca en
+// Argentina), así que hay que sacarlo antes de agregar el nuestro — si
+// no, queda "5499..." con el 9 duplicado.
 function normalizePhone(raw){
-  const digits = (raw||'').replace(/\D/g,'');
+  let digits = (raw||'').replace(/\D/g,'');
   if(!digits) return '';
-  if(digits.startsWith("549")) return "+"+digits;
-  if(digits.startsWith("54")) return "+549"+digits.slice(2);
+  if(digits.startsWith("54")) digits = digits.slice(2);
+  if(digits.startsWith("9")) digits = digits.slice(1);
   return "+549"+digits;
 }
 
