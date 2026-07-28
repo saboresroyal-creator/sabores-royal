@@ -2309,14 +2309,40 @@ async function submitOrder(){
     }
     // Cualquier otro error (red, Supabase caído, etc.) — no es un problema
     // de stock, así que igual dejamos mandar el pedido por WhatsApp para
-    // no perder la venta, avisando que puede no llegar solo al panel.
+    // no perder la venta. Antes esto solo mostraba un toast que quedaba
+    // tapado por la pestaña de WhatsApp que se abre al toque — el cliente
+    // nunca se enteraba de que el pedido no había llegado al panel. Ahora
+    // se bloquea con un modal que hay que cerrar a propósito, y recién
+    // ahí se abre WhatsApp.
     console.warn('No se pudo guardar el pedido en el servidor, se manda igual por WhatsApp:', e);
     const order = placeOrderLocalFallback({name, phone, address}, discPct);
+    await confirmOrderNotSaved();
     const msg = buildOrderWAMessage(order, true);
     window.open(waLink(msg), "_blank");
-    toast('⚠️ Tu pedido se envió por WhatsApp pero no se guardó automáticamente. Asegurate de que te confirmen por ese medio.', 'err');
     nav("success", {order});
   }
+}
+// Modal bloqueante (hay que tocar el botón para cerrarlo) que avisa que el
+// pedido no se pudo guardar en el servidor y solo quedó en este celular —
+// se usa antes de abrir WhatsApp para que el cliente no se lo pierda.
+function confirmOrderNotSaved(){
+  return new Promise(resolve=>{
+    const overlay = document.createElement("div");
+    overlay.className = "modal-overlay";
+    overlay.id = "order-fail-overlay";
+    overlay.innerHTML = `
+      <div class="modal-sheet">
+        <div class="modal-handle"></div>
+        <h3 class="modal-title" style="color:var(--danger);">⚠️ Tu pedido no se guardó solo</h3>
+        <p style="padding:0 16px 14px; font-size:14px; line-height:1.5;">Hubo un problema de conexión y el pedido <b>no llegó al sistema de la tienda</b>. Lo vas a mandar igual por WhatsApp a continuación — <b>esperá que te confirmen por ese medio</b> antes de darlo por hecho.</p>
+        <div style="padding:0 16px 16px;">
+          <button class="btn-primary" style="width:100%;" id="order-fail-ack">Entendido, mandar por WhatsApp</button>
+        </div>
+      </div>
+    `;
+    document.body.appendChild(overlay);
+    document.getElementById("order-fail-ack").onclick = ()=>{ overlay.remove(); resolve(); };
+  });
 }
 
 /* ---------- SUCCESS ---------- */
