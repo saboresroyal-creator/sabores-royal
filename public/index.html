@@ -1574,12 +1574,13 @@ function activePromo(product){
 }
 // Productos con oferta activa que además la reflejan en el precio final
 // (excluye pesables por la misma razón que pcImgBadgeHtml, y excluye a los
-// mayoristas porque ellos ya ven su propio precio, no la oferta).
+// mayoristas por completo: ellos tienen su propio acuerdo de precios y no
+// deben ver ofertas pensadas para el público minorista).
 function productsOnPromo(){
   const client = state.currentClientPhone ? state.clients[state.currentClientPhone] : null;
   return state.products.filter(p=>{
     if(p.hidden || p.sellByWeight) return false;
-    if(client && client.wholesale && p.wholesalePrice) return false;
+    if(client && client.wholesale) return false;
     return activePromo(p) !== null;
   });
 }
@@ -1632,12 +1633,15 @@ function renderOfertasScreen(){
     `}
   </div>`;
 }
-/* Prioridad: mayorista > promo > precio normal */
+/* Prioridad: mayorista > promo > precio normal.
+   Un cliente mayorista nunca ve el precio de oferta, tenga o no un
+   wholesalePrice propio cargado para ese producto puntual. */
 function effectivePrice(product){
   if(!product) return 0;
   const client = state.currentClientPhone ? state.clients[state.currentClientPhone] : null;
-  if(client && client.wholesale && product.wholesalePrice){
-    return product.wholesalePrice;
+  const isWholesaleClient = !!(client && client.wholesale);
+  if(isWholesaleClient){
+    return product.wholesalePrice || product.price;
   }
   const promo = activePromo(product);
   return promo !== null ? promo : product.price;
@@ -2158,8 +2162,7 @@ function renderProductDetail(id){
   const _isWholesale = !!(_clW && _clW.wholesale);
   const _hasDisp = !_isWholesale && p.displayQty && p.displayDiscount && qty >= p.displayQty;
   const _lineTotal = _hasDisp ? Math.round(_unitPr * (1 - p.displayDiscount/100)) * qty : _unitPr * qty;
-  const _pdIsWholesale = !!(_clW && _clW.wholesale && p.wholesalePrice);
-  const _pdPromo = !_pdIsWholesale ? activePromo(p) : null;
+  const _pdPromo = _isWholesale ? null : activePromo(p);
   const _pdPromoPct = _pdPromo!==null ? Math.round((1-_pdPromo/p.price)*100) : null;
   return `
   <div class="screen">
@@ -2250,8 +2253,9 @@ function promoBadge(pct, sm=false){
 }
 function pcPriceHtml(p){
   const client = state.currentClientPhone ? state.clients[state.currentClientPhone] : null;
-  const isWholesale = !!(client && client.wholesale && p.wholesalePrice);
-  const promo = !isWholesale ? activePromo(p) : null;
+  const isWholesaleClient = !!(client && client.wholesale);
+  const isWholesale = isWholesaleClient && !!p.wholesalePrice;
+  const promo = isWholesaleClient ? null : activePromo(p);
   const base = isWholesale ? p.wholesalePrice : (promo !== null ? promo : p.price);
   const pct = clientDiscountPct();
   const final = pct > 0 ? Math.round(base*(1-pct/100)) : base;
@@ -2277,8 +2281,8 @@ function pcImgBadgeHtml(p){
   // un descuento que después no se refleja en el precio.
   if(!p.sellByWeight){
     const client = state.currentClientPhone ? state.clients[state.currentClientPhone] : null;
-    const isWholesale = !!(client && client.wholesale && p.wholesalePrice);
-    const promo = !isWholesale ? activePromo(p) : null;
+    const isWholesaleClient = !!(client && client.wholesale);
+    const promo = isWholesaleClient ? null : activePromo(p);
     if(promo !== null){
       const pct = Math.round((1-promo/p.price)*100);
       html += `<span class="pc-promo-badge">🔥 -${pct}%</span>`;
@@ -2315,8 +2319,9 @@ function pcWeightPriceHtml(p){
 }
 function pdPriceHtml(p){
   const client = state.currentClientPhone ? state.clients[state.currentClientPhone] : null;
-  const isWholesale = !!(client && client.wholesale && p.wholesalePrice);
-  const promo = !isWholesale ? activePromo(p) : null;
+  const isWholesaleClient = !!(client && client.wholesale);
+  const isWholesale = isWholesaleClient && !!p.wholesalePrice;
+  const promo = isWholesaleClient ? null : activePromo(p);
   const base = isWholesale ? p.wholesalePrice : (promo !== null ? promo : p.price);
   const pct = clientDiscountPct();
   const final = pct > 0 ? Math.round(base*(1-pct/100)) : base;
@@ -2690,7 +2695,11 @@ async function completeRegistration(){
   saveState(); render();
   toast("¡Bienvenido, "+name+"! 👑", "ok");
   try{
-    await rpcFetch('find_or_create_client', {p_phone: phone, p_name: name, p_address: address||city||null, p_email: email||null});
+    // OJO: find_or_create_client tiene dos versiones en Supabase (una vieja de
+    // 4 parámetros y una nueva de 7 con datos de facturación) y Postgres no
+    // puede elegir cuál usar si no le mandamos los 7 nombrados — mandar solo
+    // 4 tira "ambiguous function" y el cliente nunca se guarda en el servidor.
+    await rpcFetch('find_or_create_client', {p_phone: phone, p_name: name, p_address: address||city||null, p_email: email||null, p_cuit: null, p_razon_social: null, p_condicion_iva: null});
   }catch(e){
     // Mismo problema que con los pedidos: si esto falla en silencio, el
     // cliente sigue usando la app como si nada (todo queda en su celular)
