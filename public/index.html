@@ -711,6 +711,8 @@ let state = {
   adminPagosSub: 'deudas',
   adminPagosProveedor: null,
   adminPagosAcuerdoId: null,
+  bankLoans: {items:[]},
+  adminBancoId: null,
   stockCount: {items: []},
   barcodeCatalog: {},
 };
@@ -725,6 +727,7 @@ let supplierDebtsLoaded = false;
 let supplierChecksLoaded = false;
 let taxDuesLoaded = false;
 let paymentAgreementsLoaded = false;
+let bankLoansLoaded = false;
 let stockCountLoaded = false;
 let barcodeCatalogLoaded = false;
 let _pmEditingExisting = false;
@@ -2867,6 +2870,7 @@ function renderAdmin(){
   const noBarcodeCount = state.products.filter(p=>!p.barcode).length;
   const pendingOrdersCount = state.orders.filter(o=>o.status==="Pendiente").length;
   const checksDueSoon = pagosDueSoonCount(7);
+  const bankLoansDueSoon = bankLoansDueSoonCount(7);
   const newClientsCount = Object.values(state.clients).filter(c=>!c.seen).length;
   const ALL_TABS = [
     {key:"pedidos",       label:"Pedidos", badge:pendingOrdersCount},
@@ -2885,10 +2889,11 @@ function renderAdmin(){
     {key:"alquiler",      label:"Alquiler"},
     {key:"cajadiaria",    label:"Caja Diaria"},
     {key:"pagos",         label:"Pagos", badge:checksDueSoon},
+    {key:"bancos",        label:"Bancos", badge:bankLoansDueSoon},
   ];
   const tabs = state.adminIsSuperAdmin
     ? ALL_TABS
-    : ALL_TABS.filter(t => t.key !== 'config' && t.key !== 'comparador' && t.key !== 'alquiler' && t.key !== 'cajadiaria' && t.key !== 'pagos' && (state.adminLoggedPerms||[]).includes(t.key));
+    : ALL_TABS.filter(t => t.key !== 'config' && t.key !== 'comparador' && t.key !== 'alquiler' && t.key !== 'cajadiaria' && t.key !== 'pagos' && t.key !== 'bancos' && (state.adminLoggedPerms||[]).includes(t.key));
   const tab = tabs.find(t=>t.key===state.adminTab) ? state.adminTab : (tabs[0]?.key||"pedidos");
   if(tab==="productos" && !barcodeCatalogLoaded){ barcodeCatalogLoaded = true; apiSyncBarcodeCatalog(); }
   return `
@@ -2953,6 +2958,7 @@ function renderAdmin(){
       ${tab==="alquiler" ? renderAdminAlquiler() : ""}
       ${tab==="cajadiaria" ? renderAdminCajaDiaria() : ""}
       ${tab==="pagos" ? renderAdminPagos() : ""}
+      ${tab==="bancos" ? renderAdminBancos() : ""}
     </div>
     ${tab==="productos" ? `<button class="fab" onclick="openProductModal(null)">${ic('plus')}</button>` : ""}
     ${tab==="comprobantes" ? `<button class="fab" onclick="openManualVoucherModal()">${ic('plus')}</button>` : ""}
@@ -3926,6 +3932,20 @@ function pagosDueSoonCount(days){
     s + (a.cuotas||[]).filter(c=>c.estado!=='pagado' && inRange(c.vencimiento)).length, 0);
   return checksDueSoonCount(days) + taxes + cuotas;
 }
+// A diferencia de pagosDueSoonCount, acá también contamos las cuotas ya
+// vencidas sin pagar (no solo las próximas), porque son las que más urge
+// tildar y no queremos que se "pierdan" del badge una vez pasada la fecha.
+function bankLoansDueSoonCount(days){
+  const limit = new Date(Date.now()+days*86400000).toISOString().slice(0,10);
+  return (state.bankLoans.items||[]).reduce((s,l)=>
+    s + (l.cuotas||[]).filter(c=>c.estado!=='pagado' && c.vencimiento && c.vencimiento<=limit).length, 0);
+}
+function loanSaldoPendiente(loan){
+  return (loan.cuotas||[]).filter(c=>c.estado!=='pagado').reduce((s,c)=>s+c.monto,0);
+}
+function loanTotalPendienteGeneral(){
+  return (state.bankLoans.items||[]).reduce((s,l)=>s+loanSaldoPendiente(l),0);
+}
 
 async function apiSyncSupplierDebts(){
   try{
@@ -4011,6 +4031,22 @@ async function apiSyncPaymentAgreements(){
   }catch(e){
     paymentAgreementsLoaded = true;
     toast('Error cargando acuerdos: '+e.message, 'err');
+    render();
+  }
+}
+async function apiSyncBankLoans(){
+  try{
+    const rows = await adminFetch('/app_settings?setting_key=eq.bank_loans&select=setting_value', 'GET');
+    const row = rows && rows[0];
+    if(row){
+      const parsed = JSON.parse(row.setting_value);
+      state.bankLoans = Object.assign({items:[]}, parsed);
+    }
+    bankLoansLoaded = true;
+    saveState(); render();
+  }catch(e){
+    bankLoansLoaded = true;
+    toast('Error cargando bancos: '+e.message, 'err');
     render();
   }
 }
@@ -4347,6 +4383,103 @@ async function deleteAgreement(id){
 function openAgreementDetail(id){ state.adminPagosAcuerdoId = id; render(); }
 function closeAgreementDetail(){ state.adminPagosAcuerdoId = null; render(); }
 
+// Préstamos bancarios (solapa "Bancos"): igual mecánica que los Acuerdos de
+// pago de arriba (monto total repartido en cuotas con vencimiento), pero en
+// su propia solapa porque son cosas distintas para el usuario (banco vs.
+// AFIP/ARBA) y con su propio setting_key en Supabase.
+function openBankLoanModal(){
+  const overlay = document.createElement("div");
+  overlay.className = "modal-overlay";
+  overlay.id = "bankloan-modal-overlay";
+  const today = new Date().toISOString().slice(0,10);
+  overlay.innerHTML = `
+    <div class="modal-sheet">
+      <div class="modal-handle"></div>
+      <h3 class="modal-title">Nuevo préstamo bancario</h3>
+      <p style="font-size:12px; color:rgba(255,255,255,0.5); margin:-4px 0 10px;">Cargá las cuotas tal como figuran en el cuadro de marcha del banco.</p>
+      <div class="form-group"><label>Banco</label><input id="bl-banco" placeholder="Ej: BBVA"></div>
+      <div class="form-group"><label>Concepto (opcional)</label><input id="bl-concepto" placeholder="Ej: Préstamo prendario"></div>
+      <div style="display:flex; gap:10px;">
+        <div class="form-group" style="flex:1;"><label>Monto total</label><input id="bl-total" type="number" placeholder="Ej: 1200000" oninput="rebuildBankLoanSplitRows()"></div>
+        <div class="form-group" style="flex:1;"><label>Cantidad de cuotas</label><input id="bl-cantidad" type="number" min="1" max="60" value="12" oninput="rebuildBankLoanSplitRows()"></div>
+      </div>
+      <div class="form-group"><label>Vencimiento 1° cuota</label><input id="bl-primera" type="date" value="${today}" onchange="rebuildBankLoanSplitRows()"></div>
+      <div id="bl-rows"></div>
+      <div style="display:flex; gap:10px; margin-top:6px;">
+        <button class="btn-secondary" style="flex:1;" onclick="closeBankLoanModal()">Cancelar</button>
+        <button class="btn-primary" style="flex:1;" onclick="saveBankLoan()">Guardar</button>
+      </div>
+    </div>`;
+  document.body.appendChild(overlay);
+  rebuildBankLoanSplitRows();
+}
+function closeBankLoanModal(){ const el=document.getElementById("bankloan-modal-overlay"); if(el) el.remove(); }
+// Redibuja las filas de cuotas según "monto total" / "cantidad" / "1° cuota",
+// sin pisar lo que el usuario ya haya tocado a mano en filas que sigan existiendo.
+function rebuildBankLoanSplitRows(){
+  const rowsEl = document.getElementById('bl-rows');
+  if(!rowsEl) return;
+  const total = Number(document.getElementById('bl-total')?.value) || 0;
+  const n = Math.max(1, Math.min(60, Number(document.getElementById('bl-cantidad')?.value) || 1));
+  const primera = document.getElementById('bl-primera')?.value || new Date().toISOString().slice(0,10);
+  const per = n>0 ? Math.round((total/n)*100)/100 : 0;
+  const prevRows = [...rowsEl.querySelectorAll('[data-row]')].map(row=>({
+    monto: row.querySelector('.bl-row-monto')?.value || '',
+    vto: row.querySelector('.bl-row-vto')?.value || '',
+  }));
+  let html = '';
+  for(let i=0;i<n;i++){
+    const prev = prevRows[i];
+    const defaultVto = i===0 ? primera : addMonthsClamped(primera, i);
+    html += `
+      <div data-row style="display:flex; gap:8px; align-items:flex-end; margin-bottom:10px;">
+        <div style="flex:none; width:56px; font-size:12px; color:rgba(255,255,255,0.5); padding-bottom:11px;">Cuota ${i+1}</div>
+        <div style="flex:1;"><label style="font-size:11px; color:rgba(255,255,255,0.5); display:block; margin-bottom:4px;">Importe</label>
+          <input class="bl-row-monto" type="number" value="${prev&&prev.monto!==''?prev.monto:(per||'')}" style="width:100%; padding:10px; border-radius:10px; background:var(--glass); border:1px solid var(--glass-bd); color:var(--cream);"></div>
+        <div style="flex:1;"><label style="font-size:11px; color:rgba(255,255,255,0.5); display:block; margin-bottom:4px;">Vencimiento</label>
+          <input class="bl-row-vto" type="date" value="${prev&&prev.vto?prev.vto:defaultVto}" style="width:100%; padding:10px; border-radius:10px; background:var(--glass); border:1px solid var(--glass-bd); color:var(--cream);"></div>
+      </div>`;
+  }
+  rowsEl.innerHTML = html;
+}
+async function saveBankLoan(){
+  const banco = document.getElementById("bl-banco").value.trim();
+  const concepto = document.getElementById("bl-concepto").value.trim();
+  if(!banco){ toast("Ingresá el banco", "err"); return; }
+  const cuotas = [...document.querySelectorAll('#bl-rows [data-row]')].map(row=>({
+    monto: Number(row.querySelector('.bl-row-monto').value),
+    vencimiento: row.querySelector('.bl-row-vto').value,
+  })).filter(c=>c.monto>0 && c.vencimiento).map((c,i)=>({
+    id:paymentsId('bl'), nro:i+1, monto:c.monto, vencimiento:c.vencimiento, estado:'pendiente',
+  }));
+  if(cuotas.length===0){ toast("Completá importe y vencimiento de al menos una cuota", "err"); return; }
+  const montoTotal = cuotas.reduce((s,c)=>s+c.monto,0);
+  state.bankLoans.items.push({
+    id:paymentsId('bank'), banco, concepto, montoTotal, createdAt:new Date().toISOString().slice(0,10), cuotas,
+  });
+  closeBankLoanModal();
+  saveState(); render();
+  try{ await apiSaveSetting('bank_loans', state.bankLoans); toast("Préstamo registrado", "ok"); }
+  catch(e){ toast("Error al guardar: "+e.message, "err"); }
+}
+async function setBankLoanCuotaEstado(loanId, cuotaId, estado){
+  const loan = state.bankLoans.items.find(l=>l.id===loanId);
+  const cuota = loan && loan.cuotas.find(c=>c.id===cuotaId);
+  if(!cuota) return;
+  cuota.estado = estado;
+  saveState(); render();
+  try{ await apiSaveSetting('bank_loans', state.bankLoans); } catch(e){ toast("Error al guardar: "+e.message, "err"); }
+}
+async function deleteBankLoan(id){
+  if(!confirm("¿Eliminar este préstamo y todas sus cuotas?")) return;
+  state.bankLoans.items = state.bankLoans.items.filter(l=>l.id!==id);
+  state.adminBancoId = null;
+  saveState(); render();
+  try{ await apiSaveSetting('bank_loans', state.bankLoans); } catch(e){ toast("Error al guardar: "+e.message, "err"); }
+}
+function openBankLoanDetail(id){ state.adminBancoId = id; render(); }
+function closeBankLoanDetail(){ state.adminBancoId = null; render(); }
+
 function renderAdminPagos(){
   if(!supplierDebtsLoaded){ apiSyncSupplierDebts(); }
   if(!supplierChecksLoaded){ apiSyncSupplierChecks(); }
@@ -4646,6 +4779,85 @@ function renderAdminCajaDiaria(){
     <h3 style="color:var(--white); font-size:16px; margin-bottom:8px;">Caja Diaria</h3>
     <p style="font-size:13px; color:rgba(255,255,255,0.55); max-width:320px; margin:0 auto 22px; line-height:1.5;">Se abre en una pestaña aparte — es la misma app de siempre, con los mismos datos, sincronizada con el servidor.</p>
     <a href="caja-diaria.html" target="_blank" rel="noopener" class="btn-primary" style="display:inline-flex; align-items:center; justify-content:center; gap:8px; max-width:280px; text-decoration:none;">${ic('receipt')} Abrir Caja Diaria ↗</a>
+  </div>`;
+}
+function renderAdminBancos(){
+  if(!bankLoansLoaded){ apiSyncBankLoans(); return `<div style="padding:40px;text-align:center;color:rgba(255,255,255,0.4);">Cargando...</div>`; }
+  if(state.adminBancoId) return renderAdminBancoDetail(state.adminBancoId);
+  const loans = [...(state.bankLoans.items||[])];
+  const total = loanTotalPendienteGeneral();
+  const dueSoon = bankLoansDueSoonCount(7);
+  const today = new Date().toISOString().slice(0,10);
+  return `
+  <div style="padding:16px;">
+    <div style="display:flex; gap:10px; margin-bottom:16px;">
+      <div style="flex:1; background:var(--glass); border:1px solid var(--glass-bd); border-radius:14px; padding:14px; text-align:center;">
+        <div style="font-size:11px; color:rgba(255,255,255,0.5); text-transform:uppercase;">Saldo pendiente</div>
+        <div style="font-size:18px; font-weight:800; color:${total>0?'var(--danger)':'var(--ok)'};">${money(total)}</div>
+      </div>
+      <div style="flex:1; background:var(--glass); border:1px solid var(--glass-bd); border-radius:14px; padding:14px; text-align:center;">
+        <div style="font-size:11px; color:rgba(255,255,255,0.5); text-transform:uppercase;">Vencen en 7 días (o vencidas)</div>
+        <div style="font-size:18px; font-weight:800; color:${dueSoon>0?'var(--warn)':'var(--white)'};">${dueSoon}</div>
+      </div>
+    </div>
+    <button class="btn-primary" style="width:100%; margin-bottom:16px;" onclick="openBankLoanModal()">+ Nuevo préstamo</button>
+    ${loans.length===0 ? `<div style="padding:30px; text-align:center; color:rgba(255,255,255,0.4);">Sin préstamos cargados todavía.</div>` : loans.map(l=>{
+      const saldo = loanSaldoPendiente(l);
+      const cuotasPend = (l.cuotas||[]).filter(c=>c.estado!=='pagado').length;
+      const proxima = [...(l.cuotas||[])].filter(c=>c.estado!=='pagado').sort((a,b)=>(a.vencimiento||'').localeCompare(b.vencimiento||''))[0];
+      const isPast = proxima && proxima.vencimiento < today;
+      return `
+      <div style="display:flex; justify-content:space-between; align-items:center; gap:10px; padding:14px; background:var(--glass); border:1px solid var(--glass-bd); border-radius:12px; margin-bottom:8px; cursor:pointer;" onclick="openBankLoanDetail('${l.id}')">
+        <div style="min-width:0;">
+          <div style="font-size:13.5px; font-weight:600; color:var(--white);">${escapeHtml(l.banco)}${l.concepto?` · ${escapeHtml(l.concepto)}`:''}</div>
+          <div style="font-size:11px; color:${isPast?'var(--danger)':'rgba(255,255,255,0.4)'};">${cuotasPend} cuota${cuotasPend!==1?'s':''} pendiente${cuotasPend!==1?'s':''}${proxima?` · próx. ${fmtDateAR(proxima.vencimiento)}${isPast?' (vencida)':''}`:''}</div>
+        </div>
+        <div style="font-size:14px; font-weight:700; color:${saldo>0?'var(--danger)':'var(--ok)'};">${money(saldo)}</div>
+      </div>`;
+    }).join('')}
+  </div>`;
+}
+function renderAdminBancoDetail(id){
+  const l = (state.bankLoans.items||[]).find(x=>x.id===id);
+  if(!l){ state.adminBancoId = null; return renderAdminBancos(); }
+  const saldo = loanSaldoPendiente(l);
+  const cuotas = [...(l.cuotas||[])].sort((x,y)=>(x.vencimiento||'').localeCompare(y.vencimiento||''));
+  const today = new Date().toISOString().slice(0,10);
+  return `
+  <div style="padding:16px;">
+    <div style="display:flex; align-items:center; gap:8px; margin-bottom:12px;">
+      <button onclick="closeBankLoanDetail()" style="background:none; border:none; color:var(--white); cursor:pointer; padding:4px 8px; font-size:18px;">←</button>
+      <h3 style="font-size:15px; color:var(--white);">${escapeHtml(l.banco)}${l.concepto?` · ${escapeHtml(l.concepto)}`:''}</h3>
+    </div>
+    <div style="background:var(--glass); border:1px solid var(--glass-bd); border-radius:16px; padding:20px; text-align:center; margin-bottom:16px;">
+      <div style="font-size:12px; color:rgba(255,255,255,0.5); text-transform:uppercase; letter-spacing:.5px;">Saldo pendiente</div>
+      <div style="font-size:28px; font-weight:800; color:${saldo>0?'var(--danger)':'var(--ok)'}; margin:8px 0;">${money(saldo)}</div>
+      <div style="font-size:11px; color:rgba(255,255,255,0.4);">Monto total del préstamo: ${money(l.montoTotal)}</div>
+    </div>
+    <button class="btn-secondary" style="width:100%; margin-bottom:16px; color:var(--danger);" onclick="deleteBankLoan('${l.id}')">Eliminar préstamo</button>
+    <div style="font-size:13px; font-weight:700; color:rgba(255,255,255,0.6); margin-bottom:8px; text-transform:uppercase; letter-spacing:.4px;">Cuotas</div>
+    ${cuotas.map(c=>{
+      const isPast = c.estado!=='pagado' && c.vencimiento < today;
+      const color = c.estado==='pagado' ? 'var(--ok)' : isPast ? 'var(--danger)' : 'rgba(255,255,255,0.6)';
+      const badge = dateBadgeParts(c.vencimiento);
+      return `
+      <div style="padding:12px 14px; background:var(--glass); border:1px solid var(--glass-bd); border-radius:12px; margin-bottom:8px;">
+        <div style="display:flex; align-items:center; gap:12px; margin-bottom:8px;">
+          <div style="flex:none; width:46px; padding:5px 2px; border-radius:10px; background:rgba(255,255,255,0.06); border:1.5px solid ${color}; color:${color}; text-align:center;">
+            <div style="font-size:18px; font-weight:800; line-height:1.1;">${badge.day}</div>
+            <div style="font-size:9px; font-weight:700; letter-spacing:.5px;">${badge.month}</div>
+          </div>
+          <div style="flex:1; min-width:0;">
+            <div style="font-size:13px; font-weight:600; color:var(--white);">Cuota ${c.nro}</div>
+            <div style="font-size:11px; color:rgba(255,255,255,0.4);">Vence ${fmtDateAR(c.vencimiento)}${isPast?' · vencida':''}</div>
+          </div>
+          <div style="font-size:14px; font-weight:700; color:var(--white);">${money(c.monto)}</div>
+        </div>
+        <div style="display:flex; gap:6px;">
+          ${['pendiente','pagado'].map(e=>`<button class="chip ${c.estado===e?'active':''}" style="padding:5px 12px; font-size:11px;" onclick="setBankLoanCuotaEstado('${l.id}','${c.id}','${e}')">${e==='pendiente'?'Pendiente':'Pagada'}</button>`).join('')}
+        </div>
+      </div>`;
+    }).join('')}
   </div>`;
 }
 function renderAdminAlquiler(){
