@@ -184,26 +184,26 @@ img{display:block; max-width:100%;}
   background:var(--glass); border:1px solid var(--glass-bd); color:rgba(255,255,255,0.7); white-space:nowrap;}
 .chip.active{background:var(--gold); color:var(--navy); border-color:var(--gold);}
 
-.product-grid{display:grid; grid-template-columns:1fr 1fr; gap:12px; padding:4px 16px 18px;}
-.product-card{border-radius:16px; overflow:hidden; background:var(--glass); border:1px solid var(--glass-bd);}
+.product-grid{display:grid; grid-template-columns:1fr 1fr; gap:13px; padding:4px 16px 18px;}
+.product-card{border-radius:20px; overflow:hidden; background:var(--glass); border:1px solid var(--glass-bd);}
 .pc-img{aspect-ratio:1; background:rgba(255,255,255,0.05); display:flex; align-items:center; justify-content:center; position:relative;}
 .pc-img img{width:100%; height:100%; object-fit:contain;}
-.pc-img svg{width:34px; height:34px; opacity:.25;}
-.pc-stock-low{position:absolute; top:6px; left:6px; background:var(--warn); color:var(--navy);
-  font-size:9px; font-weight:700; padding:2px 7px; border-radius:10px;}
-.pc-stock-out{position:absolute; top:6px; left:6px; background:var(--danger); color:#fff;
-  font-size:9px; font-weight:700; padding:2px 7px; border-radius:10px;}
-.pc-promo-badge{position:absolute; top:6px; right:6px; z-index:1; background:linear-gradient(135deg,#ffe066,#ffd400);
-  color:#c62222; font-size:10px; font-weight:800; padding:3px 8px; border-radius:10px;
+.pc-img svg{width:38px; height:38px; opacity:.25;}
+.pc-stock-low{position:absolute; top:8px; left:8px; background:var(--warn); color:var(--navy);
+  font-size:9.5px; font-weight:700; padding:2px 8px; border-radius:10px;}
+.pc-stock-out{position:absolute; top:8px; left:8px; background:var(--danger); color:#fff;
+  font-size:9.5px; font-weight:700; padding:2px 8px; border-radius:10px;}
+.pc-promo-badge{position:absolute; top:8px; right:8px; z-index:1; background:linear-gradient(135deg,#ffe066,#ffd400);
+  color:#c62222; font-size:12px; font-weight:800; padding:4px 10px; border-radius:11px;
   box-shadow:0 2px 8px rgba(255,212,0,0.6); animation:pcPromoPulse 1.8s ease-in-out infinite;}
 @keyframes pcPromoPulse{0%,100%{transform:scale(1);} 50%{transform:scale(1.1);}}
 @media (prefers-reduced-motion: reduce){ .pc-promo-badge{animation:none;} }
-.pc-body{padding:10px 11px 12px;}
-.pc-body h4{font-size:12.5px; font-weight:600; color:var(--white); line-height:1.3; margin-bottom:4px;
+.pc-body{padding:13px 14px 15px;}
+.pc-body h4{font-size:13.5px; font-weight:600; color:var(--white); line-height:1.35; margin-bottom:7px;
   display:-webkit-box; -webkit-line-clamp:2; -webkit-box-orient:vertical; overflow:hidden;}
-.pc-price{font-size:15px; font-weight:700; color:var(--gold2);}
-.pc-add{margin-top:8px; width:100%; padding:7px; border-radius:10px; background:var(--gold); color:var(--navy);
-  font-weight:700; font-size:12px;}
+.pc-price{font-size:19px; font-weight:800; color:var(--gold2); letter-spacing:-.2px;}
+.pc-add{margin-top:10px; width:100%; padding:9px; border-radius:11px; background:var(--gold); color:var(--navy);
+  font-weight:700; font-size:13px;}
 .pc-add:disabled{background:rgba(255,255,255,0.08); color:rgba(255,255,255,0.35);}
 
 .empty-state{padding:60px 30px; text-align:center; color:rgba(255,255,255,0.4);}
@@ -1595,11 +1595,19 @@ function homePromoBannerHtml(){
   if(IS_ADMIN_APP) return '';
   const promoProducts = productsOnPromo();
   if(promoProducts.length===0) return '';
-  const maxPct = Math.max(...promoProducts.map(p=>Math.round((1-activePromo(p)/p.price)*100)));
+  // El % más frecuente entre los productos en oferta, no el más alto: con
+  // ofertas puntuales de mayor descuento en un puñado de productos, tomar
+  // el máximo hacía que el cartel prometiera un % que casi nadie tenía.
+  const pctCounts = {};
+  promoProducts.forEach(p=>{
+    const pct = Math.round((1-activePromo(p)/p.price)*100);
+    pctCounts[pct] = (pctCounts[pct]||0) + 1;
+  });
+  const commonPct = Object.keys(pctCounts).reduce((best,pct)=>pctCounts[pct]>pctCounts[best]?pct:best);
   return `
     <div class="home-promo-banner" onclick="nav('ofertas')">
       <div class="hpb-pct">
-        <span class="hpb-pct-num">${maxPct}%</span>
+        <span class="hpb-pct-num">${commonPct}%</span>
         <span class="hpb-pct-off">OFF</span>
       </div>
       <div class="hpb-body">
@@ -2248,13 +2256,13 @@ function applyClientDiscount(price){
 }
 function discBadge(pct, sm=false){
   if(!pct) return '';
-  return `<span style="background:#e74c3c;color:#fff;border-radius:4px;padding:${sm?'1px 4px':'2px 6px'};font-size:${sm?'8px':'10px'};font-weight:800;margin-left:4px;vertical-align:middle;">-${pct}%</span>`;
+  return `<span style="background:#e74c3c;color:#fff;border-radius:5px;padding:${sm?'2px 6px':'2px 6px'};font-size:${sm?'10px':'10px'};font-weight:800;margin-left:4px;vertical-align:middle;">-${pct}%</span>`;
 }
 // Badge de oferta (promoPrice), separado de discBadge (descuento personal del
 // cliente) para que se note más: gradiente cálido + 🔥, en vez del rojo plano.
 function promoBadge(pct, sm=false){
   if(!pct) return '';
-  return `<span style="background:linear-gradient(135deg,#ffe066,#ffd400);color:#c62222;border-radius:6px;padding:${sm?'2px 6px':'3px 9px'};font-size:${sm?'9px':'11px'};font-weight:800;margin-left:4px;vertical-align:middle;box-shadow:0 1px 5px rgba(255,212,0,0.5);">🔥 -${pct}%</span>`;
+  return `<span style="background:linear-gradient(135deg,#ffe066,#ffd400);color:#c62222;border-radius:6px;padding:${sm?'3px 8px':'3px 9px'};font-size:${sm?'11px':'11px'};font-weight:800;margin-left:4px;vertical-align:middle;box-shadow:0 1px 5px rgba(255,212,0,0.5);">🔥 -${pct}%</span>`;
 }
 function pcPriceHtml(p){
   const client = state.currentClientPhone ? state.clients[state.currentClientPhone] : null;
@@ -2267,12 +2275,12 @@ function pcPriceHtml(p){
   const mayoristaTag = isWholesale ? '<span style="font-size:9px;color:#6db8e8;font-weight:700;margin-left:5px;">MAYORISTA</span>' : '';
   if(pct > 0){
     const badgePct = pct;
-    return `<span style="text-decoration:line-through;opacity:.4;font-size:10px;">${money(base)}</span> ${money(final)}${discBadge(badgePct,true)}${mayoristaTag}`;
+    return `<span style="text-decoration:line-through;opacity:.4;font-size:11px;font-weight:500;display:block;">${money(base)}</span>${money(final)}${discBadge(badgePct,true)}${mayoristaTag}`;
   }
   if(isWholesale) return money(base)+mayoristaTag;
   if(promo !== null){
     const badgePct = Math.round((1-promo/p.price)*100);
-    return `<span style="text-decoration:line-through;opacity:.45;font-size:10px;">${money(p.price)}</span> <span style="color:#c62222;">${money(promo)}</span>${promoBadge(badgePct,true)}`;
+    return `<span style="text-decoration:line-through;opacity:.45;font-size:11px;font-weight:500;display:block;">${money(p.price)}</span><span style="color:#c62222;">${money(promo)}</span>${promoBadge(badgePct,true)}`;
   }
   return money(p.price);
 }
@@ -2319,7 +2327,7 @@ function pcCardBodyHtml(p){
 function pcWeightPriceHtml(p){
   const base = effectivePriceForWeight(p);
   const pct = clientDiscountPct();
-  if(pct > 0) return `<span style="text-decoration:line-through;opacity:.4;font-size:10px;">${money(base)}</span> ${money(Math.round(base*(1-pct/100)))}/kg${discBadge(pct,true)}`;
+  if(pct > 0) return `<span style="text-decoration:line-through;opacity:.4;font-size:11px;font-weight:500;display:block;">${money(base)}</span>${money(Math.round(base*(1-pct/100)))}/kg${discBadge(pct,true)}`;
   return money(base)+'/kg'+(base!==p.pricePerKg?'<span style="font-size:9px;color:#6db8e8;font-weight:700;margin-left:5px;">MAYORISTA</span>':'');
 }
 function pdPriceHtml(p){
