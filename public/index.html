@@ -4545,6 +4545,43 @@ async function importBbvaPreset(){
   catch(e){ toast('Error al guardar: '+e.message, 'err'); }
 }
 
+// Marca en bloque como "pagadas" todas las cuotas (de todos los préstamos)
+// con vencimiento anterior a una fecha elegida — evita tener que tildar
+// a mano cada cuota vieja de un préstamo que ya venía pagando de antes.
+function openMarkPaidBeforeModal(){
+  const overlay = document.createElement("div");
+  overlay.className = "modal-overlay";
+  overlay.id = "markpaid-modal-overlay";
+  const today = new Date().toISOString().slice(0,10);
+  overlay.innerHTML = `
+    <div class="modal-sheet">
+      <div class="modal-handle"></div>
+      <h3 class="modal-title">Marcar cuotas vencidas como pagadas</h3>
+      <p style="font-size:12px; color:rgba(255,255,255,0.5); margin:-4px 0 10px;">Marca como "Pagada" todas las cuotas de todos los préstamos con vencimiento anterior a la fecha que elijas (no toca las que ya estén marcadas pagadas).</p>
+      <div class="form-group"><label>Marcar pagadas hasta (sin incluir)</label><input id="mp-fecha" type="date" value="${today}"></div>
+      <div style="display:flex; gap:10px; margin-top:6px;">
+        <button class="btn-secondary" style="flex:1;" onclick="closeMarkPaidBeforeModal()">Cancelar</button>
+        <button class="btn-primary" style="flex:1;" onclick="confirmMarkPaidBefore()">Marcar pagadas</button>
+      </div>
+    </div>`;
+  document.body.appendChild(overlay);
+}
+function closeMarkPaidBeforeModal(){ const el=document.getElementById("markpaid-modal-overlay"); if(el) el.remove(); }
+async function confirmMarkPaidBefore(){
+  const fecha = document.getElementById("mp-fecha").value;
+  if(!fecha){ toast("Elegí una fecha", "err"); return; }
+  let count = 0;
+  (state.bankLoans.items||[]).forEach(l=>{
+    (l.cuotas||[]).forEach(c=>{
+      if(c.estado!=='pagado' && c.vencimiento && c.vencimiento<fecha){ c.estado='pagado'; count++; }
+    });
+  });
+  closeMarkPaidBeforeModal();
+  saveState(); render();
+  try{ await apiSaveSetting('bank_loans', state.bankLoans); toast(count+' cuota'+(count!==1?'s':'')+' marcada'+(count!==1?'s':'')+' como pagada'+(count!==1?'s':''), 'ok'); }
+  catch(e){ toast('Error al guardar: '+e.message, 'err'); }
+}
+
 function renderAdminPagos(){
   if(!supplierDebtsLoaded){ apiSyncSupplierDebts(); }
   if(!supplierChecksLoaded){ apiSyncSupplierChecks(); }
@@ -4867,6 +4904,7 @@ function renderAdminBancos(){
     </div>
     <button class="btn-primary" style="width:100%; margin-bottom:16px;" onclick="openBankLoanModal()">+ Nuevo préstamo</button>
     ${loans.length===0 ? `<button class="btn-secondary" style="width:100%; margin-bottom:16px;" onclick="importBbvaPreset()">Importar los 44 préstamos BBVA que pasaste</button>` : ''}
+    ${loans.length>0 ? `<button class="btn-secondary" style="width:100%; margin-bottom:16px;" onclick="openMarkPaidBeforeModal()">Marcar cuotas vencidas como pagadas</button>` : ''}
     ${loans.length===0 ? `<div style="padding:30px; text-align:center; color:rgba(255,255,255,0.4);">Sin préstamos cargados todavía.</div>` : loans.map(l=>{
       const saldo = loanSaldoPendiente(l);
       const cuotasPend = (l.cuotas||[]).filter(c=>c.estado!=='pagado').length;
