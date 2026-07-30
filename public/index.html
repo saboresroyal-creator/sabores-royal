@@ -1653,13 +1653,12 @@ function activePromo(product){
   return product.promoUntil >= today ? product.promoPrice : null;
 }
 // Productos con oferta activa que además la reflejan en el precio final
-// (excluye pesables por la misma razón que pcImgBadgeHtml, y excluye a los
-// mayoristas por completo: ellos tienen su propio acuerdo de precios y no
-// deben ver ofertas pensadas para el público minorista).
+// (excluye a los mayoristas por completo: ellos tienen su propio acuerdo de
+// precios y no deben ver ofertas pensadas para el público minorista).
 function productsOnPromo(){
   const client = state.currentClientPhone ? state.clients[state.currentClientPhone] : null;
   return state.products.filter(p=>{
-    if(p.hidden || p.sellByWeight) return false;
+    if(p.hidden) return false;
     if(client && client.wholesale) return false;
     return activePromo(p) !== null;
   });
@@ -1675,7 +1674,8 @@ function homePromoBannerHtml(){
   // el máximo hacía que el cartel prometiera un % que casi nadie tenía.
   const pctCounts = {};
   promoProducts.forEach(p=>{
-    const pct = Math.round((1-activePromo(p)/p.price)*100);
+    const basePrice = p.sellByWeight ? p.pricePerKg : p.price;
+    const pct = Math.round((1-activePromo(p)/basePrice)*100);
     pctCounts[pct] = (pctCounts[pct]||0) + 1;
   });
   const commonPct = Object.keys(pctCounts).reduce((best,pct)=>pctCounts[pct]>pctCounts[best]?pct:best);
@@ -2226,16 +2226,22 @@ function renderProductDetail(id){
     const grams = state.route.grams || p.minGrams || 50;
     const pricePerKgEff = effectivePriceForWeight(p);
     const lineTotal = (pricePerKgEff/1000)*grams;
+    const _clWt = state.currentClientPhone ? state.clients[state.currentClientPhone] : null;
+    const _pdPromoW = (_clWt && _clWt.wholesale) ? null : activePromo(p);
+    const _pdPromoPctW = _pdPromoW!==null ? Math.round((1-_pdPromoW/p.pricePerKg)*100) : null;
     return `
     <div class="screen">
       <div class="topbar">
         <button class="back" onclick="nav('catalog',{section:'${p.section}'})">${ic('chevron')}</button>
         <h2>Detalle</h2>
       </div>
-      <div class="pd-img">${p.photo?`<img src="${p.photo}" loading="lazy">`:ic('box')}</div>
+      <div class="pd-img">
+        ${_pdPromoPctW?`<span class="pd-promo-badge">🔥 -${_pdPromoPctW}%</span>`:''}
+        ${p.photo?`<img src="${p.photo}" loading="lazy">`:ic('box')}
+      </div>
       <div class="pd-body">
         <h2>${p.name}</h2>
-        <div class="pd-price">${pdWeightPriceHtml(p, pricePerKgEff)}</div>
+        <div class="pd-price">${pdWeightPriceHtml(p)}</div>
         <p class="pd-desc">${p.desc||''}</p>
         <label style="display:block; font-size:12px; color:rgba(255,255,255,0.55); margin-bottom:8px; font-weight:600;">Cantidad (gramos)</label>
         <div class="qty-row">
@@ -2320,14 +2326,17 @@ function setDetailGrams(val){
   render();
 }
 /* Returns the effective price-per-kg for a weight-sold product, applying
-   wholesale pricing the same way effectivePrice() does for unit products. */
+   wholesale pricing and ofertas the same way effectivePrice() does for unit
+   products (prioridad: mayorista > promo > precio normal). */
 function effectivePriceForWeight(product){
   if(!product) return 0;
   const client = state.currentClientPhone ? state.clients[state.currentClientPhone] : null;
-  if(client && client.wholesale && product.wholesalePricePerKg){
-    return product.wholesalePricePerKg;
+  const isWholesaleClient = !!(client && client.wholesale);
+  if(isWholesaleClient){
+    return product.wholesalePricePerKg || product.pricePerKg;
   }
-  return product.pricePerKg;
+  const promo = activePromo(product);
+  return promo !== null ? promo : product.pricePerKg;
 }
 
 function clientDiscountPct(){
@@ -2375,17 +2384,13 @@ function pcPriceHtml(p){
 function isOutOfStock(p){ return !p.sellByWeight && p.stock<=0; }
 function pcImgBadgeHtml(p){
   let html = '';
-  // Los productos pesables no aplican promoPrice al precio final (ver
-  // pcWeightPriceHtml), así que no se muestra el ribbon para no prometer
-  // un descuento que después no se refleja en el precio.
-  if(!p.sellByWeight){
-    const client = state.currentClientPhone ? state.clients[state.currentClientPhone] : null;
-    const isWholesaleClient = !!(client && client.wholesale);
-    const promo = isWholesaleClient ? null : activePromo(p);
-    if(promo !== null){
-      const pct = Math.round((1-promo/p.price)*100);
-      html += `<span class="pc-promo-badge">🔥 -${pct}%</span>`;
-    }
+  const client = state.currentClientPhone ? state.clients[state.currentClientPhone] : null;
+  const isWholesaleClient = !!(client && client.wholesale);
+  const promo = isWholesaleClient ? null : activePromo(p);
+  if(promo !== null){
+    const basePrice = p.sellByWeight ? p.pricePerKg : p.price;
+    const pct = Math.round((1-promo/basePrice)*100);
+    html += `<span class="pc-promo-badge">🔥 -${pct}%</span>`;
   }
   if(isOutOfStock(p)) html += `<span class="pc-stock-out">Sin stock</span>`;
   else if(isLowStock(p) && p.stock>0) html += `<span class="pc-stock-low">¡Últimas ${p.stock}!</span>`;
@@ -2411,10 +2416,23 @@ function pcCardBodyHtml(p){
   `;
 }
 function pcWeightPriceHtml(p){
-  const base = effectivePriceForWeight(p);
+  const client = state.currentClientPhone ? state.clients[state.currentClientPhone] : null;
+  const isWholesaleClient = !!(client && client.wholesale);
+  const isWholesale = isWholesaleClient && !!p.wholesalePricePerKg;
+  const promo = isWholesaleClient ? null : activePromo(p);
+  const base = isWholesale ? p.wholesalePricePerKg : (promo !== null ? promo : p.pricePerKg);
   const pct = clientDiscountPct();
-  if(pct > 0) return `<span style="text-decoration:line-through;opacity:.4;font-size:11px;font-weight:500;display:block;">${money(base)}</span>${money(Math.round(base*(1-pct/100)))}/kg${discBadge(pct,true)}`;
-  return money(base)+'/kg'+(base!==p.pricePerKg?'<span style="font-size:9px;color:#6db8e8;font-weight:700;margin-left:5px;">MAYORISTA</span>':'');
+  const final = pct > 0 ? Math.round(base*(1-pct/100)) : base;
+  const mayoristaTag = isWholesale ? '<span style="font-size:9px;color:#6db8e8;font-weight:700;margin-left:5px;">MAYORISTA</span>' : '';
+  if(pct > 0){
+    return `<span style="text-decoration:line-through;opacity:.4;font-size:11px;font-weight:500;display:block;">${money(base)}</span>${money(final)}/kg${discBadge(pct,true)}${mayoristaTag}`;
+  }
+  if(isWholesale) return money(base)+'/kg'+mayoristaTag;
+  if(promo !== null){
+    const badgePct = Math.round((1-promo/p.pricePerKg)*100);
+    return `<span style="text-decoration:line-through;opacity:.45;font-size:11px;font-weight:500;display:block;">${money(p.pricePerKg)}</span><span style="color:#c62222;">${money(promo)}</span>/kg${promoBadge(badgePct,true)}`;
+  }
+  return money(p.pricePerKg)+'/kg';
 }
 function pdPriceHtml(p){
   const client = state.currentClientPhone ? state.clients[state.currentClientPhone] : null;
@@ -2435,10 +2453,24 @@ function pdPriceHtml(p){
   }
   return money(p.price);
 }
-function pdWeightPriceHtml(p, pricePerKgEff){
+function pdWeightPriceHtml(p){
+  const client = state.currentClientPhone ? state.clients[state.currentClientPhone] : null;
+  const isWholesaleClient = !!(client && client.wholesale);
+  const isWholesale = isWholesaleClient && !!p.wholesalePricePerKg;
+  const promo = isWholesaleClient ? null : activePromo(p);
+  const base = isWholesale ? p.wholesalePricePerKg : (promo !== null ? promo : p.pricePerKg);
   const pct = clientDiscountPct();
-  if(pct > 0) return `<span style="text-decoration:line-through;opacity:.4;font-size:14px;">${money(pricePerKgEff)}</span> ${money(Math.round(pricePerKgEff*(1-pct/100)))}/kg${discBadge(pct)}`;
-  return money(pricePerKgEff)+'/kg'+(pricePerKgEff!==p.pricePerKg?'<span style="font-size:11px;color:#6db8e8;font-weight:700;margin-left:6px;">PRECIO MAYORISTA</span>':'');
+  const final = pct > 0 ? Math.round(base*(1-pct/100)) : base;
+  const mayoristaTag = isWholesale ? '<span style="font-size:11px;color:#6db8e8;font-weight:700;margin-left:6px;">PRECIO MAYORISTA</span>' : '';
+  if(pct > 0){
+    return `<span style="text-decoration:line-through;opacity:.4;font-size:14px;">${money(base)}</span> ${money(final)}/kg${discBadge(pct)}${mayoristaTag}`;
+  }
+  if(isWholesale) return money(base)+'/kg'+mayoristaTag;
+  if(promo !== null){
+    const badgePct = Math.round((1-promo/p.pricePerKg)*100);
+    return `<span style="text-decoration:line-through;opacity:.45;font-size:14px;">${money(p.pricePerKg)}</span> <span style="color:#c62222;">${money(promo)}</span>/kg${promoBadge(badgePct)}`;
+  }
+  return money(p.pricePerKg)+'/kg';
 }
 
 /* ---------- CART ---------- */
@@ -5939,6 +5971,10 @@ function openProductModal(id){
           <div class="form-group" style="flex:1;"><label>% desc. mayorista</label><input id="pm-wholesale-pct-kg" type="number" min="0" max="99" value="${p&&p.wholesalePricePerKg&&p.pricePerKg?Math.round((1-p.wholesalePricePerKg/p.pricePerKg)*100):''}" placeholder="Ej: 30" oninput="applyWholesalePct('-kg')"></div>
           <div class="form-group" style="flex:1;"><label>Precio mayorista por kilo</label><input id="pm-wholesale-price-per-kg" type="number" value="${p&&p.wholesalePricePerKg?p.wholesalePricePerKg:''}" placeholder="Dejá vacío si no aplica"></div>
         </div>
+        <div style="display:flex;gap:10px;">
+          <div class="form-group" style="flex:1;"><label>🏷️ Precio en oferta (por kilo)</label><input id="pm-promo-price-per-kg" type="number" value="${p&&p.sellByWeight&&p.promoPrice?p.promoPrice:''}" placeholder="Vacío = sin oferta"></div>
+          <div class="form-group" style="flex:1;"><label>Válido hasta</label><input id="pm-promo-until-per-kg" type="date" value="${p&&p.sellByWeight&&p.promoUntil?p.promoUntil:''}"></div>
+        </div>
         <div class="form-group"><label>Cantidad mínima a vender (gramos)</label><input id="pm-min-grams" type="number" value="${p&&p.minGrams?p.minGrams:50}" placeholder="50"></div>
       </div>
 
@@ -6071,9 +6107,13 @@ function saveProductModal(id){
   const hidden = document.getElementById("pm-hidden-toggle").classList.contains("on");
   const displayQty = Number(document.getElementById("pm-display-qty").value)||null;
   const displayDiscount = Number(document.getElementById("pm-display-discount").value)||null;
-  const promoPriceRaw = document.getElementById("pm-promo-price").value.trim();
+  const promoPriceRaw = sellByWeight
+    ? document.getElementById("pm-promo-price-per-kg").value.trim()
+    : document.getElementById("pm-promo-price").value.trim();
   const promoPrice = promoPriceRaw ? Number(promoPriceRaw) : null;
-  const promoUntil = document.getElementById("pm-promo-until").value || null;
+  const promoUntil = (sellByWeight
+    ? document.getElementById("pm-promo-until-per-kg").value
+    : document.getElementById("pm-promo-until").value) || null;
   const pricePerKg = sellByWeight ? (Number(document.getElementById("pm-price-per-kg").value)||0) : null;
   const wholesalePerKgRaw = sellByWeight ? document.getElementById("pm-wholesale-price-per-kg").value.trim() : "";
   const wholesalePricePerKg = wholesalePerKgRaw ? Number(wholesalePerKgRaw) : null;
@@ -7074,7 +7114,8 @@ function applyCategoryPromo(section, cat, sub){
   if(!until){ toast("Elegí hasta cuándo dura la oferta", "err"); return; }
   const products = productsInCategoryGroup(section, cat, sub);
   products.forEach(p=>{
-    p.promoPrice = Math.round(p.price * (1 - pct/100));
+    const base = p.sellByWeight ? p.pricePerKg : p.price;
+    p.promoPrice = Math.round(base * (1 - pct/100));
     p.promoUntil = until;
     apiSaveProduct(p);
   });
@@ -7113,6 +7154,7 @@ function openCategoryWholesaleModal(section, cat, sub){
 function renderCategoryWholesaleModal(section, cat, sub){
   const group = productsInCategoryGroup(section, cat, sub);
   const withWholesale = group.filter(p => p.sellByWeight ? !!p.wholesalePricePerKg : !!p.wholesalePrice);
+  const withoutWholesale = group.filter(p => p.sellByWeight ? !p.wholesalePricePerKg : !p.wholesalePrice);
   const label = sub ? `${cat} → ${sub}` : cat;
   return `
     <div class="modal-sheet">
@@ -7120,10 +7162,16 @@ function renderCategoryWholesaleModal(section, cat, sub){
       <h3 class="modal-title">Ajustar % mayorista</h3>
       <p style="padding:0 16px 14px; font-size:13px; color:rgba(255,255,255,0.6);">${label} · ${withWholesale.length} de ${group.length} producto${group.length===1?'':'s'} ya tiene precio mayorista cargado — se ajustan solo esos, sumando este número a su % actual (cada uno puede partir de un % distinto).</p>
       <div class="form-group"><label>Puntos porcentuales a sumar (negativo para bajar el descuento)</label><input id="catws-delta" type="number" step="1" placeholder="Ej: 5, o -5"></div>
-      <div style="display:flex; gap:10px; margin-bottom:10px;">
+      <div style="display:flex; gap:10px; margin-bottom:${withoutWholesale.length>0?'18px':'10px'};">
         <button class="btn-secondary" style="flex:1;" onclick="closeCategoryWholesaleModal()">Cancelar</button>
         <button class="btn-primary" style="flex:1;" onclick="applyCategoryWholesaleAdjust('${section}','${cat}',${sub?`'${sub}'`:'null'})">Aplicar a ${withWholesale.length}</button>
       </div>
+      ${withoutWholesale.length>0 ? `
+      <div style="border-top:1px solid var(--glass-bd); padding-top:14px;">
+        <p style="font-size:13px; color:rgba(255,255,255,0.6); margin-bottom:10px;">${withoutWholesale.length} producto${withoutWholesale.length===1?'':'s'} de este grupo todavía no tiene precio mayorista — creáselo desde cero con un % fijo sobre su precio normal.</p>
+        <div class="form-group"><label>% de descuento a crear para los ${withoutWholesale.length} que no tienen</label><input id="catws-create-pct" type="number" min="1" max="99" step="1" placeholder="Ej: 15"></div>
+        <button class="btn-primary" style="width:100%;" onclick="applyCategoryWholesaleCreate('${section}','${cat}',${sub?`'${sub}'`:'null'})">Crear en ${withoutWholesale.length}</button>
+      </div>` : ''}
     </div>
   `;
 }
@@ -7157,6 +7205,33 @@ function applyCategoryWholesaleAdjust(section, cat, sub){
   closeCategoryWholesaleModal();
   render();
   toast(`${delta>0?'+':''}${delta} punto${Math.abs(delta)===1?'':'s'} porcentual${Math.abs(delta)===1?'':'es'} de descuento mayorista en ${count} producto${count===1?'':'s'}`, "ok");
+}
+// A diferencia de applyCategoryWholesaleAdjust (que solo ajusta a los que ya
+// tienen precio mayorista), esto le crea uno nuevo — con el mismo % fijo —
+// a los que todavía no tienen, para que "aplicar descuento a la categoría"
+// no siga salteando en silencio productos que nunca tuvieron mayorista.
+function applyCategoryWholesaleCreate(section, cat, sub){
+  const raw = document.getElementById("catws-create-pct").value;
+  const pct = Number(raw);
+  if(raw.trim()==="" || isNaN(pct) || pct<=0 || pct>=100){ toast("Ingresá un % entre 1 y 99", "err"); return; }
+  const group = productsInCategoryGroup(section, cat, sub);
+  let count = 0;
+  group.forEach(p=>{
+    if(p.sellByWeight){
+      if(p.wholesalePricePerKg || !(p.pricePerKg>0)) return;
+      p.wholesalePricePerKg = Math.round(p.pricePerKg * (1 - pct/100));
+    }else{
+      if(p.wholesalePrice || !(p.price>0)) return;
+      p.wholesalePrice = Math.round(p.price * (1 - pct/100));
+    }
+    apiSaveProduct(p);
+    count++;
+  });
+  if(count===0){ toast("Todos los productos de este grupo ya tienen precio mayorista", "err"); return; }
+  saveState();
+  closeCategoryWholesaleModal();
+  render();
+  toast(`Precio mayorista creado (-${pct}%) en ${count} producto${count===1?'':'s'}`, "ok");
 }
 
 /* ---------- ADMIN: OFERTA PARA TODO EL CATÁLOGO ---------- */
@@ -7194,7 +7269,8 @@ function applyGlobalPromo(){
   if(!until){ toast("Elegí hasta cuándo dura la oferta", "err"); return; }
   const products = state.products;
   products.forEach(p=>{
-    p.promoPrice = Math.round(p.price * (1 - pct/100));
+    const base = p.sellByWeight ? p.pricePerKg : p.price;
+    p.promoPrice = Math.round(base * (1 - pct/100));
     p.promoUntil = until;
     apiSaveProduct(p);
   });
