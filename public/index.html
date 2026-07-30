@@ -4777,6 +4777,23 @@ async function cleanupDuplicateBbvaLoans(){
   try{ await apiSaveSetting('bank_loans', state.bankLoans); toast(toRemove.length+' préstamos duplicados eliminados', 'ok'); }
   catch(e){ toast('Error al guardar: '+e.message, 'err'); }
 }
+// Vuelve a agregar cualquier préstamo del preset de BBVA que ya no esté en
+// la lista (por ejemplo, los que borró cleanupDuplicateBbvaLoans) — sin
+// tocar los que ya están, para no perder cuotas marcadas como pagadas.
+async function restoreDeletedBbvaLoans(){
+  const currentConceptos = new Set(state.bankLoans.items.map(l=>l.concepto));
+  const missing = BBVA_IMPORT_PRESET.filter(preset => !currentConceptos.has(preset.concepto));
+  if(missing.length===0){ toast('No falta ningún préstamo del preset de BBVA', 'err'); return; }
+  if(!confirm('Esto vuelve a agregar '+missing.length+' préstamo'+(missing.length!==1?'s':'')+' de BBVA que falta'+(missing.length!==1?'n':'')+' (quedan como pendientes). ¿Continuar?')) return;
+  missing.forEach(preset=>{
+    const cuotas = preset.rows.map((r,i)=>({id:paymentsId('bl'), nro:i+1, monto:r[1], vencimiento:r[0], estado:'pendiente'}));
+    const montoTotal = cuotas.reduce((s,c)=>s+c.monto,0);
+    state.bankLoans.items.push({id:paymentsId('bank'), banco:'BBVA', concepto:preset.concepto, montoTotal, createdAt:new Date().toISOString().slice(0,10), cuotas});
+  });
+  saveState(); render();
+  try{ await apiSaveSetting('bank_loans', state.bankLoans); toast(missing.length+' préstamo'+(missing.length!==1?'s':'')+' restaurado'+(missing.length!==1?'s':''), 'ok'); }
+  catch(e){ toast('Error al guardar: '+e.message, 'err'); }
+}
 
 function renderAdminPagos(){
   if(!supplierDebtsLoaded){ apiSyncSupplierDebts(); }
@@ -5103,6 +5120,7 @@ function renderAdminBancos(){
     ${loans.length>0 ? `<button class="btn-secondary" style="width:100%; margin-bottom:16px;" onclick="openMarkPaidBeforeModal()">Marcar cuotas vencidas como pagadas</button>` : ''}
     ${loans.length>0 ? `<button class="btn-secondary" style="width:100%; margin-bottom:16px; color:var(--danger);" onclick="resetAllLoansToPendiente()">Revertir todo a pendiente</button>` : ''}
     ${loans.some(l=>BBVA_DUPES_TO_REMOVE.includes(l.concepto)) ? `<button class="btn-secondary" style="width:100%; margin-bottom:16px; color:var(--danger);" onclick="cleanupDuplicateBbvaLoans()">Borrar los 19 préstamos BBVA duplicados</button>` : ''}
+    ${loans.length>0 && BBVA_IMPORT_PRESET.some(preset=>!loans.some(l=>l.concepto===preset.concepto)) ? `<button class="btn-secondary" style="width:100%; margin-bottom:16px;" onclick="restoreDeletedBbvaLoans()">Restaurar préstamos BBVA que faltan</button>` : ''}
     ${loans.length===0 ? `<div style="padding:30px; text-align:center; color:rgba(255,255,255,0.4);">Sin préstamos cargados todavía.</div>` : loans.map(l=>{
       const saldo = loanSaldoPendiente(l);
       const cuotasPend = (l.cuotas||[]).filter(c=>c.estado!=='pagado').length;
