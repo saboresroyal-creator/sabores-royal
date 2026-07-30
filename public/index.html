@@ -4728,6 +4728,22 @@ async function confirmMarkPaidBefore(){
   try{ await apiSaveSetting('bank_loans', state.bankLoans); toast(count+' cuota'+(count!==1?'s':'')+' marcada'+(count!==1?'s':'')+' como pagada'+(count!==1?'s':''), 'ok'); }
   catch(e){ toast('Error al guardar: '+e.message, 'err'); }
 }
+// Vuelve todas las cuotas de todos los préstamos a "pendiente" — para
+// arrancar de cero cuando el corte por fecha (confirmMarkPaidBefore) marcó
+// como pagadas cuotas que en realidad no se pagaron, porque el pago real
+// no fue parejo entre préstamos (algunos atrasados, algunos nunca tomados).
+async function resetAllLoansToPendiente(){
+  if(!confirm('Esto vuelve TODAS las cuotas de TODOS los préstamos a "Pendiente", como recién importadas. ¿Continuar?')) return;
+  let count = 0;
+  (state.bankLoans.items||[]).forEach(l=>{
+    (l.cuotas||[]).forEach(c=>{
+      if(c.estado==='pagado'){ c.estado='pendiente'; count++; }
+    });
+  });
+  saveState(); render();
+  try{ await apiSaveSetting('bank_loans', state.bankLoans); toast(count+' cuota'+(count!==1?'s':'')+' vuelta'+(count!==1?'s':'')+' a pendiente', 'ok'); }
+  catch(e){ toast('Error al guardar: '+e.message, 'err'); }
+}
 
 function renderAdminPagos(){
   if(!supplierDebtsLoaded){ apiSyncSupplierDebts(); }
@@ -5052,6 +5068,7 @@ function renderAdminBancos(){
     <button class="btn-primary" style="width:100%; margin-bottom:16px;" onclick="openBankLoanModal()">+ Nuevo préstamo</button>
     ${loans.length===0 ? `<button class="btn-secondary" style="width:100%; margin-bottom:16px;" onclick="importBbvaPreset()">Importar los 44 préstamos BBVA que pasaste</button>` : ''}
     ${loans.length>0 ? `<button class="btn-secondary" style="width:100%; margin-bottom:16px;" onclick="openMarkPaidBeforeModal()">Marcar cuotas vencidas como pagadas</button>` : ''}
+    ${loans.length>0 ? `<button class="btn-secondary" style="width:100%; margin-bottom:16px; color:var(--danger);" onclick="resetAllLoansToPendiente()">Revertir todo a pendiente</button>` : ''}
     ${loans.length===0 ? `<div style="padding:30px; text-align:center; color:rgba(255,255,255,0.4);">Sin préstamos cargados todavía.</div>` : loans.map(l=>{
       const saldo = loanSaldoPendiente(l);
       const cuotasPend = (l.cuotas||[]).filter(c=>c.estado!=='pagado').length;
