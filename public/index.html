@@ -13,7 +13,7 @@
 <meta name="apple-mobile-web-app-title" content="Sabores Royal">
 <link rel="apple-touch-icon" href="apple-touch-icon.png">
 <link rel="preconnect" href="https://fonts.googleapis.com">
-<link href="https://fonts.googleapis.com/css2?family=Playfair+Display:wght@500;600;700;800&family=DM+Sans:wght@400;500;600;700&display=swap" rel="stylesheet">
+<link href="https://fonts.googleapis.com/css2?family=Playfair+Display:wght@500;600;700;800&family=DM+Sans:wght@400;500;600;700&family=Baloo+2:wght@600;700;800&display=swap" rel="stylesheet">
 <style>
 :root{
   --navy:#0f1c45; --navy2:#1a2a5e; --navy3:#24356f;
@@ -208,6 +208,54 @@ img{display:block; max-width:100%;}
 
 .empty-state{padding:60px 30px; text-align:center; color:rgba(255,255,255,0.4);}
 .empty-state svg{width:50px; height:50px; opacity:.3; margin:0 auto 12px;}
+
+/* ---------- CANDY THEME (solo pantallas de listado: Catálogo, Apto Celíaco, Ofertas) ---------- */
+.candy-catalog{
+  --c-sky:#5ac8ff; --c-violet:#7c4dff; --c-violet-deep:#4a1f8f; --c-plum:#2c0f52;
+  --c-pink:#ff3d81; --c-pink-deep:#c91361; --c-gold:#ffcb3d; --c-gold-deep:#e69a00;
+  background:linear-gradient(180deg, var(--c-plum) 0%, #200a3f 100%);
+}
+.candy-catalog .topbar{
+  background:linear-gradient(160deg, var(--c-sky) 0%, var(--c-violet) 65%, var(--c-violet-deep) 100%);
+  border-bottom:none; box-shadow:0 8px 20px -10px rgba(20,0,50,0.6);
+}
+.candy-catalog .topbar h2{
+  font-family:'Baloo 2',sans-serif; font-weight:800; color:#fff; letter-spacing:.01em;
+  -webkit-text-stroke:1px var(--c-pink-deep); paint-order:stroke fill;
+}
+.candy-catalog .topbar .back{background:rgba(255,255,255,0.25); border-color:rgba(255,255,255,0.4);}
+.candy-catalog .topbar .back svg{color:#fff;}
+.candy-catalog .search-bar{background:#fff; border:none; border-radius:999px; box-shadow:0 4px 14px -6px rgba(20,0,50,0.4);}
+.candy-catalog .search-bar input{color:var(--c-plum);}
+.candy-catalog .search-bar input::placeholder{color:#9c8aa8;}
+.candy-catalog .search-bar svg{color:var(--c-pink-deep); opacity:.7;}
+.candy-catalog .search-suggestions{background:#fff; border:none; box-shadow:0 10px 30px -10px rgba(20,0,50,0.45);}
+.candy-catalog .search-sug-item{color:var(--c-plum); border-bottom-color:rgba(44,15,82,0.08);}
+.candy-catalog .search-sug-item:active{background:rgba(255,61,129,0.08);}
+.candy-catalog .search-sug-cat{color:rgba(44,15,82,0.5);}
+.candy-catalog .chip{
+  background:rgba(255,255,255,0.16); border:2px solid transparent; color:#fff;
+  font-family:'Baloo 2',sans-serif; font-weight:700; border-radius:999px;
+}
+.candy-catalog .chip.active{background:var(--c-gold); color:#5c3b00; border-color:var(--c-gold-deep);}
+.candy-catalog .product-card{
+  background:#fff; border:none; border-radius:20px;
+  box-shadow:0 6px 0 rgba(0,0,0,0.12), 0 10px 18px -10px rgba(20,0,50,0.5);
+}
+.candy-catalog .pc-img{background:linear-gradient(160deg,#ffe3ef,#ffd0e6);}
+.candy-catalog .pc-img svg{opacity:.3; color:var(--c-pink-deep);}
+.candy-catalog .pc-body h4{color:var(--c-plum);}
+.candy-catalog .pc-price{font-family:'Baloo 2',sans-serif; font-weight:800; color:var(--c-pink-deep);}
+.candy-catalog .pc-add{
+  background:linear-gradient(150deg,var(--c-pink),var(--c-pink-deep)); color:#fff;
+  font-family:'Baloo 2',sans-serif; font-weight:700; border-radius:14px;
+  box-shadow:0 3px 0 var(--c-pink-deep);
+}
+.candy-catalog .pc-add:disabled{background:rgba(0,0,0,0.12); color:rgba(0,0,0,0.35); box-shadow:none;}
+.candy-catalog .pc-promo-badge{background:linear-gradient(135deg,#fff,var(--c-gold)); color:var(--c-pink-deep);}
+.candy-catalog .pc-stock-low{background:var(--c-gold); color:#5c3b00;}
+.candy-catalog .pc-stock-out{background:var(--c-pink-deep); color:#fff;}
+.candy-catalog .empty-state{color:rgba(255,255,255,0.65);}
 
 /* ---------- PRODUCT DETAIL ---------- */
 .pd-img{aspect-ratio:1; background:rgba(255,255,255,0.05); display:flex; align-items:center; justify-content:center; margin:0 16px; border-radius:18px; overflow:hidden; position:relative;}
@@ -576,7 +624,7 @@ function ic(name){
 function renderCeliaco(){
   const products = state.products.filter(p=>p.sinTacc && !p.hidden);
   return `
-  <div class="screen">
+  <div class="screen candy-catalog">
     <div class="topbar">
       <button class="back" onclick="nav('home')">${ic('chevron')}</button>
       <h2>Apto Celíaco</h2>
@@ -1621,7 +1669,7 @@ function homePromoBannerHtml(){
 function renderOfertasScreen(){
   const products = productsOnPromo();
   return `
-  <div class="screen">
+  <div class="screen candy-catalog">
     <div class="topbar">
       <button class="back" onclick="nav('home')">${ic('chevron')}</button>
       <h2>Ofertas</h2>
@@ -2042,7 +2090,7 @@ function renderCatalog(section){
   section = section || "market";
   const meta = SECTION_META[section];
   return `
-  <div class="screen">
+  <div class="screen candy-catalog">
     <div class="topbar">
       <button class="back" onclick="nav('home')">${ic('chevron')}</button>
       <h2>${meta.label}</h2>
