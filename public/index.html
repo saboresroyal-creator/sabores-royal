@@ -126,6 +126,27 @@ img{display:block; max-width:100%;}
 .offers-banner .ob-icon svg{width:19px; height:19px;}
 .offers-banner b{color:var(--gold2); font-weight:700;}
 
+/* ---------- INICIO: fondo a rayas (solo cuando no hay foto de fondo custom) ---------- */
+.home-stripes{
+  background:repeating-linear-gradient(135deg, #4fc8fb 0px, #4fc8fb 46px, #3fb6ee 46px, #3fb6ee 92px);
+}
+.home-stripes .home-header h1{text-shadow:0 2px 0 #0f4c78, 0 4px 10px rgba(5,30,55,0.4);}
+.home-stripes .home-header p{text-shadow:0 1px 4px rgba(5,30,55,0.35);}
+.home-stripes .offers-banner{
+  background:linear-gradient(180deg,#fffdf6,#fbf1cf);
+  border:1px solid #f0dca3; box-shadow:0 8px 18px -8px rgba(10,40,70,0.35);
+  color:#6b5730;
+}
+.home-stripes .offers-banner b{color:#a8760a;}
+.home-stripes .offers-banner .ob-icon{filter:none;}
+.home-stripes .section-card{box-shadow:0 10px 20px -10px rgba(5,30,55,0.5);}
+.home-stripes .section-card.natural  {background:linear-gradient(135deg,rgba(8,38,30,0.96),rgba(8,38,30,0.82));}
+.home-stripes .section-card.golosinas{background:linear-gradient(135deg,rgba(50,15,75,0.96),rgba(50,15,75,0.82));}
+.home-stripes .section-card.market   {background:linear-gradient(135deg,rgba(8,20,58,0.96),rgba(8,20,58,0.82));}
+.home-stripes .section-card.celiaco  {background:linear-gradient(135deg,rgba(90,10,10,0.96),rgba(90,10,10,0.82));}
+.home-stripes .section-card.sinazucar{background:linear-gradient(135deg,rgba(90,65,0,0.96),rgba(90,65,0,0.82));}
+.home-stripes .section-card.fiambreria{background:linear-gradient(135deg,rgba(15,28,69,0.96),rgba(197,160,40,0.8));}
+
 .home-promo-banner{
   margin:0 16px 16px; padding:18px; border-radius:18px; cursor:pointer;
   background:linear-gradient(120deg,#ff4d3d,#ff1f1f 55%,#c60000);
@@ -2024,7 +2045,7 @@ function renderHome(){
   const activeBg = (state.homeBackgrounds||[]).find(b=>b.id===state.homeBackgroundActiveId);
   const hasCustomBg = !!(activeBg && activeBg.image);
   return `
-  <div class="screen" style="position:relative;">
+  <div class="screen ${hasCustomBg?'':'home-stripes'}" style="position:relative;">
     ${hasCustomBg ? `
     <div style="position:absolute; top:0; left:0; right:0; height:640px; z-index:0; overflow:hidden; pointer-events:none;">
       <img src="${activeBg.image}" style="width:100%; height:100%; object-fit:cover; object-position:center top; display:block;">
