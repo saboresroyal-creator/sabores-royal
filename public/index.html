@@ -764,6 +764,7 @@ let state = {
   subAdmins: [],
   adminTab: "pedidos",
   adminProductLowStockOnly: false,
+  adminProductHiddenOnly: false,
   adminProductCatFilter: null,
   adminProductSubFilter: null,
   config:{storeName:"Sabores Royal", address:"Maipú 734, Rosario", waNumber:WA_NUMBER},
@@ -3015,6 +3016,7 @@ function renderAdmin(){
   const chatUnreadTotal = Object.values(state.adminChatUnread||{}).reduce((s,n)=>s+n,0);
   const lowStockCount = state.products.filter(isLowStock).length;
   const noBarcodeCount = state.products.filter(p=>!p.barcode).length;
+  const hiddenCount = state.products.filter(p=>p.hidden).length;
   const pendingOrdersCount = state.orders.filter(o=>o.status==="Pendiente").length;
   const checksDueSoon = pagosDueSoonCount(7);
   const bankLoansDueSoon = bankLoansDueSoonCount(7);
@@ -3086,6 +3088,11 @@ function renderAdmin(){
             <button class="chip ${state.adminProductLowStockOnly?'active':''}" style="${state.adminProductLowStockOnly?'':'color:var(--warn); border-color:var(--warn);'}"
               onclick="state.adminProductLowStockOnly=!state.adminProductLowStockOnly; render()">
               ⚠ Stock bajo (${lowStockCount})
+            </button>` : ''}
+            ${hiddenCount>0 ? `
+            <button class="chip ${state.adminProductHiddenOnly?'active':''}" style="${state.adminProductHiddenOnly?'':'color:var(--danger); border-color:var(--danger);'}"
+              onclick="state.adminProductHiddenOnly=!state.adminProductHiddenOnly; render()">
+              🙈 Ocultos (${hiddenCount})
             </button>` : ''}
           </div>
         </div>
@@ -4744,6 +4751,32 @@ async function resetAllLoansToPendiente(){
   try{ await apiSaveSetting('bank_loans', state.bankLoans); toast(count+' cuota'+(count!==1?'s':'')+' vuelta'+(count!==1?'s':'')+' a pendiente', 'ok'); }
   catch(e){ toast('Error al guardar: '+e.message, 'err'); }
 }
+// Limpieza puntual de los 44 préstamos BBVA importados: de los 12 grupos que
+// eran la misma operación repetida (3 copias exactas + 9 resimulaciones con
+// otra fecha de 1° cuota), se queda con el número de archivo más alto de
+// cada grupo — suele ser la simulación más reciente — y borra el resto,
+// dejando las 25 operaciones reales.
+const BBVA_DUPES_TO_REMOVE = [
+  'Cuadro de marcha (9)', 'Cuadro de marcha (12)', 'Cuadro de marcha (1)',
+  'Cuadro de marcha (42)', 'Cuadro de marcha (41)',
+  'Cuadro de marcha (39)', 'Cuadro de marcha (38)', 'Cuadro de marcha (37)',
+  'Cuadro de marcha (35)',
+  'Cuadro de marcha (29)', 'Cuadro de marcha (28)',
+  'Cuadro de marcha (31)', 'Cuadro de marcha (30)',
+  'Cuadro de marcha (25)',
+  'Cuadro de marcha (22)',
+  'Cuadro de marcha (20)', 'Cuadro de marcha (19)', 'Cuadro de marcha (18)',
+  'Cuadro de marcha (16)',
+];
+async function cleanupDuplicateBbvaLoans(){
+  const toRemove = state.bankLoans.items.filter(l => BBVA_DUPES_TO_REMOVE.includes(l.concepto));
+  if(toRemove.length===0){ toast('No quedan préstamos duplicados de esa lista para borrar', 'err'); return; }
+  if(!confirm('Esto va a borrar '+toRemove.length+' préstamos duplicados/resimulados, dejando 1 por cada operación real. ¿Continuar?')) return;
+  state.bankLoans.items = state.bankLoans.items.filter(l => !BBVA_DUPES_TO_REMOVE.includes(l.concepto));
+  saveState(); render();
+  try{ await apiSaveSetting('bank_loans', state.bankLoans); toast(toRemove.length+' préstamos duplicados eliminados', 'ok'); }
+  catch(e){ toast('Error al guardar: '+e.message, 'err'); }
+}
 
 function renderAdminPagos(){
   if(!supplierDebtsLoaded){ apiSyncSupplierDebts(); }
@@ -5069,6 +5102,7 @@ function renderAdminBancos(){
     ${loans.length===0 ? `<button class="btn-secondary" style="width:100%; margin-bottom:16px;" onclick="importBbvaPreset()">Importar los 44 préstamos BBVA que pasaste</button>` : ''}
     ${loans.length>0 ? `<button class="btn-secondary" style="width:100%; margin-bottom:16px;" onclick="openMarkPaidBeforeModal()">Marcar cuotas vencidas como pagadas</button>` : ''}
     ${loans.length>0 ? `<button class="btn-secondary" style="width:100%; margin-bottom:16px; color:var(--danger);" onclick="resetAllLoansToPendiente()">Revertir todo a pendiente</button>` : ''}
+    ${loans.some(l=>BBVA_DUPES_TO_REMOVE.includes(l.concepto)) ? `<button class="btn-secondary" style="width:100%; margin-bottom:16px; color:var(--danger);" onclick="cleanupDuplicateBbvaLoans()">Borrar los 19 préstamos BBVA duplicados</button>` : ''}
     ${loans.length===0 ? `<div style="padding:30px; text-align:center; color:rgba(255,255,255,0.4);">Sin préstamos cargados todavía.</div>` : loans.map(l=>{
       const saldo = loanSaldoPendiente(l);
       const cuotasPend = (l.cuotas||[]).filter(c=>c.estado!=='pagado').length;
@@ -5836,10 +5870,11 @@ function renderAdminProductos(){
     ? state.products.filter(p=>p.name.toLowerCase().includes(q))
     : state.products;
   if(state.adminProductLowStockOnly) productos = productos.filter(isLowStock);
+  if(state.adminProductHiddenOnly) productos = productos.filter(p=>p.hidden);
   if(state.adminProductCatFilter) productos = productos.filter(p=>p.cat===state.adminProductCatFilter);
   if(state.adminProductSubFilter) productos = productos.filter(p=>p.sub===state.adminProductSubFilter);
   if(productos.length===0){
-    return `<div class="empty-state">${ic('box')}<p>${state.adminProductLowStockOnly?'Ningún producto con stock bajo.':(q?`Sin resultados para "${q}"`:'No hay productos que coincidan con el filtro.')}</p></div>`;
+    return `<div class="empty-state">${ic('box')}<p>${state.adminProductLowStockOnly?'Ningún producto con stock bajo.':state.adminProductHiddenOnly?'Ningún producto oculto.':(q?`Sin resultados para "${q}"`:'No hay productos que coincidan con el filtro.')}</p></div>`;
   }
   return productos.map(p=>`
     <div class="prod-row-v2 ${p.hidden?'is-hidden':''}">
