@@ -1,4 +1,4 @@
-const CACHE = 'sabores-royal-v10';
+const CACHE = 'sabores-royal-v12';
 
 self.addEventListener('install', e => {
   self.skipWaiting();
@@ -15,6 +15,9 @@ self.addEventListener('activate', e => {
 self.addEventListener('fetch', e => {
   if (e.request.method !== 'GET') return;
   if (e.request.url.includes('/api/')) return;
+  // Datos en vivo de Supabase: nunca servir desde caché (ni siquiera si falla la red),
+  // para no mostrar productos/contenido desactualizado en conexiones móviles inestables.
+  if (e.request.url.includes('supabase.co')) return;
 
   // HTML siempre desde red, nunca caché
   if (e.request.mode === 'navigate' || e.request.url.endsWith('.html')) {

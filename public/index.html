@@ -798,13 +798,6 @@ let state = {
   cmpTab: 'comparar',
   cmpCart: {},
   rentLedger: {monthlyAmount:1500000, movements:[]},
-  supplierDebts: {movements:[]},
-  supplierChecks: {movements:[]},
-  taxDues: {items:[]},
-  paymentAgreements: {items:[]},
-  adminPagosSub: 'deudas',
-  adminPagosProveedor: null,
-  adminPagosAcuerdoId: null,
   bankLoans: {items:[]},
   adminBancoId: null,
   stockCount: {items: []},
@@ -817,10 +810,6 @@ let cmpLoaded = false;
 let _cmpAiItems = null;
 let _cmpAiFilename = '';
 let rentLoaded = false;
-let supplierDebtsLoaded = false;
-let supplierChecksLoaded = false;
-let taxDuesLoaded = false;
-let paymentAgreementsLoaded = false;
 let bankLoansLoaded = false;
 let stockCountLoaded = false;
 let barcodeCatalogLoaded = false;
@@ -3018,7 +3007,6 @@ function renderAdmin(){
   const noBarcodeCount = state.products.filter(p=>!p.barcode).length;
   const hiddenCount = state.products.filter(p=>p.hidden).length;
   const pendingOrdersCount = state.orders.filter(o=>o.status==="Pendiente").length;
-  const checksDueSoon = pagosDueSoonCount(7);
   const bankLoansDueSoon = bankLoansDueSoonCount(7);
   const newClientsCount = Object.values(state.clients).filter(c=>!c.seen).length;
   const ALL_TABS = [
@@ -3037,12 +3025,11 @@ function renderAdmin(){
     {key:"comparador",    label:"Comparador"},
     {key:"alquiler",      label:"Alquiler"},
     {key:"cajadiaria",    label:"Caja Diaria"},
-    {key:"pagos",         label:"Pagos", badge:checksDueSoon},
     {key:"bancos",        label:"Bancos", badge:bankLoansDueSoon},
   ];
   const tabs = state.adminIsSuperAdmin
     ? ALL_TABS
-    : ALL_TABS.filter(t => t.key !== 'config' && t.key !== 'comparador' && t.key !== 'alquiler' && t.key !== 'cajadiaria' && t.key !== 'pagos' && t.key !== 'bancos' && (state.adminLoggedPerms||[]).includes(t.key));
+    : ALL_TABS.filter(t => t.key !== 'config' && t.key !== 'comparador' && t.key !== 'alquiler' && t.key !== 'cajadiaria' && t.key !== 'bancos' && (state.adminLoggedPerms||[]).includes(t.key));
   const tab = tabs.find(t=>t.key===state.adminTab) ? state.adminTab : (tabs[0]?.key||"pedidos");
   if(tab==="productos" && !barcodeCatalogLoaded){ barcodeCatalogLoaded = true; apiSyncBarcodeCatalog(); }
   return `
@@ -3111,7 +3098,6 @@ function renderAdmin(){
       ${tab==="comparador" ? renderAdminComparador() : ""}
       ${tab==="alquiler" ? renderAdminAlquiler() : ""}
       ${tab==="cajadiaria" ? renderAdminCajaDiaria() : ""}
-      ${tab==="pagos" ? renderAdminPagos() : ""}
       ${tab==="bancos" ? renderAdminBancos() : ""}
     </div>
     ${tab==="productos" ? `<button class="fab" onclick="openProductModal(null)">${ic('plus')}</button>` : ""}
@@ -4020,10 +4006,6 @@ async function deleteRentMovement(id){
   try{ await apiSaveRent(); } catch(e){ toast("Error al guardar: "+e.message, "err"); }
 }
 
-/* ---------- ADMIN: PAGOS A PROVEEDORES (deudas + cheques) ----------
-   Mismo patrón que Alquiler: todo el ledger vive en un registro de
-   app_settings por clave (supplier_debts / supplier_checks), leído y
-   escrito entero. Ver supabase-migration-payments-dashboard.sql. */
 function paymentsId(prefix){ return prefix+Date.now().toString(36)+Math.random().toString(36).slice(2,8); }
 // Formatea "YYYY-MM-DD" a "DD/MM/YYYY" con split de string, no con Date():
 // un Date() de una fecha sin hora se interpreta en UTC y en Argentina
@@ -4033,11 +4015,6 @@ function fmtDateAR(iso){
   const [y,m,d] = iso.split('-');
   return `${d}/${m}/${y}`;
 }
-// Las notas de facturas importadas traen fechas ISO embebidas (ej. "Vence
-// 2026-06-22"); esto las reescribe a DD/MM/YYYY sin tocar lo ya guardado.
-function fmtDatesInText(text){
-  return (text||'').replace(/\d{4}-\d{2}-\d{2}/g, iso => fmtDateAR(iso));
-}
 const MONTH_ABBR_ES = ['ENE','FEB','MAR','ABR','MAY','JUN','JUL','AGO','SEP','OCT','NOV','DIC'];
 function dateBadgeParts(iso){
   if(!iso) return {day:'—', month:''};
@@ -4045,27 +4022,6 @@ function dateBadgeParts(iso){
   return {day:d, month:MONTH_ABBR_ES[Number(m)-1]||''};
 }
 
-function supplierBalances(){
-  const balances = {};
-  (state.supplierDebts.movements||[]).forEach(m=>{
-    balances[m.proveedor] = (balances[m.proveedor]||0) + (m.type==='pago' ? -m.amount : m.amount);
-  });
-  return balances;
-}
-function supplierBalance(proveedor){
-  return (state.supplierDebts.movements||[]).filter(m=>m.proveedor===proveedor)
-    .reduce((sum,m)=> sum + (m.type==='pago' ? -m.amount : m.amount), 0);
-}
-function supplierDebtTotal(){
-  return Object.values(supplierBalances()).reduce((s,n)=>s+n, 0);
-}
-function checksDueSoonCount(days){
-  const today = new Date().toISOString().slice(0,10);
-  const limit = new Date(Date.now()+days*86400000).toISOString().slice(0,10);
-  return (state.supplierChecks.movements||[]).filter(c=>
-    c.estado!=='cobrado' && c.fechaVencimiento && c.fechaVencimiento>=today && c.fechaVencimiento<=limit
-  ).length;
-}
 // Suma "months" meses a una fecha "YYYY-MM-DD", recortando al último día
 // del mes destino si hace falta (ej: 31 ene + 1 mes = 28/29 feb, no 3 mar).
 function addMonthsClamped(iso, months){
@@ -4077,18 +4033,9 @@ function addMonthsClamped(iso, months){
   const targetD = Math.min(d, daysInTarget);
   return `${targetY}-${String(targetM+1).padStart(2,'0')}-${String(targetD).padStart(2,'0')}`;
 }
-function pagosDueSoonCount(days){
-  const today = new Date().toISOString().slice(0,10);
-  const limit = new Date(Date.now()+days*86400000).toISOString().slice(0,10);
-  const inRange = date => date && date>=today && date<=limit;
-  const taxes = (state.taxDues.items||[]).filter(t=>inRange(t.vencimiento)).length;
-  const cuotas = (state.paymentAgreements.items||[]).reduce((s,a)=>
-    s + (a.cuotas||[]).filter(c=>c.estado!=='pagado' && inRange(c.vencimiento)).length, 0);
-  return checksDueSoonCount(days) + taxes + cuotas;
-}
-// A diferencia de pagosDueSoonCount, acá también contamos las cuotas ya
-// vencidas sin pagar (no solo las próximas), porque son las que más urge
-// tildar y no queremos que se "pierdan" del badge una vez pasada la fecha.
+// Acá también contamos las cuotas ya vencidas sin pagar (no solo las
+// próximas), porque son las que más urge tildar y no queremos que se
+// "pierdan" del badge una vez pasada la fecha.
 function bankLoansDueSoonCount(days){
   const limit = new Date(Date.now()+days*86400000).toISOString().slice(0,10);
   return (state.bankLoans.items||[]).reduce((s,l)=>
@@ -4107,93 +4054,6 @@ function loanProximaCuota(loan){
   return [...(loan.cuotas||[])].filter(c=>c.estado!=='pagado').sort((a,b)=>(a.vencimiento||'').localeCompare(b.vencimiento||''))[0];
 }
 
-async function apiSyncSupplierDebts(){
-  try{
-    const rows = await adminFetch('/app_settings?setting_key=eq.supplier_debts&select=setting_value', 'GET');
-    const row = rows && rows[0];
-    if(row){
-      const parsed = JSON.parse(row.setting_value);
-      state.supplierDebts = Object.assign({movements:[]}, parsed);
-    }
-    supplierDebtsLoaded = true;
-    saveState(); render();
-  }catch(e){
-    supplierDebtsLoaded = true;
-    toast('Error cargando deudas: '+e.message, 'err');
-    render();
-  }
-}
-async function apiSaveSupplierDebts(){
-  try{
-    const val = JSON.stringify(state.supplierDebts);
-    const existing = await adminFetch('/app_settings?setting_key=eq.supplier_debts&select=id', 'GET');
-    if(existing && existing.length>0){
-      await adminFetch('/app_settings?setting_key=eq.supplier_debts', 'PATCH', {setting_value: val});
-    }else{
-      await adminFetch('/app_settings', 'POST', {setting_key:'supplier_debts', setting_value: val});
-    }
-  }catch(e){ toast('Error guardando deudas: '+e.message, 'err'); }
-}
-async function apiSyncSupplierChecks(){
-  try{
-    const rows = await adminFetch('/app_settings?setting_key=eq.supplier_checks&select=setting_value', 'GET');
-    const row = rows && rows[0];
-    if(row){
-      const parsed = JSON.parse(row.setting_value);
-      state.supplierChecks = Object.assign({movements:[]}, parsed);
-    }
-    supplierChecksLoaded = true;
-    saveState(); render();
-  }catch(e){
-    supplierChecksLoaded = true;
-    toast('Error cargando cheques: '+e.message, 'err');
-    render();
-  }
-}
-async function apiSaveSupplierChecks(){
-  try{
-    const val = JSON.stringify(state.supplierChecks);
-    const existing = await adminFetch('/app_settings?setting_key=eq.supplier_checks&select=id', 'GET');
-    if(existing && existing.length>0){
-      await adminFetch('/app_settings?setting_key=eq.supplier_checks', 'PATCH', {setting_value: val});
-    }else{
-      await adminFetch('/app_settings', 'POST', {setting_key:'supplier_checks', setting_value: val});
-    }
-  }catch(e){ toast('Error guardando cheques: '+e.message, 'err'); }
-}
-
-async function apiSyncTaxDues(){
-  try{
-    const rows = await adminFetch('/app_settings?setting_key=eq.tax_dues&select=setting_value', 'GET');
-    const row = rows && rows[0];
-    if(row){
-      const parsed = JSON.parse(row.setting_value);
-      state.taxDues = Object.assign({items:[]}, parsed);
-    }
-    taxDuesLoaded = true;
-    saveState(); render();
-  }catch(e){
-    taxDuesLoaded = true;
-    toast('Error cargando impuestos: '+e.message, 'err');
-    render();
-  }
-}
-async function apiSyncPaymentAgreements(){
-  try{
-    const rows = await adminFetch('/app_settings?setting_key=eq.payment_agreements&select=setting_value', 'GET');
-    const row = rows && rows[0];
-    if(row){
-      const parsed = JSON.parse(row.setting_value);
-      state.paymentAgreements = Object.assign({items:[]}, parsed);
-    }
-    paymentAgreementsLoaded = true;
-    saveState(); render();
-  }catch(e){
-    paymentAgreementsLoaded = true;
-    toast('Error cargando acuerdos: '+e.message, 'err');
-    render();
-  }
-}
 async function apiSyncBankLoans(){
   try{
     const rows = await adminFetch('/app_settings?setting_key=eq.bank_loans&select=setting_value', 'GET');
@@ -4211,342 +4071,8 @@ async function apiSyncBankLoans(){
   }
 }
 
-function openSupplierDebtModal(proveedorPrefill){
-  const overlay = document.createElement("div");
-  overlay.className = "modal-overlay";
-  overlay.id = "supplier-debt-modal-overlay";
-  const today = new Date().toISOString().slice(0,10);
-  overlay.innerHTML = `
-    <div class="modal-sheet">
-      <div class="modal-handle"></div>
-      <h3 class="modal-title">Registrar factura de proveedor</h3>
-      <div class="form-group"><label>Proveedor</label><input id="sd-proveedor" value="${escapeHtml(proveedorPrefill||'')}" placeholder="Ej: EMPORIO"></div>
-      <div class="form-group"><label>Monto</label><input id="sd-amount" type="number" placeholder="Ej: 150000"></div>
-      <div class="form-group"><label>Fecha</label><input id="sd-date" type="date" value="${today}"></div>
-      <div class="form-group"><label>Nota (opcional)</label><input id="sd-note" placeholder="Ej: Nro de factura"></div>
-      <div style="display:flex; gap:10px; margin-top:6px;">
-        <button class="btn-secondary" style="flex:1;" onclick="closeSupplierDebtModal()">Cancelar</button>
-        <button class="btn-primary" style="flex:1;" onclick="saveSupplierDebt()">Guardar</button>
-      </div>
-    </div>`;
-  document.body.appendChild(overlay);
-}
-function closeSupplierDebtModal(){ const el=document.getElementById("supplier-debt-modal-overlay"); if(el) el.remove(); }
-async function saveSupplierDebt(){
-  const proveedor = document.getElementById("sd-proveedor").value.trim();
-  const amount = Number(document.getElementById("sd-amount").value);
-  const date = document.getElementById("sd-date").value;
-  const note = document.getElementById("sd-note").value.trim();
-  if(!proveedor){ toast("Ingresá el proveedor", "err"); return; }
-  if(!amount || amount<=0){ toast("Ingresá un monto válido", "err"); return; }
-  if(!date){ toast("Ingresá una fecha", "err"); return; }
-  state.supplierDebts.movements.push({id:paymentsId('sd'), proveedor, date, type:'factura', amount, note});
-  closeSupplierDebtModal();
-  saveState(); render();
-  try{ await apiSaveSupplierDebts(); toast("Factura registrada", "ok"); }
-  catch(e){ toast("Error al guardar: "+e.message, "err"); }
-}
-
-function openSupplierPaymentModal(proveedorPrefill){
-  const overlay = document.createElement("div");
-  overlay.className = "modal-overlay";
-  overlay.id = "supplier-payment-modal-overlay";
-  const today = new Date().toISOString().slice(0,10);
-  overlay.innerHTML = `
-    <div class="modal-sheet">
-      <div class="modal-handle"></div>
-      <h3 class="modal-title">Registrar pago a proveedor</h3>
-      <div class="form-group"><label>Proveedor</label><input id="sp-proveedor" value="${escapeHtml(proveedorPrefill||'')}" placeholder="Ej: EMPORIO"></div>
-      <div class="form-group"><label>Monto</label><input id="sp-amount" type="number" placeholder="Ej: 150000"></div>
-      <div class="form-group"><label>Fecha</label><input id="sp-date" type="date" value="${today}"></div>
-      <div class="form-group"><label>Nota (opcional)</label><input id="sp-note" placeholder="Ej: Transferencia"></div>
-      <div style="display:flex; gap:10px; margin-top:6px;">
-        <button class="btn-secondary" style="flex:1;" onclick="closeSupplierPaymentModal()">Cancelar</button>
-        <button class="btn-primary" style="flex:1;" onclick="saveSupplierPayment()">Guardar</button>
-      </div>
-    </div>`;
-  document.body.appendChild(overlay);
-}
-function closeSupplierPaymentModal(){ const el=document.getElementById("supplier-payment-modal-overlay"); if(el) el.remove(); }
-async function saveSupplierPayment(){
-  const proveedor = document.getElementById("sp-proveedor").value.trim();
-  const amount = Number(document.getElementById("sp-amount").value);
-  const date = document.getElementById("sp-date").value;
-  const note = document.getElementById("sp-note").value.trim();
-  if(!proveedor){ toast("Ingresá el proveedor", "err"); return; }
-  if(!amount || amount<=0){ toast("Ingresá un monto válido", "err"); return; }
-  if(!date){ toast("Ingresá una fecha", "err"); return; }
-  state.supplierDebts.movements.push({id:paymentsId('sd'), proveedor, date, type:'pago', amount, note});
-  closeSupplierPaymentModal();
-  saveState(); render();
-  try{ await apiSaveSupplierDebts(); toast("Pago registrado", "ok"); }
-  catch(e){ toast("Error al guardar: "+e.message, "err"); }
-}
-async function deleteSupplierDebtMovement(id){
-  if(!confirm("¿Eliminar este movimiento?")) return;
-  state.supplierDebts.movements = state.supplierDebts.movements.filter(m=>m.id!==id);
-  saveState(); render();
-  try{ await apiSaveSupplierDebts(); } catch(e){ toast("Error al guardar: "+e.message, "err"); }
-}
-
-function openSupplierCheckModal(){
-  const overlay = document.createElement("div");
-  overlay.className = "modal-overlay";
-  overlay.id = "supplier-check-modal-overlay";
-  const today = new Date().toISOString().slice(0,10);
-  overlay.innerHTML = `
-    <div class="modal-sheet">
-      <div class="modal-handle"></div>
-      <h3 class="modal-title">Registrar cheque(s)</h3>
-      <p style="font-size:12px; color:rgba(255,255,255,0.5); margin:-4px 0 10px;">Podés repartir un pago en varios cheques con distinta fecha — ej: $1.000.000 en 4 cheques.</p>
-      <div class="form-group"><label>Proveedor</label><input id="sc-proveedor" placeholder="Ej: EMPORIO"></div>
-      <div class="form-group"><label>Fecha de emisión</label><input id="sc-emision" type="date" value="${today}" onchange="rebuildCheckSplitRows()"></div>
-      <div style="display:flex; gap:10px;">
-        <div class="form-group" style="flex:1;"><label>Monto total a pagar</label><input id="sc-total" type="number" placeholder="Ej: 1000000" oninput="rebuildCheckSplitRows()"></div>
-        <div class="form-group" style="flex:1;"><label>Repartir en</label><input id="sc-cantidad" type="number" min="1" max="24" value="1" oninput="rebuildCheckSplitRows()"></div>
-      </div>
-      <div id="sc-rows"></div>
-      <div style="display:flex; gap:10px; margin-top:6px;">
-        <button class="btn-secondary" style="flex:1;" onclick="closeSupplierCheckModal()">Cancelar</button>
-        <button class="btn-primary" style="flex:1;" onclick="saveSupplierChecks()">Guardar</button>
-      </div>
-    </div>`;
-  document.body.appendChild(overlay);
-  rebuildCheckSplitRows();
-}
-function closeSupplierCheckModal(){ const el=document.getElementById("supplier-check-modal-overlay"); if(el) el.remove(); }
-// Redibuja las filas de cheques según "monto total" / "cantidad", sin pisar
-// lo que el usuario ya haya tocado a mano en filas que sigan existiendo.
-function rebuildCheckSplitRows(){
-  const rowsEl = document.getElementById('sc-rows');
-  if(!rowsEl) return;
-  const total = Number(document.getElementById('sc-total')?.value) || 0;
-  const n = Math.max(1, Math.min(24, Number(document.getElementById('sc-cantidad')?.value) || 1));
-  const emision = document.getElementById('sc-emision')?.value || new Date().toISOString().slice(0,10);
-  const per = n>0 ? Math.round((total/n)*100)/100 : 0;
-  const prevRows = [...rowsEl.querySelectorAll('[data-row]')].map(row=>({
-    nro: row.querySelector('.sc-row-nro')?.value || '',
-    monto: row.querySelector('.sc-row-monto')?.value || '',
-    vto: row.querySelector('.sc-row-vto')?.value || '',
-  }));
-  let html = '';
-  for(let i=0;i<n;i++){
-    const prev = prevRows[i];
-    const defaultVto = new Date(new Date(emision+'T00:00:00').getTime() + (i+1)*30*86400000).toISOString().slice(0,10);
-    html += `
-      <div data-row style="display:flex; gap:8px; margin-bottom:10px;">
-        <div style="flex:1;"><label style="font-size:11px; color:rgba(255,255,255,0.5); display:block; margin-bottom:4px;">Cheque ${i+1} · Nro</label>
-          <input class="sc-row-nro" value="${prev?escapeHtml(prev.nro):''}" placeholder="Opcional" style="width:100%; padding:10px; border-radius:10px; background:var(--glass); border:1px solid var(--glass-bd); color:var(--cream);"></div>
-        <div style="flex:1;"><label style="font-size:11px; color:rgba(255,255,255,0.5); display:block; margin-bottom:4px;">Monto</label>
-          <input class="sc-row-monto" type="number" value="${prev&&prev.monto!==''?prev.monto:(per||'')}" style="width:100%; padding:10px; border-radius:10px; background:var(--glass); border:1px solid var(--glass-bd); color:var(--cream);"></div>
-        <div style="flex:1;"><label style="font-size:11px; color:rgba(255,255,255,0.5); display:block; margin-bottom:4px;">Fecha de cobro</label>
-          <input class="sc-row-vto" type="date" value="${prev&&prev.vto?prev.vto:defaultVto}" style="width:100%; padding:10px; border-radius:10px; background:var(--glass); border:1px solid var(--glass-bd); color:var(--cream);"></div>
-      </div>`;
-  }
-  rowsEl.innerHTML = html;
-}
-async function saveSupplierChecks(){
-  const proveedor = document.getElementById("sc-proveedor").value.trim();
-  const fechaEmision = document.getElementById("sc-emision").value;
-  if(!proveedor){ toast("Ingresá el proveedor", "err"); return; }
-  const nuevos = [...document.querySelectorAll('#sc-rows [data-row]')].map(row=>({
-    nroCheque: row.querySelector('.sc-row-nro').value.trim(),
-    amount: Number(row.querySelector('.sc-row-monto').value),
-    fechaVencimiento: row.querySelector('.sc-row-vto').value,
-  })).filter(r=>r.amount>0 && r.fechaVencimiento).map(r=>({
-    id:paymentsId('sc'), nroCheque:r.nroCheque, proveedor, amount:r.amount,
-    fechaEmision, fechaVencimiento:r.fechaVencimiento, estado:'pendiente',
-  }));
-  if(nuevos.length===0){ toast("Completá monto y vencimiento de al menos un cheque", "err"); return; }
-  state.supplierChecks.movements.push(...nuevos);
-  closeSupplierCheckModal();
-  saveState(); render();
-  try{ await apiSaveSupplierChecks(); toast(nuevos.length>1 ? `${nuevos.length} cheques registrados` : "Cheque registrado", "ok"); }
-  catch(e){ toast("Error al guardar: "+e.message, "err"); }
-}
-async function setCheckEstado(id, estado){
-  const c = state.supplierChecks.movements.find(c=>c.id===id);
-  if(!c) return;
-  c.estado = estado;
-  saveState(); render();
-  try{ await apiSaveSupplierChecks(); } catch(e){ toast("Error al guardar: "+e.message, "err"); }
-}
-async function deleteSupplierCheck(id){
-  if(!confirm("¿Eliminar este cheque?")) return;
-  state.supplierChecks.movements = state.supplierChecks.movements.filter(c=>c.id!==id);
-  saveState(); render();
-  try{ await apiSaveSupplierChecks(); } catch(e){ toast("Error al guardar: "+e.message, "err"); }
-}
-function openSupplierProveedor(proveedor){ state.adminPagosProveedor = proveedor; render(); }
-function closeSupplierProveedor(){ state.adminPagosProveedor = null; render(); }
-
-/* ── IMPUESTOS: se cargan una vez con su próximo vencimiento; al marcarlos
-   pagados no quedan como "pagados" — se les suma un mes (recortando al
-   último día del mes si hace falta) y vuelven a aparecer como pendientes
-   el ciclo siguiente, sin que haya que recargarlos a mano cada mes. ── */
-function openTaxDueModal(id){
-  const item = id ? state.taxDues.items.find(t=>t.id===id) : null;
-  const overlay = document.createElement("div");
-  overlay.className = "modal-overlay";
-  overlay.id = "tax-due-modal-overlay";
-  const today = new Date().toISOString().slice(0,10);
-  overlay.innerHTML = `
-    <div class="modal-sheet">
-      <div class="modal-handle"></div>
-      <h3 class="modal-title">${item ? 'Editar impuesto' : 'Nuevo impuesto'}</h3>
-      <p style="font-size:12px; color:rgba(255,255,255,0.5); margin:-4px 0 10px;">Se carga una sola vez — al marcarlo pagado, el sistema arma solo el vencimiento del mes siguiente.</p>
-      <div class="form-group"><label>Nombre</label><input id="td-nombre" value="${item?escapeHtml(item.nombre):''}" placeholder="Ej: Monotributo"></div>
-      <div class="form-group"><label>Monto estimado</label><input id="td-monto" type="number" value="${item?item.monto:''}" placeholder="Ej: 45000"></div>
-      <div class="form-group"><label>Próximo vencimiento</label><input id="td-vencimiento" type="date" value="${item?item.vencimiento:today}"></div>
-      <div style="display:flex; gap:10px; margin-top:6px;">
-        <button class="btn-secondary" style="flex:1;" onclick="closeTaxDueModal()">Cancelar</button>
-        <button class="btn-primary" style="flex:1;" onclick="saveTaxDue('${item?item.id:''}')">Guardar</button>
-      </div>
-    </div>`;
-  document.body.appendChild(overlay);
-}
-function closeTaxDueModal(){ const el=document.getElementById("tax-due-modal-overlay"); if(el) el.remove(); }
-async function saveTaxDue(id){
-  const nombre = document.getElementById("td-nombre").value.trim();
-  const monto = Number(document.getElementById("td-monto").value);
-  const vencimiento = document.getElementById("td-vencimiento").value;
-  if(!nombre){ toast("Ingresá el nombre del impuesto", "err"); return; }
-  if(!monto || monto<=0){ toast("Ingresá un monto válido", "err"); return; }
-  if(!vencimiento){ toast("Ingresá la fecha de vencimiento", "err"); return; }
-  if(id){
-    const item = state.taxDues.items.find(t=>t.id===id);
-    if(item){ item.nombre=nombre; item.monto=monto; item.vencimiento=vencimiento; }
-  }else{
-    state.taxDues.items.push({id:paymentsId('td'), nombre, monto, vencimiento, historial:[]});
-  }
-  closeTaxDueModal();
-  saveState(); render();
-  try{ await apiSaveSetting('tax_dues', state.taxDues); toast("Impuesto guardado", "ok"); }
-  catch(e){ toast("Error al guardar: "+e.message, "err"); }
-}
-async function markTaxDuePaid(id){
-  const item = state.taxDues.items.find(t=>t.id===id);
-  if(!item) return;
-  item.historial = item.historial || [];
-  item.historial.push({fecha: item.vencimiento, monto: item.monto});
-  item.vencimiento = addMonthsClamped(item.vencimiento, 1);
-  saveState(); render();
-  try{ await apiSaveSetting('tax_dues', state.taxDues); toast('Marcado como pagado — próximo vencimiento: '+fmtDateAR(item.vencimiento), 'ok'); }
-  catch(e){ toast("Error al guardar: "+e.message, "err"); }
-}
-async function deleteTaxDue(id){
-  if(!confirm("¿Eliminar este impuesto? Se deja de trackear su vencimiento.")) return;
-  state.taxDues.items = state.taxDues.items.filter(t=>t.id!==id);
-  saveState(); render();
-  try{ await apiSaveSetting('tax_dues', state.taxDues); } catch(e){ toast("Error al guardar: "+e.message, "err"); }
-}
-
-/* ── ACUERDOS A PAGAR: planes de pago (AFIP/ARBA/Municipalidad, etc.)
-   repartidos en cuotas — mismo mecanismo de reparto que los cheques, pero
-   con vencimientos mensuales en vez de a mano fila por fila. ── */
-function agreementSaldoPendiente(agreement){
-  return (agreement.cuotas||[]).filter(c=>c.estado!=='pagado').reduce((s,c)=>s+c.monto,0);
-}
-function agreementTotalPendienteGeneral(){
-  return (state.paymentAgreements.items||[]).reduce((s,a)=>s+agreementSaldoPendiente(a),0);
-}
-function openAgreementModal(){
-  const overlay = document.createElement("div");
-  overlay.className = "modal-overlay";
-  overlay.id = "agreement-modal-overlay";
-  const today = new Date().toISOString().slice(0,10);
-  overlay.innerHTML = `
-    <div class="modal-sheet">
-      <div class="modal-handle"></div>
-      <h3 class="modal-title">Nuevo acuerdo de pago</h3>
-      <p style="font-size:12px; color:rgba(255,255,255,0.5); margin:-4px 0 10px;">Ej: plan de facilidades AFIP/ARBA. Repartí el monto total en cuotas mensuales.</p>
-      <div class="form-group"><label>Organismo</label><input id="ag-organismo" placeholder="Ej: AFIP"></div>
-      <div class="form-group"><label>Concepto</label><input id="ag-concepto" placeholder="Ej: Plan de facilidades RG 5321"></div>
-      <div style="display:flex; gap:10px;">
-        <div class="form-group" style="flex:1;"><label>Monto total</label><input id="ag-total" type="number" placeholder="Ej: 1200000" oninput="rebuildAgreementSplitRows()"></div>
-        <div class="form-group" style="flex:1;"><label>Cantidad de cuotas</label><input id="ag-cantidad" type="number" min="1" max="60" value="1" oninput="rebuildAgreementSplitRows()"></div>
-      </div>
-      <div class="form-group"><label>Vencimiento 1° cuota</label><input id="ag-primera" type="date" value="${today}" onchange="rebuildAgreementSplitRows()"></div>
-      <div id="ag-rows"></div>
-      <div style="display:flex; gap:10px; margin-top:6px;">
-        <button class="btn-secondary" style="flex:1;" onclick="closeAgreementModal()">Cancelar</button>
-        <button class="btn-primary" style="flex:1;" onclick="saveAgreement()">Guardar</button>
-      </div>
-    </div>`;
-  document.body.appendChild(overlay);
-  rebuildAgreementSplitRows();
-}
-function closeAgreementModal(){ const el=document.getElementById("agreement-modal-overlay"); if(el) el.remove(); }
-// Redibuja las filas de cuotas según "monto total" / "cantidad" / "1° cuota",
-// sin pisar lo que el usuario ya haya tocado a mano en filas que sigan existiendo.
-function rebuildAgreementSplitRows(){
-  const rowsEl = document.getElementById('ag-rows');
-  if(!rowsEl) return;
-  const total = Number(document.getElementById('ag-total')?.value) || 0;
-  const n = Math.max(1, Math.min(60, Number(document.getElementById('ag-cantidad')?.value) || 1));
-  const primera = document.getElementById('ag-primera')?.value || new Date().toISOString().slice(0,10);
-  const per = n>0 ? Math.round((total/n)*100)/100 : 0;
-  const prevRows = [...rowsEl.querySelectorAll('[data-row]')].map(row=>({
-    monto: row.querySelector('.ag-row-monto')?.value || '',
-    vto: row.querySelector('.ag-row-vto')?.value || '',
-  }));
-  let html = '';
-  for(let i=0;i<n;i++){
-    const prev = prevRows[i];
-    const defaultVto = i===0 ? primera : addMonthsClamped(primera, i);
-    html += `
-      <div data-row style="display:flex; gap:8px; align-items:flex-end; margin-bottom:10px;">
-        <div style="flex:none; width:56px; font-size:12px; color:rgba(255,255,255,0.5); padding-bottom:11px;">Cuota ${i+1}</div>
-        <div style="flex:1;"><label style="font-size:11px; color:rgba(255,255,255,0.5); display:block; margin-bottom:4px;">Monto</label>
-          <input class="ag-row-monto" type="number" value="${prev&&prev.monto!==''?prev.monto:(per||'')}" style="width:100%; padding:10px; border-radius:10px; background:var(--glass); border:1px solid var(--glass-bd); color:var(--cream);"></div>
-        <div style="flex:1;"><label style="font-size:11px; color:rgba(255,255,255,0.5); display:block; margin-bottom:4px;">Vencimiento</label>
-          <input class="ag-row-vto" type="date" value="${prev&&prev.vto?prev.vto:defaultVto}" style="width:100%; padding:10px; border-radius:10px; background:var(--glass); border:1px solid var(--glass-bd); color:var(--cream);"></div>
-      </div>`;
-  }
-  rowsEl.innerHTML = html;
-}
-async function saveAgreement(){
-  const organismo = document.getElementById("ag-organismo").value.trim();
-  const concepto = document.getElementById("ag-concepto").value.trim();
-  if(!organismo){ toast("Ingresá el organismo", "err"); return; }
-  const cuotas = [...document.querySelectorAll('#ag-rows [data-row]')].map(row=>({
-    monto: Number(row.querySelector('.ag-row-monto').value),
-    vencimiento: row.querySelector('.ag-row-vto').value,
-  })).filter(c=>c.monto>0 && c.vencimiento).map((c,i)=>({
-    id:paymentsId('ac'), nro:i+1, monto:c.monto, vencimiento:c.vencimiento, estado:'pendiente',
-  }));
-  if(cuotas.length===0){ toast("Completá monto y vencimiento de al menos una cuota", "err"); return; }
-  const montoTotal = cuotas.reduce((s,c)=>s+c.monto,0);
-  state.paymentAgreements.items.push({
-    id:paymentsId('agr'), organismo, concepto, montoTotal, createdAt:new Date().toISOString().slice(0,10), cuotas,
-  });
-  closeAgreementModal();
-  saveState(); render();
-  try{ await apiSaveSetting('payment_agreements', state.paymentAgreements); toast("Acuerdo registrado", "ok"); }
-  catch(e){ toast("Error al guardar: "+e.message, "err"); }
-}
-async function setAgreementCuotaEstado(agreementId, cuotaId, estado){
-  const agreement = state.paymentAgreements.items.find(a=>a.id===agreementId);
-  const cuota = agreement && agreement.cuotas.find(c=>c.id===cuotaId);
-  if(!cuota) return;
-  cuota.estado = estado;
-  saveState(); render();
-  try{ await apiSaveSetting('payment_agreements', state.paymentAgreements); } catch(e){ toast("Error al guardar: "+e.message, "err"); }
-}
-async function deleteAgreement(id){
-  if(!confirm("¿Eliminar este acuerdo y todas sus cuotas?")) return;
-  state.paymentAgreements.items = state.paymentAgreements.items.filter(a=>a.id!==id);
-  state.adminPagosAcuerdoId = null;
-  saveState(); render();
-  try{ await apiSaveSetting('payment_agreements', state.paymentAgreements); } catch(e){ toast("Error al guardar: "+e.message, "err"); }
-}
-function openAgreementDetail(id){ state.adminPagosAcuerdoId = id; render(); }
-function closeAgreementDetail(){ state.adminPagosAcuerdoId = null; render(); }
-
-// Préstamos bancarios (solapa "Bancos"): igual mecánica que los Acuerdos de
-// pago de arriba (monto total repartido en cuotas con vencimiento), pero en
-// su propia solapa porque son cosas distintas para el usuario (banco vs.
-// AFIP/ARBA) y con su propio setting_key en Supabase.
+// Préstamos bancarios (solapa "Bancos"): monto total repartido en cuotas
+// con vencimiento, con su propio setting_key en Supabase.
 function openBankLoanModal(){
   const overlay = document.createElement("div");
   overlay.className = "modal-overlay";
@@ -4799,293 +4325,6 @@ async function restoreDeletedBbvaLoans(){
   saveState(); render();
   try{ await apiSaveSetting('bank_loans', state.bankLoans); toast(missing.length+' préstamo'+(missing.length!==1?'s':'')+' restaurado'+(missing.length!==1?'s':''), 'ok'); }
   catch(e){ toast('Error al guardar: '+e.message, 'err'); }
-}
-
-function renderAdminPagos(){
-  if(!supplierDebtsLoaded){ apiSyncSupplierDebts(); }
-  if(!supplierChecksLoaded){ apiSyncSupplierChecks(); }
-  if(!taxDuesLoaded){ apiSyncTaxDues(); }
-  if(!paymentAgreementsLoaded){ apiSyncPaymentAgreements(); }
-  if(!supplierDebtsLoaded || !supplierChecksLoaded || !taxDuesLoaded || !paymentAgreementsLoaded){
-    return `<div style="padding:40px;text-align:center;color:rgba(255,255,255,0.4);">Cargando...</div>`;
-  }
-  const sub = state.adminPagosSub||'deudas';
-  return `
-  <div style="padding:12px 16px 0; display:flex; gap:8px; flex-wrap:wrap;">
-    <button class="chip ${sub==='deudas'?'active':''}" onclick="state.adminPagosSub='deudas'; state.adminPagosProveedor=null; render()">Deudas</button>
-    <button class="chip ${sub==='cheques'?'active':''}" onclick="state.adminPagosSub='cheques'; render()">Cheques</button>
-    <button class="chip ${sub==='impuestos'?'active':''}" onclick="state.adminPagosSub='impuestos'; render()">Impuestos</button>
-    <button class="chip ${sub==='acuerdos'?'active':''}" onclick="state.adminPagosSub='acuerdos'; state.adminPagosAcuerdoId=null; render()">Acuerdos</button>
-    <button class="chip ${sub==='calendario'?'active':''}" onclick="state.adminPagosSub='calendario'; render()">Calendario</button>
-  </div>
-  ${sub==='deudas' ? renderAdminPagosDeudas()
-    : sub==='cheques' ? renderAdminPagosCheques()
-    : sub==='impuestos' ? renderAdminPagosImpuestos()
-    : sub==='acuerdos' ? renderAdminPagosAcuerdos()
-    : renderAdminPagosCalendario()}`;
-}
-
-function renderAdminPagosDeudas(){
-  if(state.adminPagosProveedor) return renderAdminPagosProveedorDetail(state.adminPagosProveedor);
-  const balances = supplierBalances();
-  const total = Object.values(balances).reduce((s,n)=>s+n, 0);
-  const proveedores = Object.keys(balances).sort((a,b)=> balances[b]-balances[a]);
-  return `
-  <div style="padding:16px;">
-    <div style="background:var(--glass); border:1px solid var(--glass-bd); border-radius:16px; padding:20px; text-align:center; margin-bottom:16px;">
-      <div style="font-size:12px; color:rgba(255,255,255,0.5); text-transform:uppercase; letter-spacing:.5px;">Deuda total a proveedores</div>
-      <div style="font-size:32px; font-weight:800; color:${total>0?'var(--danger)':'var(--ok)'}; margin:8px 0;">${money(total)}</div>
-    </div>
-    <button class="btn-primary" style="width:100%; margin-bottom:16px;" onclick="openSupplierDebtModal('')">+ Registrar factura</button>
-    <div style="font-size:13px; font-weight:700; color:rgba(255,255,255,0.6); margin-bottom:8px; text-transform:uppercase; letter-spacing:.4px;">Proveedores</div>
-    ${proveedores.length===0 ? `<div style="padding:30px; text-align:center; color:rgba(255,255,255,0.4);">Sin proveedores cargados todavía.</div>` : proveedores.map(p=>`
-      <div style="display:flex; justify-content:space-between; align-items:center; gap:10px; padding:14px; background:var(--glass); border:1px solid var(--glass-bd); border-radius:12px; margin-bottom:8px; cursor:pointer;" onclick="openSupplierProveedor('${escapeHtml(p)}')">
-        <div style="font-size:13.5px; font-weight:600; color:var(--white);">${escapeHtml(p)}</div>
-        <div style="font-size:14px; font-weight:700; color:${balances[p]>0?'var(--danger)':'var(--ok)'};">${money(balances[p])}</div>
-      </div>`).join('')}
-  </div>`;
-}
-
-function renderAdminPagosProveedorDetail(proveedor){
-  const balance = supplierBalance(proveedor);
-  const movs = (state.supplierDebts.movements||[]).filter(m=>m.proveedor===proveedor).sort((a,b)=> (a.date||'').localeCompare(b.date||''));
-  let running = 0;
-  const rows = movs.map(m=>{ running += (m.type==='pago' ? -m.amount : m.amount); return Object.assign({}, m, {running}); });
-  return `
-  <div style="padding:16px;">
-    <div style="display:flex; align-items:center; gap:8px; margin-bottom:12px;">
-      <button onclick="closeSupplierProveedor()" style="background:none; border:none; color:var(--white); cursor:pointer; padding:4px 8px; font-size:18px;">←</button>
-      <h3 style="font-size:15px; color:var(--white);">${escapeHtml(proveedor)}</h3>
-    </div>
-    <div style="background:var(--glass); border:1px solid var(--glass-bd); border-radius:16px; padding:20px; text-align:center; margin-bottom:16px;">
-      <div style="font-size:12px; color:rgba(255,255,255,0.5); text-transform:uppercase; letter-spacing:.5px;">Saldo</div>
-      <div style="font-size:28px; font-weight:800; color:${balance>0?'var(--danger)':'var(--ok)'}; margin:8px 0;">${money(balance)}</div>
-    </div>
-    <div style="display:flex; gap:10px; margin-bottom:16px;">
-      <button class="btn-secondary" style="flex:1;" onclick="openSupplierDebtModal('${escapeHtml(proveedor)}')">+ Factura</button>
-      <button class="btn-primary" style="flex:1;" onclick="openSupplierPaymentModal('${escapeHtml(proveedor)}')">+ Pago</button>
-    </div>
-    <div style="font-size:13px; font-weight:700; color:rgba(255,255,255,0.6); margin-bottom:8px; text-transform:uppercase; letter-spacing:.4px;">Movimientos</div>
-    ${rows.length===0 ? `<div style="padding:30px; text-align:center; color:rgba(255,255,255,0.4);">Sin movimientos todavía.</div>` : rows.slice().reverse().map(m=>`
-      <div style="display:flex; justify-content:space-between; align-items:center; gap:10px; padding:12px 14px; background:var(--glass); border:1px solid var(--glass-bd); border-radius:12px; margin-bottom:8px;">
-        <div style="flex:1; min-width:0;">
-          <div style="font-size:13px; font-weight:600;">${escapeHtml(fmtDatesInText(m.note)||(m.type==='pago'?'Pago':'Factura'))}</div>
-          <div style="font-size:12px; font-weight:700; color:var(--gold2);">${fmtDateAR(m.date)}</div>
-        </div>
-        <div style="text-align:right;">
-          <div style="font-size:14px; font-weight:700; color:${m.type==='pago'?'var(--ok)':'var(--danger)'};">${m.type==='pago'?'-':'+'}${money(m.amount)}</div>
-          <div style="font-size:11px; color:rgba(255,255,255,0.35);">Saldo: ${money(m.running)}</div>
-        </div>
-        <button class="icon-btn" onclick="deleteSupplierDebtMovement('${m.id}')">${ic('trash')}</button>
-      </div>`).join('')}
-  </div>`;
-}
-
-function renderAdminPagosCheques(){
-  const today = new Date().toISOString().slice(0,10);
-  const checks = [...(state.supplierChecks.movements||[])].sort((a,b)=> (a.fechaVencimiento||'').localeCompare(b.fechaVencimiento||''));
-  const pendientes = checks.filter(c=>c.estado==='pendiente');
-  const vencidos = checks.filter(c=>c.estado==='vencido');
-  const totalPendiente = pendientes.reduce((s,c)=>s+c.amount, 0);
-  return `
-  <div style="padding:16px;">
-    <div style="display:flex; gap:10px; margin-bottom:16px;">
-      <div style="flex:1; background:var(--glass); border:1px solid var(--glass-bd); border-radius:14px; padding:14px; text-align:center;">
-        <div style="font-size:11px; color:rgba(255,255,255,0.5); text-transform:uppercase;">Pendientes</div>
-        <div style="font-size:18px; font-weight:800; color:var(--white);">${money(totalPendiente)}</div>
-        <div style="font-size:11px; color:rgba(255,255,255,0.4);">${pendientes.length} cheques</div>
-      </div>
-      <div style="flex:1; background:var(--glass); border:1px solid var(--glass-bd); border-radius:14px; padding:14px; text-align:center;">
-        <div style="font-size:11px; color:rgba(255,255,255,0.5); text-transform:uppercase;">Vencidos</div>
-        <div style="font-size:18px; font-weight:800; color:var(--danger);">${vencidos.length}</div>
-        <div style="font-size:11px; color:rgba(255,255,255,0.4);">sin marcar cobrados</div>
-      </div>
-    </div>
-    <button class="btn-primary" style="width:100%; margin-bottom:16px;" onclick="openSupplierCheckModal()">+ Registrar cheque</button>
-    ${checks.length===0 ? `<div style="padding:30px; text-align:center; color:rgba(255,255,255,0.4);">Sin cheques cargados todavía.</div>` : checks.map(c=>{
-      const dueSoon = c.estado==='pendiente' && c.fechaVencimiento && c.fechaVencimiento<=new Date(Date.now()+7*86400000).toISOString().slice(0,10);
-      const color = c.estado==='cobrado' ? 'var(--ok)' : c.estado==='vencido' ? 'var(--danger)' : dueSoon ? 'var(--warn)' : 'rgba(255,255,255,0.6)';
-      const badge = dateBadgeParts(c.fechaVencimiento);
-      return `
-      <div style="padding:12px 14px; background:var(--glass); border:1px solid var(--glass-bd); border-radius:12px; margin-bottom:8px;">
-        <div style="display:flex; align-items:center; gap:12px; margin-bottom:8px;">
-          <div style="flex:none; width:46px; padding:5px 2px; border-radius:10px; background:rgba(255,255,255,0.06); border:1.5px solid ${color}; color:${color}; text-align:center;">
-            <div style="font-size:18px; font-weight:800; line-height:1.1;">${badge.day}</div>
-            <div style="font-size:9px; font-weight:700; letter-spacing:.5px;">${badge.month}</div>
-          </div>
-          <div style="flex:1; min-width:0;">
-            <div style="font-size:13px; font-weight:600; color:var(--white);">${escapeHtml(c.proveedor)}${c.nroCheque?` · Nro ${escapeHtml(c.nroCheque)}`:''}</div>
-            <div style="font-size:11px; color:rgba(255,255,255,0.4);">Emisión: ${fmtDateAR(c.fechaEmision)} · Cobro: ${fmtDateAR(c.fechaVencimiento)}</div>
-          </div>
-          <div style="font-size:14px; font-weight:700; color:var(--white);">${money(c.amount)}</div>
-          <button class="icon-btn" onclick="deleteSupplierCheck('${c.id}')">${ic('trash')}</button>
-        </div>
-        <div style="display:flex; gap:6px;">
-          ${['pendiente','vencido','cobrado'].map(e=>`<button class="chip ${c.estado===e?'active':''}" style="padding:5px 12px; font-size:11px;" onclick="setCheckEstado('${c.id}','${e}')">${e==='pendiente'?'Pendiente':e==='vencido'?'Vencido':'Cobrado'}</button>`).join('')}
-        </div>
-      </div>`;
-    }).join('')}
-  </div>`;
-}
-
-function renderAdminPagosImpuestos(){
-  const today = new Date().toISOString().slice(0,10);
-  const items = [...(state.taxDues.items||[])].sort((a,b)=>(a.vencimiento||'').localeCompare(b.vencimiento||''));
-  const totalMensual = items.reduce((s,t)=>s+t.monto, 0);
-  return `
-  <div style="padding:16px;">
-    <div style="background:var(--glass); border:1px solid var(--glass-bd); border-radius:16px; padding:20px; text-align:center; margin-bottom:16px;">
-      <div style="font-size:12px; color:rgba(255,255,255,0.5); text-transform:uppercase; letter-spacing:.5px;">Total impuestos cargados</div>
-      <div style="font-size:32px; font-weight:800; color:var(--white); margin:8px 0;">${money(totalMensual)}</div>
-    </div>
-    <button class="btn-primary" style="width:100%; margin-bottom:16px;" onclick="openTaxDueModal()">+ Agregar impuesto</button>
-    ${items.length===0 ? `<div style="padding:30px; text-align:center; color:rgba(255,255,255,0.4);">Sin impuestos cargados todavía.</div>` : items.map(t=>{
-      const dueSoon = t.vencimiento && t.vencimiento<=new Date(Date.now()+7*86400000).toISOString().slice(0,10);
-      const isPast = t.vencimiento < today;
-      const color = isPast ? 'var(--danger)' : dueSoon ? 'var(--warn)' : 'rgba(255,255,255,0.6)';
-      const badge = dateBadgeParts(t.vencimiento);
-      return `
-      <div style="padding:12px 14px; background:var(--glass); border:1px solid var(--glass-bd); border-radius:12px; margin-bottom:8px;">
-        <div style="display:flex; align-items:center; gap:12px; margin-bottom:8px;">
-          <div style="flex:none; width:46px; padding:5px 2px; border-radius:10px; background:rgba(255,255,255,0.06); border:1.5px solid ${color}; color:${color}; text-align:center;">
-            <div style="font-size:18px; font-weight:800; line-height:1.1;">${badge.day}</div>
-            <div style="font-size:9px; font-weight:700; letter-spacing:.5px;">${badge.month}</div>
-          </div>
-          <div style="flex:1; min-width:0; cursor:pointer;" onclick="openTaxDueModal('${t.id}')">
-            <div style="font-size:13px; font-weight:600; color:var(--white);">${escapeHtml(t.nombre)}</div>
-            <div style="font-size:11px; color:${isPast?'var(--danger)':'rgba(255,255,255,0.4)'};">Vence ${fmtDateAR(t.vencimiento)}${isPast?' · vencido':''}</div>
-          </div>
-          <div style="font-size:14px; font-weight:700; color:var(--white);">${money(t.monto)}</div>
-          <button class="icon-btn" onclick="deleteTaxDue('${t.id}')">${ic('trash')}</button>
-        </div>
-        <button class="btn-secondary" style="width:100%; padding:8px; font-size:12.5px;" onclick="markTaxDuePaid('${t.id}')">Marcar pagado → pasa al mes siguiente</button>
-      </div>`;
-    }).join('')}
-  </div>`;
-}
-
-function renderAdminPagosAcuerdos(){
-  if(state.adminPagosAcuerdoId) return renderAdminPagosAcuerdoDetail(state.adminPagosAcuerdoId);
-  const agreements = [...(state.paymentAgreements.items||[])];
-  const total = agreementTotalPendienteGeneral();
-  return `
-  <div style="padding:16px;">
-    <div style="background:var(--glass); border:1px solid var(--glass-bd); border-radius:16px; padding:20px; text-align:center; margin-bottom:16px;">
-      <div style="font-size:12px; color:rgba(255,255,255,0.5); text-transform:uppercase; letter-spacing:.5px;">Saldo total en acuerdos</div>
-      <div style="font-size:32px; font-weight:800; color:${total>0?'var(--danger)':'var(--ok)'}; margin:8px 0;">${money(total)}</div>
-    </div>
-    <button class="btn-primary" style="width:100%; margin-bottom:16px;" onclick="openAgreementModal()">+ Nuevo acuerdo</button>
-    ${agreements.length===0 ? `<div style="padding:30px; text-align:center; color:rgba(255,255,255,0.4);">Sin acuerdos cargados todavía.</div>` : agreements.map(a=>{
-      const saldo = agreementSaldoPendiente(a);
-      const cuotasPend = (a.cuotas||[]).filter(c=>c.estado!=='pagado').length;
-      return `
-      <div style="display:flex; justify-content:space-between; align-items:center; gap:10px; padding:14px; background:var(--glass); border:1px solid var(--glass-bd); border-radius:12px; margin-bottom:8px; cursor:pointer;" onclick="openAgreementDetail('${a.id}')">
-        <div style="min-width:0;">
-          <div style="font-size:13.5px; font-weight:600; color:var(--white);">${escapeHtml(a.organismo)}${a.concepto?` · ${escapeHtml(a.concepto)}`:''}</div>
-          <div style="font-size:11px; color:rgba(255,255,255,0.4);">${cuotasPend} cuota${cuotasPend!==1?'s':''} pendiente${cuotasPend!==1?'s':''}</div>
-        </div>
-        <div style="font-size:14px; font-weight:700; color:${saldo>0?'var(--danger)':'var(--ok)'};">${money(saldo)}</div>
-      </div>`;
-    }).join('')}
-  </div>`;
-}
-
-function renderAdminPagosAcuerdoDetail(id){
-  const a = (state.paymentAgreements.items||[]).find(x=>x.id===id);
-  if(!a){ state.adminPagosAcuerdoId = null; return renderAdminPagosAcuerdos(); }
-  const saldo = agreementSaldoPendiente(a);
-  const cuotas = [...(a.cuotas||[])].sort((x,y)=>(x.vencimiento||'').localeCompare(y.vencimiento||''));
-  const today = new Date().toISOString().slice(0,10);
-  return `
-  <div style="padding:16px;">
-    <div style="display:flex; align-items:center; gap:8px; margin-bottom:12px;">
-      <button onclick="closeAgreementDetail()" style="background:none; border:none; color:var(--white); cursor:pointer; padding:4px 8px; font-size:18px;">←</button>
-      <h3 style="font-size:15px; color:var(--white);">${escapeHtml(a.organismo)}${a.concepto?` · ${escapeHtml(a.concepto)}`:''}</h3>
-    </div>
-    <div style="background:var(--glass); border:1px solid var(--glass-bd); border-radius:16px; padding:20px; text-align:center; margin-bottom:16px;">
-      <div style="font-size:12px; color:rgba(255,255,255,0.5); text-transform:uppercase; letter-spacing:.5px;">Saldo pendiente</div>
-      <div style="font-size:28px; font-weight:800; color:${saldo>0?'var(--danger)':'var(--ok)'}; margin:8px 0;">${money(saldo)}</div>
-      <div style="font-size:11px; color:rgba(255,255,255,0.4);">Monto total del acuerdo: ${money(a.montoTotal)}</div>
-    </div>
-    <button class="btn-secondary" style="width:100%; margin-bottom:16px; color:var(--danger);" onclick="deleteAgreement('${a.id}')">Eliminar acuerdo</button>
-    <div style="font-size:13px; font-weight:700; color:rgba(255,255,255,0.6); margin-bottom:8px; text-transform:uppercase; letter-spacing:.4px;">Cuotas</div>
-    ${cuotas.map(c=>{
-      const isPast = c.estado!=='pagado' && c.vencimiento < today;
-      const color = c.estado==='pagado' ? 'var(--ok)' : isPast ? 'var(--danger)' : 'rgba(255,255,255,0.6)';
-      const badge = dateBadgeParts(c.vencimiento);
-      return `
-      <div style="padding:12px 14px; background:var(--glass); border:1px solid var(--glass-bd); border-radius:12px; margin-bottom:8px;">
-        <div style="display:flex; align-items:center; gap:12px; margin-bottom:8px;">
-          <div style="flex:none; width:46px; padding:5px 2px; border-radius:10px; background:rgba(255,255,255,0.06); border:1.5px solid ${color}; color:${color}; text-align:center;">
-            <div style="font-size:18px; font-weight:800; line-height:1.1;">${badge.day}</div>
-            <div style="font-size:9px; font-weight:700; letter-spacing:.5px;">${badge.month}</div>
-          </div>
-          <div style="flex:1; min-width:0;">
-            <div style="font-size:13px; font-weight:600; color:var(--white);">Cuota ${c.nro}</div>
-            <div style="font-size:11px; color:rgba(255,255,255,0.4);">Vence ${fmtDateAR(c.vencimiento)}${isPast?' · vencida':''}</div>
-          </div>
-          <div style="font-size:14px; font-weight:700; color:var(--white);">${money(c.monto)}</div>
-        </div>
-        <div style="display:flex; gap:6px;">
-          ${['pendiente','pagado'].map(e=>`<button class="chip ${c.estado===e?'active':''}" style="padding:5px 12px; font-size:11px;" onclick="setAgreementCuotaEstado('${a.id}','${c.id}','${e}')">${e==='pendiente'?'Pendiente':'Pagada'}</button>`).join('')}
-        </div>
-      </div>`;
-    }).join('')}
-  </div>`;
-}
-
-// Junta cheques + impuestos + cuotas de acuerdos en una sola línea de
-// tiempo de vencimientos, agrupados por fecha (mismo semáforo de colores
-// que ya usaban los cheques solos).
-function renderAdminPagosCalendario(){
-  const today = new Date().toISOString().slice(0,10);
-  const entries = [];
-  (state.supplierChecks.movements||[]).forEach(c=>{
-    if(c.estado==='cobrado' || !c.fechaVencimiento) return;
-    entries.push({date:c.fechaVencimiento, amount:c.amount, label:`Cheque · ${c.proveedor}${c.nroCheque?` · Nro ${c.nroCheque}`:''}`});
-  });
-  (state.taxDues.items||[]).forEach(t=>{
-    if(!t.vencimiento) return;
-    entries.push({date:t.vencimiento, amount:t.monto, label:`Impuesto · ${t.nombre}`});
-  });
-  (state.paymentAgreements.items||[]).forEach(a=>{
-    (a.cuotas||[]).forEach(c=>{
-      if(c.estado==='pagado' || !c.vencimiento) return;
-      entries.push({date:c.vencimiento, amount:c.monto, label:`${a.organismo}${a.concepto?` · ${a.concepto}`:''} · Cuota ${c.nro}`});
-    });
-  });
-  const byDate = {};
-  entries.forEach(e=>{ (byDate[e.date] = byDate[e.date]||[]).push(e); });
-  const dates = Object.keys(byDate).sort();
-  if(dates.length===0){
-    return `<div class="empty-state">${ic('receipt')}<p>No hay vencimientos pendientes para mostrar en el calendario.</p></div>`;
-  }
-  return `
-  <div style="padding:16px;">
-    ${dates.map(date=>{
-      const items = byDate[date].sort((a,b)=> b.amount-a.amount);
-      const total = items.reduce((s,e)=>s+e.amount, 0);
-      const isPast = date < today;
-      const badge = dateBadgeParts(date);
-      const color = isPast ? 'var(--danger)' : (date <= new Date(Date.now()+7*86400000).toISOString().slice(0,10) ? 'var(--warn)' : 'rgba(255,255,255,0.6)');
-      return `
-      <div style="margin-bottom:14px;">
-        <div style="display:flex; align-items:center; gap:12px; margin-bottom:8px;">
-          <div style="flex:none; width:46px; padding:5px 2px; border-radius:10px; background:rgba(255,255,255,0.06); border:1.5px solid ${color}; color:${color}; text-align:center;">
-            <div style="font-size:18px; font-weight:800; line-height:1.1;">${badge.day}</div>
-            <div style="font-size:9px; font-weight:700; letter-spacing:.5px;">${badge.month}</div>
-          </div>
-          <div style="flex:1; font-size:13px; font-weight:700; color:${isPast?'var(--danger)':'var(--white)'};">${fmtDateAR(date)}${isPast?' · vencido':''}</div>
-          <div style="font-size:15px; font-weight:800; color:var(--gold2);">${money(total)}</div>
-        </div>
-        ${items.map(e=>`
-          <div style="display:flex; justify-content:space-between; align-items:center; gap:10px; padding:9px 12px 9px 58px; font-size:12.5px; color:rgba(255,255,255,0.75);">
-            <span>${escapeHtml(e.label)}</span>
-            <span style="font-weight:700; color:var(--white); flex:none;">${money(e.amount)}</span>
-          </div>`).join('')}
-      </div>`;
-    }).join('')}
-  </div>`;
 }
 
 // Caja Diaria vive en su propio archivo (caja-diaria.html), con su propio
