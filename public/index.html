@@ -21,6 +21,7 @@
   --cream:#f8f5ec; --white:#ffffff;
   --glass:rgba(255,255,255,0.06); --glass-bd:rgba(255,255,255,0.12);
   --ok:#3ecf8e; --warn:#e0a83c; --danger:#e5566d;
+  --pink:#ff3d81; --pink-deep:#c91361;
   --radius:18px;
 }
 *{box-sizing:border-box; margin:0; padding:0;}
@@ -152,14 +153,29 @@ img{display:block; max-width:100%;}
 
 /* ---------- BOTTOM NAV ---------- */
 .bottomnav{
-  display:flex; justify-content:space-around; padding:10px 6px 14px;
-  background:rgba(10,16,40,0.85); border-top:1px solid var(--glass-bd);
-  position:sticky; bottom:0; backdrop-filter:blur(14px); z-index:50;
+  display:flex; justify-content:space-around; align-items:center;
+  margin:0 12px 14px; padding:9px 4px;
+  background:linear-gradient(160deg, var(--pink) 0%, var(--pink-deep) 100%);
+  border-radius:999px; position:sticky; bottom:14px; z-index:50;
+  box-shadow:0 10px 24px -8px rgba(140,10,70,0.55);
 }
 .bottomnav button{display:flex; flex-direction:column; align-items:center; gap:4px;
-  font-size:10.5px; color:rgba(255,255,255,0.45); padding:4px 10px;}
-.bottomnav button.active{color:var(--gold2);}
-.bottomnav svg{width:21px; height:21px;}
+  font-size:10px; font-weight:700; color:rgba(255,255,255,0.65); padding:4px 8px;}
+.bottomnav button.active{color:#fff;}
+.bottomnav button.active svg{filter:drop-shadow(0 0 6px rgba(255,255,255,0.55));}
+.bottomnav svg{width:20px; height:20px;}
+.bottomnav .nav-cart-circle{
+  width:44px; height:44px; margin-top:-26px; border-radius:50%;
+  background:linear-gradient(150deg,#fff,#ffe0ec);
+  border:3px solid var(--pink-deep);
+  display:flex; align-items:center; justify-content:center;
+  box-shadow:0 4px 0 rgba(80,0,40,0.35), 0 8px 16px -6px rgba(0,0,0,0.45);
+}
+.bottomnav .nav-cart-circle svg{width:21px; height:21px; color:var(--pink-deep);}
+.bottomnav button.nav-cart.active .nav-cart-circle{
+  background:linear-gradient(150deg,var(--goldlight),var(--gold)); border-color:#fff;
+}
+.bottomnav button.nav-cart.active .nav-cart-circle svg{color:var(--navy);}
 
 /* ---------- LISTS / CATALOG ---------- */
 .search-wrap{position:relative; margin:14px 16px;}
@@ -256,6 +272,12 @@ img{display:block; max-width:100%;}
 .candy-catalog .pc-stock-low{background:var(--c-gold); color:#5c3b00;}
 .candy-catalog .pc-stock-out{background:var(--c-pink-deep); color:#fff;}
 .candy-catalog .empty-state{color:rgba(255,255,255,0.65);}
+.candy-catalog .ribbon{
+  margin:2px 16px 12px; padding:10px 14px; border-radius:14px;
+  background:linear-gradient(120deg,var(--c-gold),var(--c-gold-deep));
+  font-family:'Baloo 2',sans-serif; font-weight:700; font-size:12.5px; color:#5c3b00;
+  box-shadow:0 4px 0 #a86e00; text-align:center;
+}
 
 /* ---------- PRODUCT DETAIL ---------- */
 .pd-img{aspect-ratio:1; background:rgba(255,255,255,0.05); display:flex; align-items:center; justify-content:center; margin:0 16px; border-radius:18px; overflow:hidden; position:relative;}
@@ -633,6 +655,7 @@ function renderCeliaco(){
       <img src="/sin-tacc-seal.png" style="width:36px; height:36px; object-fit:contain;">
       <p style="font-size:13px; color:rgba(255,255,255,0.6); line-height:1.4;">Todos nuestros productos certificados Sin TACC, aptos para personas con celiaquía.</p>
     </div>
+    ${renderCatalogRibbonHTML('celiaco')}
     <div class="product-grid">
       ${products.map(p=>`
         <div class="product-card" onclick="openProduct('${p.id}')">
@@ -746,6 +769,7 @@ let state = {
   ofertas: [],
   bannerNovedades: null,
   bannerOfertas: null,
+  catalogRibbons: {},
   homeBackgrounds: [],
   homeBackgroundActiveId: null,
   adminBannerSub: 'banners',
@@ -1040,7 +1064,7 @@ function normalizeHomeBackground(parsed){
 }
 async function apiSyncContent(){
   try{
-    const data = await supaFetch('/app_settings?setting_key=in.(novedades,ofertas,banner_novedades,banner_ofertas,home_background,client_discounts,wholesale_clients,categories,store_config,fiscal_config,banners,pos_config,pos_banner)&select=setting_key,setting_value', 'GET');
+    const data = await supaFetch('/app_settings?setting_key=in.(novedades,ofertas,banner_novedades,banner_ofertas,catalog_ribbons,home_background,client_discounts,wholesale_clients,categories,store_config,fiscal_config,banners,pos_config,pos_banner)&select=setting_key,setting_value', 'GET');
     if(!data || data.length===0) return;
     let changed = false;
     data.forEach(row=>{
@@ -1057,6 +1081,9 @@ async function apiSyncContent(){
         }
         if(row.setting_key==='banner_ofertas' && JSON.stringify(parsed)!==JSON.stringify(state.bannerOfertas)){
           state.bannerOfertas = parsed; changed = true;
+        }
+        if(row.setting_key==='catalog_ribbons' && parsed && JSON.stringify(parsed)!==JSON.stringify(state.catalogRibbons)){
+          state.catalogRibbons = parsed; changed = true;
         }
         if(row.setting_key==='home_background'){
           const norm = normalizeHomeBackground(parsed);
@@ -1678,6 +1705,7 @@ function renderOfertasScreen(){
       <span style="font-size:28px;">🔥</span>
       <p style="font-size:13px; color:rgba(255,255,255,0.6); line-height:1.4;">Productos con descuento por tiempo limitado. El precio vuelve solo al normal cuando vence la oferta.</p>
     </div>
+    ${renderCatalogRibbonHTML('ofertas')}
     ${products.length===0 ? `
       <div class="empty-state">${ic('box')}<p>No hay ofertas activas en este momento.</p></div>
     ` : `
@@ -1894,15 +1922,17 @@ function renderBottomNav(){
     {key:"account", icon:"user", label:"Cuenta"},
   ];
   return `<div class="bottomnav">
-    ${tabs.map(t=>`
-      <button class="${r===t.key?'active':''}" onclick="nav('${t.key}'${t.section?`,{section:'${t.section}'}`:''})" style="position:relative;">
-        ${ic(t.icon)}
-        ${t.key==='chat'
-          ? `<span id="chat-nav-badge" style="position:absolute;top:-2px;right:2px;background:var(--gold);color:var(--navy);font-size:9px;font-weight:700;border-radius:10px;padding:1px 5px;display:${t.badge?'':'none'};">${t.badge||0}</span>`
-          : t.badge?`<span style="position:absolute;top:-2px;right:2px;background:var(--gold);color:var(--navy);font-size:9px;font-weight:700;border-radius:10px;padding:1px 5px;">${t.badge}</span>`:''
-        }
+    ${tabs.map(t=>{
+      const isCart = t.key==='cart';
+      const badgeHtml = t.key==='chat'
+        ? `<span id="chat-nav-badge" style="position:absolute;top:-2px;right:2px;background:var(--gold);color:var(--navy);font-size:9px;font-weight:700;border-radius:10px;padding:1px 5px;display:${t.badge?'':'none'};">${t.badge||0}</span>`
+        : t.badge?`<span style="position:absolute;top:-2px;right:2px;background:var(--gold);color:var(--navy);font-size:9px;font-weight:700;border-radius:10px;padding:1px 5px;">${t.badge}</span>`:'';
+      return `
+      <button class="${r===t.key?'active':''}${isCart?' nav-cart':''}" onclick="nav('${t.key}'${t.section?`,{section:'${t.section}'}`:''})" style="position:relative;">
+        ${isCart ? `<span class="nav-cart-circle">${ic(t.icon)}</span>${badgeHtml}` : `${ic(t.icon)}${badgeHtml}`}
         <span>${t.label}</span>
-      </button>`).join('')}
+      </button>`;
+    }).join('')}
   </div>`;
 }
 
@@ -2085,6 +2115,13 @@ function renderHome(){
   </div>`;
 }
 
+/* ---------- CANDY RIBBON (cartel angosto arriba de la grilla, editable desde Admin > Banners > Ribbon) ---------- */
+function renderCatalogRibbonHTML(key){
+  const r = state.catalogRibbons[key];
+  if(!r || !r.enabled || !r.text || !r.text.trim()) return '';
+  return `<div class="ribbon">${r.text}</div>`;
+}
+
 /* ---------- CATALOG ---------- */
 function renderCatalog(section){
   section = section || "market";
@@ -2131,6 +2168,7 @@ function renderCatalogResults(section){
       ${hasSinTacc ? `<button class="chip ${sinTaccOnly?'active':''}" onclick="toggleSinTaccFilter()" style="${sinTaccOnly?'':'background:rgba(46,125,79,0.15); border-color:rgba(46,125,79,0.5); color:#6fcf97;'}">🌾 Sin TACC</button>` : ''}
       ${hasSinAzucar ? `<button class="chip ${sinAzucarOnly?'active':''}" onclick="toggleSinAzucarFilter()" style="${sinAzucarOnly?'':'background:rgba(180,140,0,0.15); border-color:rgba(180,140,0,0.5); color:#f0c040;'}">🚫🍬 Sin Azúcar</button>` : ''}
     </div>
+    ${renderCatalogRibbonHTML(section)}
     ${products.length===0 ? `
       <div class="empty-state">${ic('box')}<p>No encontramos productos${q?` para "${q}"`:''}.</p></div>
     ` : `
@@ -8471,12 +8509,54 @@ function renderAdminBanners(){
       <button class="chip ${sub==='novedades'?'active':''}" onclick="setAdminBannerSub('novedades')">Novedades</button>
       <button class="chip ${sub==='ofertas'?'active':''}" onclick="setAdminBannerSub('ofertas')">Ofertas</button>
       <button class="chip ${sub==='fondo'?'active':''}" onclick="setAdminBannerSub('fondo')">Fondo</button>
+      <button class="chip ${sub==='ribbon'?'active':''}" onclick="setAdminBannerSub('ribbon')">Ribbon</button>
     </div>
     ${sub==='banners' ? renderBannersList() : ''}
     ${sub==='novedades' ? renderNovedadesList() : ''}
     ${sub==='ofertas' ? renderOfertasList() : ''}
     ${sub==='fondo' ? renderHomeBackgroundSection() : ''}
+    ${sub==='ribbon' ? renderCatalogRibbonsSection() : ''}
   `;
+}
+const CATALOG_RIBBON_SECTIONS = [
+  {key:'natural', label:'Tienda Natural'},
+  {key:'celiaco', label:'Apto Celíaco'},
+  {key:'sinazucar', label:'Sin Azúcar'},
+  {key:'golosinas', label:'Golosinas'},
+  {key:'market', label:'Market'},
+  {key:'fiambreria', label:'Fiambrería'},
+  {key:'ofertas', label:'Ofertas'},
+];
+function renderCatalogRibbonsSection(){
+  return `
+    <div style="padding:0 16px 16px;">
+      <p style="font-size:12px; color:rgba(255,255,255,0.5); line-height:1.5; margin-bottom:12px;">Cartel angosto arriba de los productos en cada catálogo (ej: "🎉 2x1 en gomitas surtidas esta semana"). Dejalo apagado o vacío para que no se muestre.</p>
+      ${CATALOG_RIBBON_SECTIONS.map(s=>{
+        const r = state.catalogRibbons[s.key] || {text:'', enabled:false};
+        return `
+        <div style="padding:12px 14px; border-radius:12px; background:var(--glass); border:1px solid var(--glass-bd); margin-bottom:10px;">
+          <div style="display:flex; align-items:center; justify-content:space-between; margin-bottom:8px;">
+            <b style="font-size:13px;">${s.label}</b>
+            <button class="chip ${r.enabled?'active':''}" onclick="toggleCatalogRibbon('${s.key}')">${r.enabled?'Activo':'Inactivo'}</button>
+          </div>
+          <input value="${escapeHtml(r.text||'')}" placeholder="Ej: 🎉 2x1 en gomitas surtidas esta semana" onchange="setCatalogRibbonText('${s.key}', this.value)" style="width:100%; padding:10px 12px; border-radius:10px; background:rgba(255,255,255,0.06); border:1px solid var(--glass-bd); color:var(--cream); font-size:13px;">
+        </div>`;
+      }).join('')}
+    </div>
+  `;
+}
+function toggleCatalogRibbon(key){
+  const cur = state.catalogRibbons[key] || {text:'', enabled:false};
+  state.catalogRibbons = {...state.catalogRibbons, [key]: {...cur, enabled: !cur.enabled}};
+  saveState(); render();
+  apiSaveSetting('catalog_ribbons', state.catalogRibbons);
+}
+function setCatalogRibbonText(key, text){
+  const cur = state.catalogRibbons[key] || {text:'', enabled:false};
+  state.catalogRibbons = {...state.catalogRibbons, [key]: {...cur, text}};
+  saveState();
+  apiSaveSetting('catalog_ribbons', state.catalogRibbons);
+  toast('Guardado','ok');
 }
 function renderHomeBackgroundSection(){
   const bgs = state.homeBackgrounds||[];
