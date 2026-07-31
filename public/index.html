@@ -6769,13 +6769,81 @@ function clearGlobalPromo(){
 }
 
 /* ---------- ADMIN: CLIENTES ---------- */
+/* ---------- CLIENTES DUPLICADOS ----------
+   normalizePhone() antes no agregaba el "9" que necesitan los celulares
+   argentinos en formato internacional (ver supabase-migration-merge-
+   phone-duplicates.sql) — según cómo se haya tipeado el número las
+   distintas veces, el mismo cliente real podía terminar como dos filas
+   separadas (una con el 9, otra sin él, o con otras variantes de
+   formato). Acá los detectamos comparando los últimos 10 dígitos del
+   teléfono (el número real, sin importar 54/9/0/15 adelante) y los
+   fusionamos en uno solo con el formato correcto. */
+function findDuplicateClientGroups(){
+  const groups = {};
+  Object.values(state.clients).forEach(c=>{
+    const digits = (c.phone||'').replace(/\D/g,'');
+    const core = digits.slice(-10);
+    if(!core || core.length<8) return;
+    (groups[core] = groups[core]||[]).push(c);
+  });
+  return Object.values(groups).filter(g=>g.length>1);
+}
+function pickCanonicalClient(group){
+  const proper = group.find(c=>/^\+549\d{10}$/.test(c.phone));
+  return proper || group.slice().sort((a,b)=>(b.points||0)-(a.points||0))[0];
+}
+async function mergeDuplicateClients(){
+  const groups = findDuplicateClientGroups();
+  if(groups.length===0){ toast('No encontré clientes duplicados', 'ok'); return; }
+  const totalDupes = groups.reduce((s,g)=>s+g.length-1, 0);
+  if(!confirm(`Encontré ${groups.length} cliente${groups.length!==1?'s':''} con filas duplicadas (${totalDupes} de más). Se van a fusionar en una sola por cliente — sumando puntos y completando nombre/dirección/email/mayorista/descuento desde todas las filas. ¿Continuar?`)) return;
+  let merged = 0;
+  for(const group of groups){
+    const canon = pickCanonicalClient(group);
+    const canonPhone = /^\+549\d{10}$/.test(canon.phone) ? canon.phone : normalizePhone(canon.phone);
+    const others = group.filter(c=>c!==canon);
+    let points = canon.points||0, name = canon.name, address = canon.address, email = canon.email,
+      doc = canon.doc, city = canon.city, province = canon.province,
+      wholesale = !!canon.wholesale, discountPct = canon.discountPct;
+    others.forEach(o=>{
+      points += (o.points||0);
+      name = name || o.name; address = address || o.address; email = email || o.email;
+      doc = doc || o.doc; city = city || o.city; province = province || o.province;
+      wholesale = wholesale || !!o.wholesale;
+      discountPct = discountPct || o.discountPct;
+    });
+    delete state.clients[canon.phone];
+    others.forEach(o=>delete state.clients[o.phone]);
+    state.clients[canonPhone] = {phone:canonPhone, name:name||'', address:address||'', email:email||'', doc:doc||'', city:city||'', province:province||'', points, orders:[], wholesale, discountPct};
+    if(state.currentClientPhone && others.some(o=>o.phone===state.currentClientPhone)) state.currentClientPhone = canonPhone;
+    for(const o of others){
+      try{ await adminFetch('/clients?phone=eq.'+encodeURIComponent(o.phone), 'DELETE'); }
+      catch(e){ console.warn('Error borrando duplicado', o.phone, e); }
+    }
+    try{ await adminFetch('/clients?phone=eq.'+encodeURIComponent(canonPhone), 'PATCH', {full_name:name||'', address:address||'', email:email||''}); }
+    catch(e){ console.warn('Error actualizando cliente fusionado', canonPhone, e); }
+    try{ await adminFetch('/rpc/set_client_points', 'POST', {p_phone: canonPhone, p_points: points}); }
+    catch(e){ console.warn('Error actualizando puntos fusionados', e); }
+    merged++;
+  }
+  saveState(); render();
+  try{ await apiSaveWholesaleClients(); }catch(e){}
+  try{ await apiSaveClientDiscounts(); }catch(e){}
+  toast(`${merged} cliente${merged!==1?'s':''} fusionado${merged!==1?'s':''}`, 'ok');
+}
 function renderAdminClientes(){
   if(state.adminClientDetailPhone) return renderAdminClientDetail(state.adminClientDetailPhone);
   const list = Object.values(state.clients).sort((a,b)=>b.points-a.points);
   if(list.length===0){
     return `<div class="empty-state">${ic('user')}<p>Todavía no hay clientes registrados.</p></div>`;
   }
-  return list.map((c,i)=>{
+  const dupeGroups = findDuplicateClientGroups();
+  const dupeBanner = dupeGroups.length>0 ? `
+    <div style="margin:0 16px 12px; padding:14px; border-radius:12px; background:rgba(224,168,60,0.12); border:1px solid rgba(224,168,60,0.4);">
+      <div style="font-size:13px; color:var(--warn); font-weight:700; margin-bottom:8px;">⚠️ Encontré ${dupeGroups.length} cliente${dupeGroups.length!==1?'s':''} con filas duplicadas (mismo número, distinto formato)</div>
+      <button class="btn-secondary" style="width:100%;" onclick="mergeDuplicateClients()">Fusionar duplicados</button>
+    </div>` : '';
+  return dupeBanner + list.map((c,i)=>{
     const tier = tierFor(c.points);
     return `<div class="client-row" style="cursor:pointer;" onclick="openAdminClientDetail('${c.phone}')">
       <div class="client-rank">${i+1}</div>
