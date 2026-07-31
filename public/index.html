@@ -5136,8 +5136,14 @@ function renderAdminPedidos(){
         <span class="oc-id">#${o.id} — ${escapeHtml(o.customer.name)}</span>
         <span class="status-pill status-${o.status.toLowerCase()}">${o.status}</span>
       </div>
-      <div class="oc-items">${o.items.map(it=>formatOrderItemLabel(it)).join(', ')}</div>
-      <div style="font-weight:700; color:var(--gold2); margin-bottom:10px;">${money(o.total)}</div>
+      <div class="oc-items" style="display:flex; flex-direction:column; gap:4px; margin-bottom:8px;">
+        ${o.items.map((it,idx)=>`
+        <div style="display:flex; align-items:center; justify-content:space-between; gap:8px;">
+          <span style="${it.sinStock?'text-decoration:line-through; opacity:0.5;':''}">${formatOrderItemLabel(it)}</span>
+          ${o.status!=="Cancelado" ? `<button style="flex:0 0 auto; padding:2px 8px; font-size:10px; border-radius:8px; cursor:pointer; background:${it.sinStock?'rgba(46,204,113,0.15)':'rgba(231,76,60,0.12)'}; border:1px solid ${it.sinStock?'rgba(46,204,113,0.4)':'rgba(231,76,60,0.4)'}; color:${it.sinStock?'#2ecc71':'#e74c3c'};" onclick="toggleOrderItemStock('${o.id}', ${idx})">${it.sinStock?'↩️ Restaurar':'🚫 Sin stock'}</button>` : ''}
+        </div>`).join('')}
+      </div>
+      <div style="font-weight:700; color:var(--gold2); margin-bottom:10px;">${o.items.some(it=>it.sinStock) ? `<span style="text-decoration:line-through; opacity:0.5; font-weight:400; margin-right:6px;">${money(orderOriginalTotal(o))}</span>` : ''}${money(o.total)}</div>
       <div class="oc-actions">
         ${o.status==="Cancelado" ? `<button class="btn-secondary" style="flex:1; padding:9px;" disabled>Anulado</button>`
           : o.status!=="Entregado" ? `<button class="btn-advance" onclick="advanceOrderStatus('${o.id}')">Marcar ${order[order.indexOf(o.status)+1]}</button>` : `<button class="btn-secondary" style="flex:1; padding:9px;" disabled>Completado</button>`}
@@ -5194,6 +5200,66 @@ async function apiCancelOrder(orderId){
   }catch(e){
     console.warn('Error anulando pedido:', e);
     toast('Se anuló acá pero no en el servidor: '+e.message, 'err');
+  }
+}
+// Suma de lineTotal de todos los items sin importar sinStock — se usa para
+// mostrar tachado el total "original" al lado del nuevo total ya descontado.
+function orderOriginalTotal(order){
+  const base = order.items.reduce((s,it)=>s+Number(it.lineTotal||0), 0);
+  const discPct = order.clientDiscountPct || 0;
+  return base - (discPct>0 ? Math.round(base*discPct/100) : 0);
+}
+// Recalcula el total del pedido excluyendo los items marcados sinStock,
+// reaplicando el % de descuento del cliente si tenía uno.
+function recalcOrderTotal(order){
+  const base = order.items.reduce((s,it)=> s + (it.sinStock ? 0 : Number(it.lineTotal||0)), 0);
+  const discPct = order.clientDiscountPct || 0;
+  const discAmount = discPct>0 ? Math.round(base*discPct/100) : 0;
+  order.clientDiscountAmount = discAmount || undefined;
+  order.total = base - discAmount;
+}
+// Marca/desmarca un item del pedido como sin stock: lo tacha, descuenta su
+// importe del total (con el % de descuento reaplicado) y devuelve/retira el
+// stock del producto (solo para items vendidos por unidad — los vendidos
+// por peso nunca descontaron stock al crear el pedido).
+function toggleOrderItemStock(orderId, itemIndex){
+  const order = state.orders.find(o=>o.id===orderId);
+  if(!order) return;
+  const it = order.items[itemIndex];
+  if(!it) return;
+  const marking = !it.sinStock;
+  if(marking && !confirm(`¿Marcar "${it.name}" como sin stock? Se descuenta del total del pedido.`)) return;
+  it.sinStock = marking;
+  if(!it.grams){
+    const p = state.products.find(pr=>pr.id===String(it.id));
+    if(p){
+      p.stock = Math.max(0, p.stock + (marking ? (it.qty||1) : -(it.qty||1)));
+      apiPatchProductStock(p);
+    }
+  }
+  recalcOrderTotal(order);
+  saveState(); render();
+  apiUpdateOrderItems(order);
+  toast(marking ? "Producto marcado sin stock, descontado del total" : "Producto restaurado al pedido", "ok");
+}
+async function apiPatchProductStock(p){
+  if(!IS_ADMIN_APP || !p._apiId) return;
+  try{
+    await adminFetch('/products?id=eq.'+p._apiId, 'PATCH', {stock: p.stock});
+  }catch(e){
+    console.warn('Error actualizando stock del producto:', e);
+    toast('No se pudo actualizar el stock en el servidor: '+e.message, 'err');
+  }
+}
+async function apiUpdateOrderItems(order){
+  if(!IS_ADMIN_APP) return;
+  try{
+    await adminFetch('/orders?id=eq.'+encodeURIComponent(order.id), 'PATCH', {
+      items: order.items, total: order.total, discount_amount: order.clientDiscountAmount||null,
+    });
+  }catch(e){
+    console.warn('Error actualizando items del pedido:', e);
+    toast('No se pudo actualizar en el servidor: '+e.message, 'err');
   }
 }
 function deleteOrder(orderId){
