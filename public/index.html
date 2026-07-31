@@ -1883,6 +1883,7 @@ function buildOrderWAMessage(order, unsaved){
   msg += `\nTotal: ${money(order.total)}`;
   if(order.customer.address) msg += `\nDirección: ${order.customer.address}`;
   msg += `\nNombre: ${order.customer.name}`;
+  if(order.notes) msg += `\nNotas: ${order.notes}`;
   return msg;
 }
 function buildStatusWAMessage(order){
@@ -2657,6 +2658,7 @@ async function submitOrder(){
   const name = document.getElementById("ck-name").value.trim();
   const rawPhone = document.getElementById("ck-phone").value.trim();
   const address = document.getElementById("ck-address").value.trim();
+  const notes = document.getElementById("ck-notes").value.trim();
   if(!name || !rawPhone){ toast("Completá nombre y teléfono", "err"); return; }
   const phone = normalizePhone(rawPhone);
   state.currentClientPhone = phone;
@@ -2671,6 +2673,10 @@ async function submitOrder(){
   const waWin = window.open('', '_blank');
   try{
     const order = await placeOrder({name, phone, address}, discPct);
+    // notes no viaja al servidor (create_order no tiene ese parámetro) — se
+    // manda igual por WhatsApp, que es donde realmente se coordina el
+    // pedido, así no se pierde lo que el cliente aclaró.
+    order.notes = notes;
     saveState();
     const msg = buildOrderWAMessage(order);
     openWaWindow(waWin, msg);
@@ -2690,6 +2696,7 @@ async function submitOrder(){
     // ahí se abre WhatsApp.
     console.warn('No se pudo guardar el pedido en el servidor, se manda igual por WhatsApp:', e);
     const order = placeOrderLocalFallback({name, phone, address}, discPct);
+    order.notes = notes;
     await confirmOrderNotSaved(e);
     const msg = buildOrderWAMessage(order, true);
     openWaWindow(waWin, msg);
@@ -8189,10 +8196,10 @@ function renderAdminSugerencias(){
   return state.suggestions.map(s=>`
     <div class="order-card" style="${s.read?'opacity:.6;':''}" onclick="markSuggestionRead('${s.id}')">
       <div class="oc-head">
-        <span class="oc-id">${s.name}${s.phone?` · ${s.phone}`:''}</span>
+        <span class="oc-id">${escapeHtml(s.name)}${s.phone?` · ${escapeHtml(s.phone)}`:''}</span>
         ${!s.read?'<span class="status-pill status-pendiente">Nueva</span>':''}
       </div>
-      <div class="oc-items" style="color:rgba(255,255,255,0.8); font-size:13px;">${s.message}</div>
+      <div class="oc-items" style="color:rgba(255,255,255,0.8); font-size:13px; white-space:pre-wrap;">${escapeHtml(s.message)}</div>
       <div style="display:flex; justify-content:space-between; align-items:center; margin-top:8px;">
         <span style="font-size:11px; color:rgba(255,255,255,0.4);">${new Date(s.date).toLocaleDateString('es-AR')}</span>
         <button class="icon-btn" onclick="event.stopPropagation(); deleteSuggestion('${s.id}')">${ic('trash')}</button>
