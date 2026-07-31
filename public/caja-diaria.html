@@ -633,7 +633,6 @@ const SUPABASE_KEY = 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZ
 // weqeztedhhthbl) que hizo que la sincronización fallara en silencio
 // durante días, sin que nadie lo notara hasta que faltaron datos.
 const SUPABASE_URL = (()=>{ try{ const r=JSON.parse(atob(SUPABASE_KEY.split('.')[1])).ref; return 'https://'+r+'.supabase.co'; }catch(e){ return 'https://topgunweqeztedhhthbl.supabase.co'; } })();
-const CAJA_DATA_KEY = 'caja_diaria_data';
 let _remoteSyncTimer = null;
 
 async function cajaFetch(path, method, body){
@@ -644,21 +643,70 @@ async function cajaFetch(path, method, body){
   if(!res.ok){ let err; try{ err=JSON.parse(text); }catch(e){ err={message:text}; } throw new Error(err.message || 'HTTP '+res.status); }
   return text ? JSON.parse(text) : null;
 }
+// Los datos de caja (plata real) ya no se leen/escriben directo contra la
+// tabla — pasan por estas dos funciones RPC, que validan el PIN del lado
+// del servidor (ver supabase-migration-caja-diaria-pin.sql). Chequearlo
+// solo acá en JS no alcanzaría: cualquiera podría pegarle directo a la
+// API sin pasar por esta pantalla.
+async function cajaRpc(name, args){
+  const res = await fetch(SUPABASE_URL + '/rest/v1/rpc/' + name, {
+    method: 'POST',
+    headers: {'Content-Type':'application/json','apikey':SUPABASE_KEY,'Authorization':'Bearer '+SUPABASE_KEY},
+    body: JSON.stringify(args||{}),
+  });
+  const text = await res.text();
+  if(!res.ok){ let err; try{ err=JSON.parse(text); }catch(e){ err={message:text}; } throw new Error(err.message || 'HTTP '+res.status); }
+  return text ? JSON.parse(text) : null;
+}
+let CAJA_PIN = null;
+function promptCajaPin(wrongPin){
+  return new Promise(resolve=>{
+    const overlay = document.createElement('div');
+    overlay.style.cssText = 'position:fixed;inset:0;background:#0f1c45;display:flex;flex-direction:column;align-items:center;justify-content:center;z-index:99999;gap:14px;padding:24px;';
+    overlay.innerHTML = `
+      <div style="color:#fff;font-size:19px;font-weight:700;">🔒 Caja Diaria</div>
+      <div style="color:rgba(255,255,255,.6);font-size:13px;text-align:center;max-width:260px;">Ingresá el PIN para entrar</div>
+      ${wrongPin ? `<div style="color:#e5566d;font-size:12.5px;font-weight:700;">PIN incorrecto, probá de nuevo</div>` : ''}
+      <input id="cajaPinInput" type="password" inputmode="numeric" autocomplete="off" style="width:180px;padding:14px;border-radius:12px;border:1px solid rgba(255,255,255,.2);background:rgba(255,255,255,.08);color:#fff;font-size:22px;text-align:center;letter-spacing:6px;">
+      <button id="cajaPinBtn" style="padding:12px 34px;border-radius:12px;border:none;background:#c5a028;color:#0f1c45;font-weight:700;font-size:14px;cursor:pointer;">Entrar</button>
+    `;
+    document.body.appendChild(overlay);
+    const input = overlay.querySelector('#cajaPinInput');
+    input.focus();
+    const submit = ()=>{ const v=input.value.trim(); if(!v) return; overlay.remove(); resolve(v); };
+    overlay.querySelector('#cajaPinBtn').onclick = submit;
+    input.addEventListener('keydown', e=>{ if(e.key==='Enter') submit(); });
+  });
+}
+// Pide el PIN (recordado en esta pestaña con sessionStorage, así no hay
+// que reescribirlo en cada guardado — pero se vuelve a pedir si se cierra
+// la pestaña) hasta que uno válido confirme contra el servidor.
+async function ensureCajaPin(){
+  const cached = sessionStorage.getItem('caja_pin');
+  if(cached){
+    try{ await cajaRpc('get_caja_diaria', {p_pin: cached}); CAJA_PIN = cached; return; }
+    catch(e){ sessionStorage.removeItem('caja_pin'); }
+  }
+  let wrong = false;
+  while(true){
+    const pin = await promptCajaPin(wrong);
+    try{
+      await cajaRpc('get_caja_diaria', {p_pin: pin});
+      CAJA_PIN = pin;
+      sessionStorage.setItem('caja_pin', pin);
+      return;
+    }catch(e){ wrong = true; }
+  }
+}
 async function pullRemoteState(){
-  const rows = await cajaFetch('/app_settings?setting_key=eq.'+CAJA_DATA_KEY+'&select=setting_value', 'GET');
-  const row = rows && rows[0];
-  if(row){ try{ state = JSON.parse(row.setting_value); }catch(e){} }
+  const raw = await cajaRpc('get_caja_diaria', {p_pin: CAJA_PIN});
+  if(raw){ try{ state = JSON.parse(raw); }catch(e){} }
 }
 async function pushRemoteState(){
   const statusEl = document.getElementById('backupStatus');
   try{
     const val = JSON.stringify(state);
-    const existing = await cajaFetch('/app_settings?setting_key=eq.'+CAJA_DATA_KEY+'&select=id', 'GET');
-    if(existing && existing.length>0){
-      await cajaFetch('/app_settings?setting_key=eq.'+CAJA_DATA_KEY, 'PATCH', {setting_value: val});
-    }else{
-      await cajaFetch('/app_settings', 'POST', {setting_key:CAJA_DATA_KEY, setting_value: val});
-    }
+    await cajaRpc('save_caja_diaria', {p_pin: CAJA_PIN, p_data: val});
     if(statusEl){ statusEl.textContent = '☁ Sincronizado ' + new Date().toLocaleTimeString('es-AR',{hour:'2-digit',minute:'2-digit'}); statusEl.style.color = 'var(--green)'; }
   }catch(e){
     if(statusEl){ statusEl.textContent = '⚠ Sin sincronizar (' + e.message + ')'; statusEl.style.color = 'var(--red)'; }
@@ -2045,11 +2093,11 @@ function pesos(n) {
 // ============================================================
 async function init() {
   load();
+  await ensureCajaPin();
   try{
-    const rows = await cajaFetch('/app_settings?setting_key=eq.'+CAJA_DATA_KEY+'&select=setting_value', 'GET');
-    const row = rows && rows[0];
-    if(row){
-      const remote = JSON.parse(row.setting_value);
+    const raw = await cajaRpc('get_caja_diaria', {p_pin: CAJA_PIN});
+    if(raw){
+      const remote = JSON.parse(raw);
       const remoteUpdatedAt = remote.updatedAt || 0;
       const localUpdatedAt = state.updatedAt || 0;
       if(remoteUpdatedAt > localUpdatedAt){
