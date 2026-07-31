@@ -2546,30 +2546,56 @@ function renderCart(){
 }
 
 /* ---------- CHECKOUT ---------- */
-function renderCheckout(){
-  const saved = state.currentClientPhone ? state.clients[state.currentClientPhone] : null;
-  const savedPhoneDigits = saved ? saved.phone.replace(/^\+?549?/,'') : '';
+// El teléfono recién se pide en este paso (para no frenar a quien solo
+// quiere mirar el catálogo), así que hasta que lo tipea acá state.
+// currentClientPhone puede seguir en null aunque el cliente sea mayorista
+// o tenga descuento especial — todo lo que vio hasta este punto (catálogo,
+// carrito) le mostró precio de lista sin que hubiera forma de saber que
+// era mayorista. Por eso el resumen de esta pantalla se recalcula en vivo
+// apenas escribe el teléfono (onCheckoutPhoneInput), resolviendo la
+// identidad ANTES de mostrar el total — así lo que ve acá es exactamente
+// lo mismo que se termina cobrando y mandando por WhatsApp, en vez de
+// mostrar un total y cobrar otro.
+function renderCheckoutSummaryHtml(){
   const base = cartTotal();
   const discPct = clientDiscountPct();
   const discAmount = discPct > 0 ? Math.round(base * discPct / 100) : 0;
   const finalTotal = base - discAmount;
+  const client = state.currentClientPhone ? state.clients[state.currentClientPhone] : null;
+  const isWholesale = !!(client && client.wholesale);
+  return `
+    ${isWholesale ? `<div class="summary-row" style="color:#6db8e8;"><span>👑 Precio mayorista aplicado</span><span></span></div>` : ''}
+    ${discPct > 0 ? `
+      <div class="summary-row"><span>Subtotal</span><span>${money(base)}</span></div>
+      <div class="summary-row" style="color:var(--ok);"><span>Descuento especial (${discPct}%)</span><span>-${money(discAmount)}</span></div>
+    ` : ''}
+    <div class="summary-row total"><span>Total a pagar</span><span>${money(finalTotal)}</span></div>
+  `;
+}
+// Resuelve el teléfono tipeado contra los clientes ya conocidos SOLO para
+// que el precio mostrado sea el correcto — no guarda nada ni registra al
+// cliente todavía (eso sigue pasando recién al confirmar en submitOrder).
+function onCheckoutPhoneInput(){
+  const rawPhone = (document.getElementById("ck-phone")||{}).value || '';
+  const phone = rawPhone.trim() ? normalizePhone(rawPhone) : null;
+  state.currentClientPhone = (phone && state.clients[phone]) ? phone : null;
+  const summaryEl = document.getElementById("ck-summary");
+  if(summaryEl) summaryEl.innerHTML = renderCheckoutSummaryHtml();
+}
+function renderCheckout(){
+  const saved = state.currentClientPhone ? state.clients[state.currentClientPhone] : null;
+  const savedPhoneDigits = saved ? saved.phone.replace(/^\+?549?/,'') : '';
   return `
   <div class="screen">
     <div class="topbar"><button class="back" onclick="nav('cart')">${ic('chevron')}</button><h2>Tus datos</h2></div>
     <div class="form-group"><label>Nombre completo</label><input id="ck-name" value="${saved?saved.name:''}" placeholder="Tu nombre"></div>
     <div class="form-group"><label>Teléfono</label><div style="display:flex; gap:8px;">
       <div style="padding:13px 14px; border-radius:12px; background:var(--glass); border:1px solid var(--glass-bd); color:var(--cream); font-weight:700;">+549</div>
-      <input id="ck-phone" value="${savedPhoneDigits}" placeholder="11 1234 5678" style="flex:1;">
+      <input id="ck-phone" value="${savedPhoneDigits}" placeholder="11 1234 5678" style="flex:1;" oninput="onCheckoutPhoneInput()">
     </div></div>
     <div class="form-group"><label>Dirección de entrega (opcional)</label><input id="ck-address" value="${saved?saved.address:''}" placeholder="Calle, número, barrio"></div>
     <div class="form-group"><label>Notas (opcional)</label><textarea id="ck-notes" placeholder="Aclaraciones sobre tu pedido"></textarea></div>
-    <div class="cart-summary">
-      ${discPct > 0 ? `
-        <div class="summary-row"><span>Subtotal</span><span>${money(base)}</span></div>
-        <div class="summary-row" style="color:var(--ok);"><span>Descuento especial (${discPct}%)</span><span>-${money(discAmount)}</span></div>
-      ` : ''}
-      <div class="summary-row total"><span>Total a pagar</span><span>${money(finalTotal)}</span></div>
-    </div>
+    <div class="cart-summary" id="ck-summary">${renderCheckoutSummaryHtml()}</div>
     <div style="padding:0 16px 90px;">
       <button class="btn-primary" onclick="submitOrder()">${ic('wa')} Confirmar pedido por WhatsApp</button>
     </div>
