@@ -438,6 +438,9 @@ img{display:block; max-width:100%;}
 .prod-row-actions{display:flex; gap:6px;}
 .icon-btn{width:32px; height:32px; border-radius:8px; background:var(--glass); border:1px solid var(--glass-bd); display:flex; align-items:center; justify-content:center;}
 .icon-btn svg{width:15px; height:15px;}
+.chat-del-btn{background:none; border:none; color:inherit; opacity:.55; cursor:pointer; padding:2px; margin-left:5px; display:inline-flex; vertical-align:middle;}
+.chat-del-btn svg{width:11px; height:11px;}
+.chat-del-btn:active{opacity:1;}
 
 .prod-row-v2{padding:13px 16px; border-bottom:1px solid var(--glass-bd);}
 .prod-row-v2-top{display:flex; gap:12px; align-items:flex-start; margin-bottom:10px;}
@@ -4897,7 +4900,9 @@ function buildChatBubbles(msgs, isAdmin=false){
     </div>`;
   return msgs.map(m=>{
     const mine = isAdmin ? m.sender==='admin' : m.sender==='client';
-    const time = new Date(m.created_at).toLocaleTimeString('es-AR',{hour:'2-digit',minute:'2-digit'});
+    const time = new Date(m.created_at).toLocaleString('es-AR',{day:'2-digit',month:'2-digit',hour:'2-digit',minute:'2-digit'});
+    const canDelete = isAdmin || mine;
+    const delBtn = canDelete ? `<button class="chat-del-btn" title="Borrar mensaje" onclick="deleteChatMessage('${m.id}',decodeURIComponent('${encodeURIComponent(m.client_phone||'')}'),${isAdmin})">${ic('trash')}</button>` : '';
     const bgColor = mine ? 'var(--gold)' : 'var(--glass)';
     const textColor = mine ? 'var(--navy)' : 'var(--white)';
     let attachHtml = '';
@@ -4922,10 +4927,23 @@ function buildChatBubbles(msgs, isAdmin=false){
         <div style="max-width:78%;padding:${hasPad?'10px 14px':'6px'};border-radius:${mine?'18px 18px 4px 18px':'18px 18px 18px 4px'};background:${bgColor};border:${mine?'none':'1px solid var(--glass-bd)'};color:${textColor};overflow:hidden;">
           ${attachHtml}
           ${m.message?`<p style="font-size:14px;line-height:1.45;word-break:break-word;">${escapeHtml(m.message)}</p>`:''}
-          <p style="font-size:10px;opacity:.55;margin-top:4px;text-align:right;padding:${hasPad?'0':'0 8px 4px'};">${time}</p>
+          <p style="font-size:10px;opacity:.55;margin-top:4px;display:flex;align-items:center;justify-content:flex-end;padding:${hasPad?'0':'0 8px 4px'};">${time}${delBtn}</p>
         </div>
       </div>`;
   }).join('');
+}
+
+async function deleteChatMessage(id, phone, isAdmin){
+  if(!confirm('¿Borrar este mensaje? Esta acción no se puede deshacer.')) return;
+  try{
+    if(isAdmin){
+      await adminFetch(`/chat_messages?id=eq.${encodeURIComponent(id)}`, 'DELETE');
+      await syncAdminChats();
+    } else {
+      await rpcFetch('delete_chat_message', {p_phone: phone, p_id: String(id)});
+      await syncClientChat();
+    }
+  }catch(e){ toast("Error al borrar: "+e.message,"err"); }
 }
 
 function startChatPoll(){
