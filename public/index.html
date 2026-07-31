@@ -1918,6 +1918,7 @@ function render(){
   else if(r.screen==="price-list-view") html = renderPriceListView(r.productIds, r.priceMode);
   else if(r.screen==="celiaco") html = renderCeliaco();
   else if(r.screen==="ofertas") html = renderOfertasScreen();
+  else if(r.screen==="search") html = renderGlobalSearch();
   else if(r.screen==="chat") html = needsLogin ? renderClientWelcome() : renderChat();
   else if(r.screen==="suggestions") html = renderSuggestions();
   else html = renderHome();
@@ -1930,6 +1931,7 @@ function renderBottomNav(){
   const tabs = [
     {key:"home", icon:"home", label:"Inicio"},
     {key:"catalog", icon:"grid", label:"Catálogo", section:"market"},
+    {key:"search", icon:"search", label:"Buscar"},
     {key:"cart", icon:"cart2", label:"Carrito", badge:cartCount()},
     {key:"chat", icon:"chat", label:"Chat", badge: state.chatUnread||0},
     {key:"account", icon:"user", label:"Cuenta"},
@@ -2230,6 +2232,56 @@ function onSearchInput(val){
 function setCatalogCat(cat){ state.route.cat = cat; state.route.sinTaccOnly = false; state.route.sinAzucarOnly = false; render(); }
 function toggleSinTaccFilter(){ state.route.sinTaccOnly = !state.route.sinTaccOnly; state.route.sinAzucarOnly = false; state.route.cat = null; render(); }
 function toggleSinAzucarFilter(){ state.route.sinAzucarOnly = !state.route.sinAzucarOnly; state.route.sinTaccOnly = false; state.route.cat = null; render(); }
+
+/* ---------- BÚSQUEDA GLOBAL ----------
+   A diferencia del buscador de adentro de Catálogo (que solo filtra
+   dentro de la sección en la que ya estás), esto busca en TODOS los
+   productos de todas las secciones — y se llega desde la barra inferior,
+   que está en todas las pantallas del cliente, no solo en Catálogo. */
+function renderGlobalSearch(){
+  return `
+  <div class="screen candy-catalog">
+    <div class="topbar">
+      <button class="back" onclick="nav('home')">${ic('chevron')}</button>
+      <h2>Buscar</h2>
+      <img src="${LOGO_DATA_URL}" class="logo-mini" alt="">
+    </div>
+    <div class="search-wrap">
+      <div class="search-bar">
+        ${ic('search')}
+        <input id="global-search-input" autofocus placeholder="Buscar en toda la tienda..." value="${escapeHtml(state.route.gq||'')}" oninput="onGlobalSearchInput(this.value)">
+      </div>
+    </div>
+    <div id="global-search-results">${renderGlobalSearchResults()}</div>
+  </div>`;
+}
+function renderGlobalSearchResults(){
+  const q = (state.route.gq||"").trim().toLowerCase();
+  if(!q){
+    return `<div class="empty-state">${ic('search')}<p>Escribí para buscar en toda la tienda, sin importar la sección.</p></div>`;
+  }
+  const products = state.products.filter(p=>!p.hidden && p.name.toLowerCase().includes(q));
+  return products.length===0 ? `
+    <div class="empty-state">${ic('box')}<p>No encontramos productos para "${escapeHtml(q)}".</p></div>
+  ` : `
+    <div class="product-grid">
+      ${products.map(p=>`
+        <div class="product-card" onclick="openProduct('${p.id}')">
+          <div class="pc-img">
+            ${pcImgBadgeHtml(p)}
+            ${p.photo ? `<img src="${p.photo}" alt="" loading="lazy">` : ic('box')}
+          </div>
+          <div class="pc-body">${pcCardBodyHtml(p)}</div>
+        </div>
+      `).join('')}
+    </div>
+  `;
+}
+function onGlobalSearchInput(val){
+  state.route.gq = val;
+  const el = document.getElementById('global-search-results');
+  if(el) el.innerHTML = renderGlobalSearchResults();
+}
 
 /* ---------- PRODUCT DETAIL ---------- */
 function renderProductDetail(id){
