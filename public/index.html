@@ -6124,13 +6124,49 @@ function downscaleImageDataUrl(dataUrl, maxDim=1600, quality=0.85){
     img.src = dataUrl;
   });
 }
+// Herramienta de una sola vez para achicar las fotos de producto ya
+// subidas (antes de que las nuevas empezaran a subirse a 900px): las baja
+// una por una, las recomprime, y si el resultado pesa bastante menos las
+// vuelve a subir — apiSaveProduct ya sabe subir un data: URL y actualizar
+// photo_url solo, así que reutiliza exactamente el mismo camino que usa
+// cualquier edición manual de producto.
+async function optimizeProductPhotos(){
+  const targets = state.products.filter(p=>p.photo && p.photo.startsWith('http'));
+  if(targets.length===0){ toast('No hay fotos para optimizar', 'err'); return; }
+  if(!confirm(`Esto vuelve a comprimir las fotos de ${targets.length} productos (a 900px, calidad 80%) para que el catálogo cargue más rápido. Puede tardar varios minutos — no cierres esta pantalla mientras corre. ¿Continuar?`)) return;
+  toast(`Optimizando fotos de ${targets.length} productos...`, 'ok');
+  let done=0, skipped=0, failed=0;
+  for(const p of targets){
+    try{
+      const res = await fetch(p.photo);
+      const blob = await res.blob();
+      const dataUrl = await new Promise((resolve,reject)=>{
+        const reader = new FileReader();
+        reader.onload = ()=>resolve(reader.result);
+        reader.onerror = reject;
+        reader.readAsDataURL(blob);
+      });
+      const resized = await downscaleImageDataUrl(dataUrl, 900, 0.8);
+      if(resized.length >= dataUrl.length * 0.9){ skipped++; continue; }
+      p.photo = resized;
+      await apiSaveProduct(p);
+      done++;
+    }catch(e){ console.warn('No se pudo optimizar foto de', p.name, e); failed++; }
+  }
+  saveState(); render();
+  toast(`Fotos optimizadas: ${done} · ya eran chicas: ${skipped} · con error: ${failed}`, 'ok');
+}
 function onPhotoSelected(event){
   const file = event.target.files[0];
   if(!file) return;
   const reader = new FileReader();
   reader.onload = async (e)=>{
     let dataUrl = e.target.result;
-    try{ dataUrl = await downscaleImageDataUrl(dataUrl); }
+    // 900px/calidad 0.8 para fotos de producto en vez del default de 1600 —
+    // se ven en tarjetas chiquitas del catálogo y en un detalle no muy
+    // grande, 1600 era mucho más peso del que se aprovecha y hacía más
+    // lenta la carga del catálogo en conexiones móviles.
+    try{ dataUrl = await downscaleImageDataUrl(dataUrl, 900, 0.8); }
     catch(err){ console.warn("No se pudo optimizar la foto, se usa el original:", err); }
     adminPhotoDraft.original = dataUrl;
     adminPhotoDraft.current = dataUrl;
@@ -7201,6 +7237,11 @@ function renderAdminConfig(){
     </div>
 
     ${state.adminIsSuperAdmin ? `
+    <h3 style="color:var(--gold2); font-size:14px; margin:18px 16px 4px;">Rendimiento</h3>
+    <div style="padding:0 16px 16px;">
+      <p style="font-size:12.5px; color:rgba(255,255,255,0.6); margin-bottom:12px;">Las fotos de producto se suben desde el celular a 1600px — mucho más peso del que se aprovecha en las tarjetas del catálogo y hace más lenta la carga. Las fotos nuevas ya se suben más livianas (900px); este botón vuelve a comprimir las que ya estaban cargadas.</p>
+      <button class="btn-secondary" style="width:100%;" onclick="optimizeProductPhotos()">Optimizar fotos de productos ya cargadas</button>
+    </div>
     <h3 style="color:var(--gold2); font-size:14px; margin:18px 16px 4px;">Administradores</h3>
     <div style="padding:0 16px 6px;">
       <p style="font-size:12px; color:rgba(255,255,255,0.5); margin-bottom:10px;">Podés agregar colaboradores con su propio acceso. Solo vos (Admin General) podés gestionar esto.</p>
