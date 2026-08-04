@@ -306,15 +306,20 @@ img{display:block; max-width:100%;}
 .pd-promo-badge{position:absolute; top:12px; right:12px; z-index:1; background:linear-gradient(135deg,#ffe066,#ffd400);
   color:#c62222; font-size:13px; font-weight:800; padding:5px 12px; border-radius:12px;
   box-shadow:0 3px 10px rgba(255,212,0,0.6); animation:pcPromoPulse 1.8s ease-in-out infinite;}
-.pd-body{padding:18px 18px 130px;}
+.pd-body{padding:18px 18px 210px;}
 .pd-body h2{font-size:21px; color:var(--white); margin-bottom:6px;}
 .pd-price{font-size:22px; font-weight:700; color:var(--gold2); margin-bottom:14px;}
 .pd-desc{font-size:13.5px; color:rgba(255,255,255,0.65); line-height:1.6; margin-bottom:16px;}
 .qty-row{display:flex; align-items:center; gap:14px; margin-bottom:16px;}
 .qty-btn{width:36px; height:36px; border-radius:10px; background:var(--glass); border:1px solid var(--glass-bd); font-size:18px; font-weight:700;}
 .qty-val{font-size:17px; font-weight:700; min-width:30px; text-align:center;}
-.sticky-cta{position:fixed; bottom:0; left:0; right:0; max-width:480px; margin:0 auto;
-  padding:8px 16px 20px; background:rgba(10,16,40,0.92); backdrop-filter:blur(14px); border-top:1px solid var(--glass-bd); z-index:60;}
+/* Flota arriba de la barra de navegación inferior en vez de pegada al
+   borde: bottom:98px deja los ~89px que ocupa el circulo rosa del carrito
+   (medido con el nav ya pegado, sticky bottom:14px) más un margen chico. */
+.sticky-cta{position:fixed; bottom:98px; left:12px; right:12px; max-width:456px; margin:0 auto;
+  padding:10px 16px; background:rgba(10,16,40,0.94); backdrop-filter:blur(14px);
+  border:1px solid var(--glass-bd); border-radius:20px; z-index:60;
+  box-shadow:0 10px 24px -8px rgba(0,0,0,0.5);}
 .btn-primary{width:100%; padding:8px 12px; border-radius:12px; background:var(--gold); color:var(--navy);
   font-weight:700; font-size:13px; display:flex; align-items:center; justify-content:center; gap:6px;}
 .btn-primary svg{width:15px; height:15px; flex-shrink:0;}
@@ -1941,12 +1946,7 @@ function render(){
   else if(r.screen==="chat") html = needsLogin ? renderClientWelcome() : renderChat();
   else if(r.screen==="suggestions") html = renderSuggestions();
   else html = renderHome();
-  // "product" queda afuera de la lista: la barra inferior (nav-cart-circle
-  // incluido) vive en un stacking context distinto al de .sticky-cta —
-  // trampa de la animación fadeIn de .screen — así que superpone el botón
-  // "Agregar al carrito" en vez de quedar detrás. Más simple sacar la barra
-  // de navegación en esa pantalla que pelear con el stacking context.
-  app.innerHTML = html + (["admin","voucher-view","price-list-view","product"].includes(r.screen) ? "" : renderBottomNav());
+  app.innerHTML = html + (["admin","voucher-view","price-list-view"].includes(r.screen) ? "" : renderBottomNav());
   bindDynamic();
 }
 
