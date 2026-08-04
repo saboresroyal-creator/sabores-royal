@@ -1941,7 +1941,12 @@ function render(){
   else if(r.screen==="chat") html = needsLogin ? renderClientWelcome() : renderChat();
   else if(r.screen==="suggestions") html = renderSuggestions();
   else html = renderHome();
-  app.innerHTML = html + (["admin","voucher-view","price-list-view"].includes(r.screen) ? "" : renderBottomNav());
+  // "product" queda afuera de la lista: la barra inferior (nav-cart-circle
+  // incluido) vive en un stacking context distinto al de .sticky-cta —
+  // trampa de la animación fadeIn de .screen — así que superpone el botón
+  // "Agregar al carrito" en vez de quedar detrás. Más simple sacar la barra
+  // de navegación en esa pantalla que pelear con el stacking context.
+  app.innerHTML = html + (["admin","voucher-view","price-list-view","product"].includes(r.screen) ? "" : renderBottomNav());
   bindDynamic();
 }
 
