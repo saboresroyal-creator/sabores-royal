@@ -2177,6 +2177,25 @@ function renderCatalog(section){
     <div id="catalog-results">${renderCatalogResults(section)}</div>
   </div>`;
 }
+// Normaliza para comparar sin importar tildes (así "fiambreria" encuentra
+// "Fiambrería") ni mayúsculas.
+function normText(s){
+  return (s||'').normalize('NFD').replace(/[̀-ͯ]/g,'').toLowerCase();
+}
+// Un producto matchea si el texto buscado aparece en su nombre, categoría,
+// subcategoría o el nombre de su sección — así buscar "combo" encuentra los
+// productos de la categoría "Combos Ofertas" aunque el nombre del producto
+// no diga "combo", y buscar "fiambre"/"fiambrería" encuentra todo lo de la
+// sección Fiambrería, no solo productos que tengan esa palabra en el nombre.
+function productMatchesSearch(p, qNorm){
+  if(!qNorm) return true;
+  if(normText(p.name).includes(qNorm)) return true;
+  if(normText(p.cat).includes(qNorm)) return true;
+  if(normText(p.sub).includes(qNorm)) return true;
+  const secLabel = (SECTION_META[p.section]||{}).label || '';
+  if(normText(secLabel).includes(qNorm)) return true;
+  return false;
+}
 function renderCatalogResults(section){
   const q = (state.route.q||"").toLowerCase();
   const activeCat = state.route.cat || null;
@@ -2192,7 +2211,7 @@ function renderCatalogResults(section){
   if(activeCat) products = products.filter(p=>p.cat===activeCat);
   if(sinTaccOnly) products = products.filter(p=>p.sinTacc);
   if(sinAzucarOnly) products = products.filter(p=>p.sinAzucar);
-  if(q) products = products.filter(p=>p.name.toLowerCase().includes(q));
+  if(q) products = products.filter(p=>productMatchesSearch(p, normText(q)));
   const hasSinTacc = baseProducts.some(p=>p.sinTacc);
   const hasSinAzucar = baseProducts.some(p=>p.sinAzucar);
   return `
@@ -2234,8 +2253,9 @@ function onSearchInput(val){
   // productos con nombres parecidos entra en las primeras 6 sugerencias
   // depende del orden en que Supabase devuelve las filas (no garantizado),
   // y un producto recién editado puede quedar afuera sin motivo aparente.
+  const qNorm = normText(q);
   const matches = state.products.filter(p=>
-    !p.hidden && (p.name.toLowerCase().includes(q) || (p.cat||'').toLowerCase().includes(q))
+    !p.hidden && productMatchesSearch(p, qNorm)
   ).sort((a,b)=>a.name.localeCompare(b.name,'es')).slice(0,12);
   if(!matches.length){ sugEl.style.display='none'; return; }
   sugEl.innerHTML = matches.map(p=>`
@@ -2275,11 +2295,12 @@ function renderGlobalSearch(){
   </div>`;
 }
 function renderGlobalSearchResults(){
-  const q = (state.route.gq||"").trim().toLowerCase();
+  const q = (state.route.gq||"").trim();
   if(!q){
     return `<div class="empty-state">${ic('search')}<p>Escribí para buscar en toda la tienda, sin importar la sección.</p></div>`;
   }
-  const products = state.products.filter(p=>!p.hidden && p.name.toLowerCase().includes(q));
+  const qNorm = normText(q);
+  const products = state.products.filter(p=>!p.hidden && productMatchesSearch(p, qNorm));
   return products.length===0 ? `
     <div class="empty-state">${ic('box')}<p>No encontramos productos para "${escapeHtml(q)}".</p></div>
   ` : `
