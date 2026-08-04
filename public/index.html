@@ -7001,15 +7001,30 @@ async function mergeDuplicateClients(){
       wholesale = wholesale || !!o.wholesale;
       discountPct = discountPct || o.discountPct;
     });
+    // Si el elegido como canónico tampoco tenía el formato +549 bien puesto
+    // (el caso más común: TODAS las filas del grupo vienen del mismo bug de
+    // formato, así que ninguna pasa el regex de pickCanonicalClient), su
+    // fila vieja en Supabase también hay que borrarla — si no, queda
+    // huérfana con el teléfono mal formateado y el PATCH de abajo apunta a
+    // una fila con el teléfono nuevo que todavía no existe, así que no
+    // actualiza nada (esto era lo que hacía que "fusionar" no sirviera).
+    const canonNeedsRename = canonPhone !== canon.phone;
+    const rowsToDelete = canonNeedsRename ? [...others, canon] : others;
     delete state.clients[canon.phone];
     others.forEach(o=>delete state.clients[o.phone]);
     state.clients[canonPhone] = {phone:canonPhone, name:name||'', address:address||'', email:email||'', doc:doc||'', city:city||'', province:province||'', points, orders:[], wholesale, discountPct};
-    if(state.currentClientPhone && others.some(o=>o.phone===state.currentClientPhone)) state.currentClientPhone = canonPhone;
-    for(const o of others){
+    if(state.currentClientPhone && group.some(c=>c.phone===state.currentClientPhone)) state.currentClientPhone = canonPhone;
+    for(const o of rowsToDelete){
       try{ await adminFetch('/clients?phone=eq.'+encodeURIComponent(o.phone), 'DELETE'); }
       catch(e){ console.warn('Error borrando duplicado', o.phone, e); }
     }
-    try{ await adminFetch('/clients?phone=eq.'+encodeURIComponent(canonPhone), 'PATCH', {full_name:name||'', address:address||'', email:email||''}); }
+    try{
+      if(canonNeedsRename){
+        await adminFetch('/clients', 'POST', {phone:canonPhone, full_name:name||'Cliente', address:address||null, email:email||null});
+      }else{
+        await adminFetch('/clients?phone=eq.'+encodeURIComponent(canonPhone), 'PATCH', {full_name:name||'', address:address||null, email:email||null});
+      }
+    }
     catch(e){ console.warn('Error actualizando cliente fusionado', canonPhone, e); }
     try{ await adminFetch('/rpc/set_client_points', 'POST', {p_phone: canonPhone, p_points: points}); }
     catch(e){ console.warn('Error actualizando puntos fusionados', e); }
