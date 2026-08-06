@@ -7198,13 +7198,14 @@ function renderGlobalWholesaleModal(){
       <div class="modal-handle"></div>
       <h3 class="modal-title">Ajustar % mayorista de todo el catálogo</h3>
       <p style="padding:0 16px 14px; font-size:13px; color:rgba(255,255,255,0.6);">Todas las secciones · ${withWholesale.length} de ${group.length} producto${group.length===1?'':'s'} ya tiene precio mayorista cargado.</p>
-      <div class="form-group"><label>Fijar el descuento en este % (reemplaza el actual de cada producto, no lo suma)</label><input id="globalws-set-pct" type="number" min="1" max="99" step="1" placeholder="Ej: 35"></div>
-      <div style="display:flex; gap:10px; margin-bottom:18px;">
+      <div class="form-group"><label>Fijar el descuento en este % para todos (reemplaza el actual de cada producto, no lo suma)</label><input id="globalws-set-pct" type="number" min="1" max="99" step="1" placeholder="Ej: 35"></div>
+      <div style="display:flex; gap:10px; margin-bottom:16px;">
         <button class="btn-secondary" style="flex:1;" onclick="closeGlobalWholesaleModal()">Cancelar</button>
         <button class="btn-primary" style="flex:1;" onclick="applyGlobalWholesaleSet()">Fijar en ${withWholesale.length}</button>
       </div>
-      <div style="border-top:1px solid var(--glass-bd); padding-top:14px; margin-bottom:${withoutWholesale.length>0?'18px':'10px'};">
-        <p style="font-size:12px; color:rgba(255,255,255,0.5); margin-bottom:10px;">O, si en vez de fijar un % parejo para todos preferís sumar/restar puntos al % que ya tenga cada producto (cada uno puede partir de un % distinto):</p>
+      <button class="btn-secondary" id="globalws-advanced-toggle" style="width:calc(100% - 32px); margin:0 16px 16px; font-size:11px; opacity:0.7;" onclick="document.getElementById('globalws-advanced').style.display='block'; document.getElementById('globalws-advanced-toggle').style.display='none';">⚙️ Opción avanzada: sumar/restar puntos en vez de fijar</button>
+      <div id="globalws-advanced" style="display:none; border-top:1px solid var(--glass-bd); padding-top:14px; margin-bottom:${withoutWholesale.length>0?'18px':'10px'};">
+        <p style="font-size:12px; color:rgba(255,255,255,0.5); margin-bottom:10px;">⚠️ Esto SUMA (o resta) al % que ya tenga cada producto, no lo reemplaza — usalo solo si los productos parten de porcentajes distintos entre sí. Para poner el mismo % a todos, usá "Fijar" arriba.</p>
         <div class="form-group"><label>Puntos porcentuales a sumar (negativo para bajar el descuento)</label><input id="globalws-delta" type="number" step="1" placeholder="Ej: 5, o -5"></div>
         <button class="btn-secondary" style="width:100%;" onclick="applyGlobalWholesaleAdjust()">Sumar/restar en ${withWholesale.length}</button>
       </div>
