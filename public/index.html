@@ -7104,11 +7104,17 @@ function renderCategoryWholesaleModal(section, cat, sub){
     <div class="modal-sheet">
       <div class="modal-handle"></div>
       <h3 class="modal-title">Ajustar % mayorista</h3>
-      <p style="padding:0 16px 14px; font-size:13px; color:rgba(255,255,255,0.6);">${label} · ${withWholesale.length} de ${group.length} producto${group.length===1?'':'s'} ya tiene precio mayorista cargado — se ajustan solo esos, sumando este número a su % actual (cada uno puede partir de un % distinto).</p>
-      <div class="form-group"><label>Puntos porcentuales a sumar (negativo para bajar el descuento)</label><input id="catws-delta" type="number" step="1" placeholder="Ej: 5, o -5"></div>
-      <div style="display:flex; gap:10px; margin-bottom:${withoutWholesale.length>0?'18px':'10px'};">
+      <p style="padding:0 16px 14px; font-size:13px; color:rgba(255,255,255,0.6);">${label} · ${withWholesale.length} de ${group.length} producto${group.length===1?'':'s'} ya tiene precio mayorista cargado.</p>
+      <div class="form-group"><label>Fijar el descuento en este % para todos (reemplaza el actual de cada producto, no lo suma)</label><input id="catws-set-pct" type="number" min="1" max="99" step="1" placeholder="Ej: 35"></div>
+      <div style="display:flex; gap:10px; margin-bottom:16px;">
         <button class="btn-secondary" style="flex:1;" onclick="closeCategoryWholesaleModal()">Cancelar</button>
-        <button class="btn-primary" style="flex:1;" onclick="applyCategoryWholesaleAdjust('${section}','${cat}',${sub?`'${sub}'`:'null'})">Aplicar a ${withWholesale.length}</button>
+        <button class="btn-primary" style="flex:1;" onclick="applyCategoryWholesaleSet('${section}','${cat}',${sub?`'${sub}'`:'null'})">Fijar en ${withWholesale.length}</button>
+      </div>
+      <button class="btn-secondary" id="catws-advanced-toggle" style="width:calc(100% - 32px); margin:0 16px 16px; font-size:11px; opacity:0.7;" onclick="document.getElementById('catws-advanced').style.display='block'; document.getElementById('catws-advanced-toggle').style.display='none';">⚙️ Opción avanzada: sumar/restar puntos en vez de fijar</button>
+      <div id="catws-advanced" style="display:none; border-top:1px solid var(--glass-bd); padding-top:14px; margin-bottom:${withoutWholesale.length>0?'18px':'10px'};">
+        <p style="font-size:12px; color:rgba(255,255,255,0.5); margin-bottom:10px;">⚠️ Esto SUMA (o resta) al % que ya tenga cada producto, no lo reemplaza — usalo solo si parten de porcentajes distintos entre sí. Para poner el mismo % a todos, usá "Fijar" arriba.</p>
+        <div class="form-group"><label>Puntos porcentuales a sumar (negativo para bajar el descuento)</label><input id="catws-delta" type="number" step="1" placeholder="Ej: 5, o -5"></div>
+        <button class="btn-secondary" style="width:100%;" onclick="applyCategoryWholesaleAdjust('${section}','${cat}',${sub?`'${sub}'`:'null'})">Sumar/restar en ${withWholesale.length}</button>
       </div>
       ${withoutWholesale.length>0 ? `
       <div style="border-top:1px solid var(--glass-bd); padding-top:14px;">
@@ -7122,6 +7128,24 @@ function renderCategoryWholesaleModal(section, cat, sub){
 function closeCategoryWholesaleModal(){
   const el = document.getElementById("category-wholesale-overlay");
   if(el) el.remove();
+}
+// Fija el % de descuento mayorista tal cual (reemplaza el valor de cada
+// producto del grupo, no lo suma al que ya tenía).
+function applyCategoryWholesaleSet(section, cat, sub){
+  const raw = document.getElementById("catws-set-pct").value;
+  const pct = Number(raw);
+  if(raw.trim()==="" || isNaN(pct) || pct<=0 || pct>=100){ toast("Ingresá un % entre 1 y 99", "err"); return; }
+  const group = productsInCategoryGroup(section, cat, sub).filter(p => p.sellByWeight ? !!p.wholesalePricePerKg : !!p.wholesalePrice);
+  group.forEach(p=>{
+    if(p.sellByWeight){ p.wholesalePricePerKg = Math.round(p.pricePerKg * (1 - pct/100)); }
+    else{ p.wholesalePrice = Math.round(p.price * (1 - pct/100)); }
+    apiSaveProduct(p);
+  });
+  if(group.length===0){ toast("Ningún producto de este grupo tiene precio mayorista cargado todavía", "err"); return; }
+  saveState();
+  closeCategoryWholesaleModal();
+  render();
+  toast(`Descuento mayorista fijado en ${pct}% para ${group.length} producto${group.length===1?'':'s'}`, "ok");
 }
 function applyCategoryWholesaleAdjust(section, cat, sub){
   const raw = document.getElementById("catws-delta").value;
