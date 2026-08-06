@@ -6957,8 +6957,9 @@ async function removePhotoBackgroundAI(){
 /* ---------- ADMIN: CATEGORIAS ---------- */
 function renderAdminCategorias(){
   return `
-    <div style="padding:12px 16px 0;">
+    <div style="padding:12px 16px 0; display:flex; flex-direction:column; gap:8px;">
       <button class="btn-primary" style="width:100%;" onclick="openGlobalPromoModal()">🏷️ Oferta para todo el catálogo</button>
+      <button class="btn-secondary" style="width:100%;" onclick="openGlobalWholesaleModal()">💲 Ajustar % mayorista de todo el catálogo</button>
     </div>
   ` + Object.keys(SECTION_META).map(section=>{
     const cats = state.categories[section]||{};
@@ -7175,6 +7176,119 @@ function applyCategoryWholesaleCreate(section, cat, sub){
   closeCategoryWholesaleModal();
   render();
   toast(`Precio mayorista creado (-${pct}%) en ${count} producto${count===1?'':'s'}`, "ok");
+}
+
+/* ---------- ADMIN: AJUSTAR % MAYORISTA DE TODO EL CATÁLOGO ---------- */
+// Mismo mecanismo que applyCategoryWholesaleAdjust/Create, pero sin filtrar
+// por section/cat/sub: para corregir de una sola vez un % que se cargó mal
+// en muchos productos (ej. "cargué 30% en vez de 35%") sin ir uno por uno.
+function openGlobalWholesaleModal(){
+  const overlay = document.createElement("div");
+  overlay.className = "modal-overlay";
+  overlay.id = "global-wholesale-overlay";
+  overlay.innerHTML = renderGlobalWholesaleModal();
+  document.body.appendChild(overlay);
+}
+function renderGlobalWholesaleModal(){
+  const group = state.products;
+  const withWholesale = group.filter(p => p.sellByWeight ? !!p.wholesalePricePerKg : !!p.wholesalePrice);
+  const withoutWholesale = group.filter(p => p.sellByWeight ? !p.wholesalePricePerKg : !p.wholesalePrice);
+  return `
+    <div class="modal-sheet">
+      <div class="modal-handle"></div>
+      <h3 class="modal-title">Ajustar % mayorista de todo el catálogo</h3>
+      <p style="padding:0 16px 14px; font-size:13px; color:rgba(255,255,255,0.6);">Todas las secciones · ${withWholesale.length} de ${group.length} producto${group.length===1?'':'s'} ya tiene precio mayorista cargado.</p>
+      <div class="form-group"><label>Fijar el descuento en este % (reemplaza el actual de cada producto, no lo suma)</label><input id="globalws-set-pct" type="number" min="1" max="99" step="1" placeholder="Ej: 35"></div>
+      <div style="display:flex; gap:10px; margin-bottom:18px;">
+        <button class="btn-secondary" style="flex:1;" onclick="closeGlobalWholesaleModal()">Cancelar</button>
+        <button class="btn-primary" style="flex:1;" onclick="applyGlobalWholesaleSet()">Fijar en ${withWholesale.length}</button>
+      </div>
+      <div style="border-top:1px solid var(--glass-bd); padding-top:14px; margin-bottom:${withoutWholesale.length>0?'18px':'10px'};">
+        <p style="font-size:12px; color:rgba(255,255,255,0.5); margin-bottom:10px;">O, si en vez de fijar un % parejo para todos preferís sumar/restar puntos al % que ya tenga cada producto (cada uno puede partir de un % distinto):</p>
+        <div class="form-group"><label>Puntos porcentuales a sumar (negativo para bajar el descuento)</label><input id="globalws-delta" type="number" step="1" placeholder="Ej: 5, o -5"></div>
+        <button class="btn-secondary" style="width:100%;" onclick="applyGlobalWholesaleAdjust()">Sumar/restar en ${withWholesale.length}</button>
+      </div>
+      ${withoutWholesale.length>0 ? `
+      <div style="border-top:1px solid var(--glass-bd); padding-top:14px;">
+        <p style="font-size:13px; color:rgba(255,255,255,0.6); margin-bottom:10px;">${withoutWholesale.length} producto${withoutWholesale.length===1?'':'s'} de todo el catálogo todavía no tiene precio mayorista — creáselo desde cero con un % fijo sobre su precio normal.</p>
+        <div class="form-group"><label>% de descuento a crear para los ${withoutWholesale.length} que no tienen</label><input id="globalws-create-pct" type="number" min="1" max="99" step="1" placeholder="Ej: 15"></div>
+        <button class="btn-primary" style="width:100%;" onclick="applyGlobalWholesaleCreate()">Crear en ${withoutWholesale.length}</button>
+      </div>` : ''}
+    </div>
+  `;
+}
+function closeGlobalWholesaleModal(){
+  const el = document.getElementById("global-wholesale-overlay");
+  if(el) el.remove();
+}
+// Fija el % de descuento mayorista tal cual (reemplaza el valor de cada
+// producto, no lo suma al que ya tenía) — para corregir de una que el % haya
+// quedado mal por sumarlo con applyGlobalWholesaleAdjust en vez de fijarlo.
+function applyGlobalWholesaleSet(){
+  const raw = document.getElementById("globalws-set-pct").value;
+  const pct = Number(raw);
+  if(raw.trim()==="" || isNaN(pct) || pct<=0 || pct>=100){ toast("Ingresá un % entre 1 y 99", "err"); return; }
+  const group = state.products.filter(p => p.sellByWeight ? !!p.wholesalePricePerKg : !!p.wholesalePrice);
+  group.forEach(p=>{
+    if(p.sellByWeight){ p.wholesalePricePerKg = Math.round(p.pricePerKg * (1 - pct/100)); }
+    else{ p.wholesalePrice = Math.round(p.price * (1 - pct/100)); }
+    apiSaveProduct(p);
+  });
+  if(group.length===0){ toast("Ningún producto del catálogo tiene precio mayorista cargado todavía", "err"); return; }
+  saveState();
+  closeGlobalWholesaleModal();
+  render();
+  toast(`Descuento mayorista fijado en ${pct}% para ${group.length} producto${group.length===1?'':'s'}`, "ok");
+}
+function applyGlobalWholesaleAdjust(){
+  const raw = document.getElementById("globalws-delta").value;
+  const delta = Number(raw);
+  if(raw.trim()==="" || isNaN(delta) || delta===0){ toast("Ingresá cuántos puntos porcentuales sumar (o restar con -)", "err"); return; }
+  const group = state.products;
+  let count = 0;
+  group.forEach(p=>{
+    if(p.sellByWeight){
+      if(!p.wholesalePricePerKg || !(p.pricePerKg>0)) return;
+      const currentPct = (1 - p.wholesalePricePerKg/p.pricePerKg) * 100;
+      const newPct = Math.min(99, Math.max(1, Math.round(currentPct + delta)));
+      p.wholesalePricePerKg = Math.round(p.pricePerKg * (1 - newPct/100));
+    }else{
+      if(!p.wholesalePrice || !(p.price>0)) return;
+      const currentPct = (1 - p.wholesalePrice/p.price) * 100;
+      const newPct = Math.min(99, Math.max(1, Math.round(currentPct + delta)));
+      p.wholesalePrice = Math.round(p.price * (1 - newPct/100));
+    }
+    apiSaveProduct(p);
+    count++;
+  });
+  if(count===0){ toast("Ningún producto del catálogo tiene precio mayorista cargado todavía", "err"); return; }
+  saveState();
+  closeGlobalWholesaleModal();
+  render();
+  toast(`${delta>0?'+':''}${delta} punto${Math.abs(delta)===1?'':'s'} porcentual${Math.abs(delta)===1?'':'es'} de descuento mayorista en ${count} producto${count===1?'':'s'}`, "ok");
+}
+function applyGlobalWholesaleCreate(){
+  const raw = document.getElementById("globalws-create-pct").value;
+  const pct = Number(raw);
+  if(raw.trim()==="" || isNaN(pct) || pct<=0 || pct>=100){ toast("Ingresá un % entre 1 y 99", "err"); return; }
+  const group = state.products;
+  let count = 0;
+  group.forEach(p=>{
+    if(p.sellByWeight){
+      if(p.wholesalePricePerKg || !(p.pricePerKg>0)) return;
+      p.wholesalePricePerKg = Math.round(p.pricePerKg * (1 - pct/100));
+    }else{
+      if(p.wholesalePrice || !(p.price>0)) return;
+      p.wholesalePrice = Math.round(p.price * (1 - pct/100));
+    }
+    apiSaveProduct(p);
+    count++;
+  });
+  if(count===0){ toast("Todos los productos ya tienen precio mayorista cargado", "err"); return; }
+  saveState();
+  closeGlobalWholesaleModal();
+  render();
+  toast(`Descuento mayorista del ${pct}% creado en ${count} producto${count===1?'':'s'}`, "ok");
 }
 
 /* ---------- ADMIN: OFERTA PARA TODO EL CATÁLOGO ---------- */
