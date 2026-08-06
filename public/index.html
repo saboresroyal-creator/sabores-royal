@@ -784,6 +784,7 @@ let state = {
     domicilio:"Maipú 734, Rosario",
     ivaPorcentaje:21,
     aliasTransferencia:"SABORES.ROYAL.MAIPU",
+    puntoVenta:null,
   },
   posConfig:{cajeros:[]},
   posBanner:{image:'', title:'', subtitle:'', active:false},
@@ -1502,6 +1503,15 @@ function mapVoucherRow(row){
     neto: row.neto!=null ? Number(row.neto) : undefined,
     orderId: row.order_id || null,
     editedAt: row.edited_at || undefined,
+    afipCae: row.afip_cae || null,
+    afipCaeVencimiento: row.afip_cae_vencimiento || null,
+    afipNumero: row.afip_numero || null,
+    afipPuntoVenta: row.afip_punto_venta || null,
+    afipTipoComprobante: row.afip_tipo_comprobante || null,
+    afipAmbiente: row.afip_ambiente || null,
+    afipDocTipo: row.afip_doc_tipo || null,
+    afipDocNro: row.afip_doc_nro || null,
+    afipCuitEmisor: row.afip_cuit_emisor || null,
   };
 }
 
@@ -1548,6 +1558,15 @@ async function apiSaveVoucher(voucher){
       neto: voucher.neto!=null ? voucher.neto : null,
       order_id: voucher.orderId || null,
       edited_at: voucher.editedAt || null,
+      afip_cae: voucher.afipCae || null,
+      afip_cae_vencimiento: voucher.afipCaeVencimiento || null,
+      afip_numero: voucher.afipNumero || null,
+      afip_punto_venta: voucher.afipPuntoVenta || null,
+      afip_tipo_comprobante: voucher.afipTipoComprobante || null,
+      afip_ambiente: voucher.afipAmbiente || null,
+      afip_doc_tipo: voucher.afipDocTipo || null,
+      afip_doc_nro: voucher.afipDocNro!=null ? String(voucher.afipDocNro) : null,
+      afip_cuit_emisor: voucher.afipCuitEmisor!=null ? String(voucher.afipCuitEmisor) : null,
     };
     await adminFetch('/vouchers', 'POST', body, 'resolution=merge-duplicates,return=representation');
   }catch(e){
@@ -5159,13 +5178,21 @@ function renderAdminPedidos(){
         ${o.items.map((it,idx)=>`
         <div style="display:flex; align-items:center; justify-content:space-between; gap:8px;">
           <span style="${it.sinStock?'text-decoration:line-through; opacity:0.5;':''}">${formatOrderItemLabel(it)}</span>
-          ${o.status!=="Cancelado" ? `<button style="flex:0 0 auto; padding:2px 8px; font-size:10px; border-radius:8px; cursor:pointer; background:${it.sinStock?'rgba(46,204,113,0.15)':'rgba(231,76,60,0.12)'}; border:1px solid ${it.sinStock?'rgba(46,204,113,0.4)':'rgba(231,76,60,0.4)'}; color:${it.sinStock?'#2ecc71':'#e74c3c'};" onclick="toggleOrderItemStock('${o.id}', ${idx})">${it.sinStock?'↩️ Restaurar':'🚫 Sin stock'}</button>` : ''}
+          ${o.status!=="Cancelado" ? `
+          <div style="display:flex; gap:4px; flex:0 0 auto;">
+            <button style="padding:2px 8px; font-size:10px; border-radius:8px; cursor:pointer; background:rgba(224,168,60,0.12); border:1px solid rgba(224,168,60,0.4); color:var(--warn);" onclick="openEditOrderItemModal('${o.id}', ${idx})">✏️ Editar</button>
+            <button style="padding:2px 8px; font-size:10px; border-radius:8px; cursor:pointer; background:${it.sinStock?'rgba(46,204,113,0.15)':'rgba(231,76,60,0.12)'}; border:1px solid ${it.sinStock?'rgba(46,204,113,0.4)':'rgba(231,76,60,0.4)'}; color:${it.sinStock?'#2ecc71':'#e74c3c'};" onclick="toggleOrderItemStock('${o.id}', ${idx})">${it.sinStock?'↩️ Restaurar':'🚫 Sin stock'}</button>
+          </div>` : ''}
         </div>`).join('')}
       </div>
+      ${o.status!=="Cancelado" ? `<button style="margin-bottom:10px; padding:6px 10px; font-size:11px; border-radius:8px; cursor:pointer; background:rgba(46,204,113,0.12); border:1px solid rgba(46,204,113,0.4); color:#2ecc71;" onclick="openAddOrderItemModal('${o.id}')">➕ Agregar producto</button>` : ''}
       <div style="font-weight:700; color:var(--gold2); margin-bottom:10px;">${o.items.some(it=>it.sinStock) ? `<span style="text-decoration:line-through; opacity:0.5; font-weight:400; margin-right:6px;">${money(orderOriginalTotal(o))}</span>` : ''}${money(o.total)}</div>
       <div class="oc-actions">
         ${o.status==="Cancelado" ? `<button class="btn-secondary" style="flex:1; padding:9px;" disabled>Anulado</button>`
-          : o.status!=="Entregado" ? `<button class="btn-advance" onclick="advanceOrderStatus('${o.id}')">Marcar ${orderStatusLabel(order[order.indexOf(o.status)+1])}</button>` : `<button class="btn-secondary" style="flex:1; padding:9px;" disabled>Completado</button>`}
+          : `<div style="display:flex; gap:6px; flex:1;">
+               ${order.indexOf(o.status)>0 ? `<button class="btn-secondary" style="flex:0 0 auto; padding:9px 12px;" onclick="regressOrderStatus('${o.id}')" title="Volver a ${orderStatusLabel(order[order.indexOf(o.status)-1])}">‹ Volver</button>` : ''}
+               ${o.status!=="Entregado" ? `<button class="btn-advance" style="flex:1;" onclick="advanceOrderStatus('${o.id}')">Marcar ${orderStatusLabel(order[order.indexOf(o.status)+1])}</button>` : `<button class="btn-secondary" style="flex:1; padding:9px;" disabled>Completado</button>`}
+             </div>`}
         <button class="btn-wa-notify" style="${readyForClient?'':'opacity:0.4; cursor:not-allowed;'}" ${clientActionDisabled} onclick="notifyOrderWA('${o.id}')">${ic('wa')} Notificar</button>
       </div>
       <div class="oc-actions" style="margin-top:8px;">
@@ -5174,6 +5201,10 @@ function renderAdminPedidos(){
           : `<button class="btn-outline-gold" style="flex:0 0 auto; width:40%; padding:3px; font-size:9px;" onclick="openOrderVoucherPicker('${o.id}')">${ic('receipt')} Generar comprobante</button>`
         }
       </div>
+      ${o.status!=="Cancelado" ? `
+      <div class="oc-actions" style="margin-top:8px;">
+        <button class="btn-outline-gold" style="flex:0 0 auto; width:60%; padding:3px; font-size:9px;" onclick="openManualVoucherModalForOrder('${o.id}')">🧾 Facturar diferencia / extra</button>
+      </div>` : ''}
       <div class="oc-actions" style="margin-top:8px; gap:8px;">
         <button style="flex:1; padding:9px; font-size:12px; background:var(--glass); border:1px solid var(--glass-bd); border-radius:10px; color:var(--white); cursor:pointer; ${readyForClient?'':'opacity:0.4; cursor:not-allowed;'}" ${clientActionDisabled} onclick="printOrder('${o.id}')">🖨️ Imprimir / PDF</button>
         <button style="flex:1; padding:9px; font-size:12px; background:var(--glass); border:1px solid var(--glass-bd); border-radius:10px; color:var(--white); cursor:pointer; ${readyForClient?'':'opacity:0.4; cursor:not-allowed;'}" ${clientActionDisabled} onclick="shareOrder('${o.id}')">📤 Compartir</button>
@@ -5191,6 +5222,16 @@ function advanceOrderStatus(orderId){
   const flow = ["Pendiente","Revision","Listo","Entregado"];
   const idx = flow.indexOf(order.status);
   if(idx < flow.length-1){ order.status = flow[idx+1]; saveState(); render(); apiUpdateOrderStatus(orderId, order.status); }
+}
+// Vuelve el pedido un paso atrás en el flujo (ej. lo marcaste "Listo" por
+// error, o hay que volver a "En revisión" para corregir algo antes de
+// avisarle al cliente). No toca stock ni total, solo el estado.
+function regressOrderStatus(orderId){
+  const order = state.orders.find(o=>o.id===orderId);
+  if(!order) return;
+  const flow = ["Pendiente","Revision","Listo","Entregado"];
+  const idx = flow.indexOf(order.status);
+  if(idx > 0){ order.status = flow[idx-1]; saveState(); render(); apiUpdateOrderStatus(orderId, order.status); }
 }
 // Anular un pedido: a diferencia de borrarlo, el pedido queda visible con
 // estado "Cancelado" y el stock que create_order() había descontado se
@@ -5260,6 +5301,244 @@ function toggleOrderItemStock(orderId, itemIndex){
   saveState(); render();
   apiUpdateOrderItems(order);
   toast(marking ? "Producto marcado sin stock, descontado del total" : "Producto restaurado al pedido", "ok");
+}
+// Modal para editar un item de un pedido ya cargado: cambiar cantidad/gramos
+// (ej. el cliente pidió 50g y ahora se le manda 200g) o reemplazar el
+// producto por otro (ej. no hay leche marca Canut, se le carga otra marca).
+function openEditOrderItemModal(orderId, itemIndex){
+  const order = state.orders.find(o=>o.id===orderId);
+  if(!order || !order.items[itemIndex]) return;
+  const overlay = document.createElement("div");
+  overlay.className = "modal-overlay";
+  overlay.id = "edit-order-item-overlay";
+  overlay.innerHTML = renderEditOrderItemModalContent(orderId, itemIndex, "");
+  document.body.appendChild(overlay);
+}
+function closeEditOrderItemModal(){
+  const el = document.getElementById("edit-order-item-overlay");
+  if(el) el.remove();
+}
+function renderEditOrderItemModalContent(orderId, itemIndex, searchQuery){
+  const order = state.orders.find(o=>o.id===orderId);
+  const it = order.items[itemIndex];
+  const isWeight = !!it.grams;
+  return `
+    <div class="modal-sheet">
+      <div class="modal-handle"></div>
+      <h3 class="modal-title">Editar item</h3>
+      <p style="padding:0 16px 10px; font-size:13px; color:rgba(255,255,255,0.6);">${escapeHtml(it.name)}</p>
+      <div class="form-group"><label>${isWeight?'Gramos':'Cantidad'}</label>
+        <input id="eoi-qty" type="number" min="1" step="${isWeight?10:1}" value="${isWeight?it.grams:it.qty}">
+      </div>
+      <button class="btn-primary" style="margin:0 16px 16px; width:calc(100% - 32px);" onclick="saveEditOrderItemQty('${orderId}', ${itemIndex})">Guardar ${isWeight?'gramos':'cantidad'}</button>
+      <div style="padding:12px 16px 0; font-size:12px; color:rgba(255,255,255,0.5); border-top:1px solid var(--glass-bd);">¿No hay stock de este producto? Buscá un reemplazo:</div>
+      <div class="search-bar" style="margin:10px 16px;">
+        ${ic('search')}
+        <input id="eoi-search" placeholder="Buscar producto reemplazo..." value="${escapeHtml(searchQuery||'')}" oninput="onEditOrderItemSearch('${orderId}', ${itemIndex}, this.value)">
+      </div>
+      <div id="eoi-results" style="max-height:240px; overflow-y:auto; display:flex; flex-direction:column; gap:6px; padding:0 16px;">
+        ${renderEditOrderItemResults(orderId, itemIndex, searchQuery)}
+      </div>
+      <button class="btn-secondary" style="margin:16px;" onclick="closeEditOrderItemModal()">Cerrar</button>
+    </div>
+  `;
+}
+function renderEditOrderItemResults(orderId, itemIndex, query){
+  const qNorm = normText((query||'').trim());
+  if(!qNorm) return '';
+  const results = state.products.filter(p=>!p.hidden && productMatchesSearch(p, qNorm)).slice(0, 15);
+  if(results.length===0) return `<p style="font-size:12px; color:rgba(255,255,255,0.5); text-align:center; padding:10px 0;">Sin resultados</p>`;
+  return results.map(p=>`
+    <button class="btn-secondary" style="display:flex; align-items:center; justify-content:space-between; padding:10px 12px; text-align:left;" onclick="replaceOrderItemProduct('${orderId}', ${itemIndex}, '${p.id}')">
+      <span>${escapeHtml(p.name)}</span>
+      <span style="color:var(--gold2); font-weight:700; flex:0 0 auto; margin-left:8px;">${p.sellByWeight ? money(p.pricePerKg)+'/kg' : money(p.price)}</span>
+    </button>
+  `).join('');
+}
+function onEditOrderItemSearch(orderId, itemIndex, query){
+  const el = document.getElementById('eoi-results');
+  if(el) el.innerHTML = renderEditOrderItemResults(orderId, itemIndex, query);
+}
+// Cambia solo la cantidad/gramos de un item, manteniendo el mismo producto
+// y precio unitario ya acordado. Para items vendidos por unidad, ajusta el
+// stock por la diferencia (positiva o negativa) entre la cantidad vieja y
+// la nueva — los vendidos por peso nunca tocan stock.
+function saveEditOrderItemQty(orderId, itemIndex){
+  const order = state.orders.find(o=>o.id===orderId);
+  if(!order) return;
+  const it = order.items[itemIndex];
+  if(!it) return;
+  const input = document.getElementById('eoi-qty');
+  const val = Number(input.value);
+  if(!val || val<=0){ toast('Ingresá una cantidad válida', 'err'); return; }
+  const isWeight = !!it.grams;
+  if(isWeight){
+    it.grams = val;
+  } else {
+    const delta = val - (it.qty||0);
+    it.qty = val;
+    if(!it.sinStock && delta !== 0){
+      const p = state.products.find(pr=>pr.id===String(it.id));
+      if(p){
+        p.stock = Math.max(0, p.stock - delta);
+        apiPatchProductStock(p);
+      }
+    }
+  }
+  it.lineTotal = isWeight ? (it.price/1000)*it.grams : it.price*it.qty;
+  recalcOrderTotal(order);
+  saveState(); render();
+  apiUpdateOrderItems(order);
+  closeEditOrderItemModal();
+  toast('Item actualizado', 'ok');
+}
+// Reemplaza el producto de un item del pedido por otro (ej. no hay stock de
+// la marca pedida). Devuelve el stock del producto viejo (si correspondía
+// descontarlo) y descuenta el del nuevo, y recalcula precio según si el
+// cliente es mayorista y si el producto nuevo tiene oferta activa.
+function replaceOrderItemProduct(orderId, itemIndex, newProductId){
+  const order = state.orders.find(o=>o.id===orderId);
+  if(!order) return;
+  const it = order.items[itemIndex];
+  if(!it) return;
+  const newProduct = state.products.find(p=>p.id===newProductId);
+  if(!newProduct) return;
+  if(!confirm(`¿Reemplazar "${it.name}" por "${newProduct.name}"?`)) return;
+
+  if(!it.grams && !it.sinStock){
+    const oldProduct = state.products.find(pr=>pr.id===String(it.id));
+    if(oldProduct){ oldProduct.stock = (oldProduct.stock||0) + (it.qty||1); apiPatchProductStock(oldProduct); }
+  }
+
+  const clientPhone = order.customer && order.customer.phone ? normalizePhone(order.customer.phone) : null;
+  const client = clientPhone ? state.clients[clientPhone] : null;
+  const isWholesale = !!(client && client.wholesale);
+  const promo = activePromo(newProduct);
+
+  it.id = Number(newProduct.id);
+  it.name = newProduct.name;
+  it.sinStock = false;
+  if(newProduct.sellByWeight){
+    const grams = it.grams || newProduct.minGrams || 50;
+    const pricePerKg = isWholesale ? (newProduct.wholesalePricePerKg || newProduct.pricePerKg) : (promo !== null ? promo : newProduct.pricePerKg);
+    it.price = pricePerKg;
+    it.grams = grams;
+    delete it.qty;
+    it.lineTotal = (pricePerKg/1000)*grams;
+  } else {
+    const qty = it.qty || 1;
+    const unitPrice = isWholesale ? (newProduct.wholesalePrice || newProduct.price) : (promo !== null ? promo : newProduct.price);
+    it.price = unitPrice;
+    it.qty = qty;
+    delete it.grams;
+    it.lineTotal = unitPrice*qty;
+    newProduct.stock = Math.max(0, (newProduct.stock||0) - qty);
+    apiPatchProductStock(newProduct);
+  }
+  recalcOrderTotal(order);
+  saveState(); render();
+  apiUpdateOrderItems(order);
+  closeEditOrderItemModal();
+  toast('Producto reemplazado', 'ok');
+}
+// Modal para agregar un producto nuevo a un pedido ya cargado (ej. el
+// cliente se olvidó de pedir algo y se le suma al mismo pedido).
+function openAddOrderItemModal(orderId){
+  const order = state.orders.find(o=>o.id===orderId);
+  if(!order) return;
+  const overlay = document.createElement("div");
+  overlay.className = "modal-overlay";
+  overlay.id = "add-order-item-overlay";
+  overlay.innerHTML = renderAddOrderItemModalContent(orderId, "");
+  document.body.appendChild(overlay);
+}
+function closeAddOrderItemModal(){
+  const el = document.getElementById("add-order-item-overlay");
+  if(el) el.remove();
+}
+function renderAddOrderItemModalContent(orderId, searchQuery){
+  return `
+    <div class="modal-sheet">
+      <div class="modal-handle"></div>
+      <h3 class="modal-title">Agregar producto al pedido</h3>
+      <div class="search-bar" style="margin:10px 16px;">
+        ${ic('search')}
+        <input id="aoi-search" placeholder="Buscar producto..." value="${escapeHtml(searchQuery||'')}" oninput="onAddOrderItemSearch('${orderId}', this.value)">
+      </div>
+      <div id="aoi-results" style="max-height:320px; overflow-y:auto; display:flex; flex-direction:column; gap:6px; padding:0 16px;">
+        ${renderAddOrderItemResults(orderId, searchQuery)}
+      </div>
+      <button class="btn-secondary" style="margin:16px;" onclick="closeAddOrderItemModal()">Cerrar</button>
+    </div>
+  `;
+}
+function renderAddOrderItemResults(orderId, query){
+  const qNorm = normText((query||'').trim());
+  if(!qNorm) return '';
+  const results = state.products.filter(p=>!p.hidden && productMatchesSearch(p, qNorm)).slice(0, 15);
+  if(results.length===0) return `<p style="font-size:12px; color:rgba(255,255,255,0.5); text-align:center; padding:10px 0;">Sin resultados</p>`;
+  return results.map(p=>`
+    <button class="btn-secondary" style="display:flex; align-items:center; justify-content:space-between; padding:10px 12px; text-align:left;" onclick="pickAddOrderItemProduct('${orderId}', '${p.id}')">
+      <span>${escapeHtml(p.name)}</span>
+      <span style="color:var(--gold2); font-weight:700; flex:0 0 auto; margin-left:8px;">${p.sellByWeight ? money(p.pricePerKg)+'/kg' : money(p.price)}</span>
+    </button>
+  `).join('');
+}
+function onAddOrderItemSearch(orderId, query){
+  const el = document.getElementById('aoi-results');
+  if(el) el.innerHTML = renderAddOrderItemResults(orderId, query);
+}
+function pickAddOrderItemProduct(orderId, productId){
+  const product = state.products.find(p=>p.id===productId);
+  const overlay = document.getElementById('add-order-item-overlay');
+  if(!product || !overlay) return;
+  const isWeight = !!product.sellByWeight;
+  overlay.querySelector('.modal-sheet').innerHTML = `
+    <div class="modal-handle"></div>
+    <h3 class="modal-title">Agregar: ${escapeHtml(product.name)}</h3>
+    <div class="form-group"><label>${isWeight?'Gramos':'Cantidad'}</label>
+      <input id="aoi-qty" type="number" min="1" step="${isWeight?10:1}" value="${isWeight?(product.minGrams||50):1}">
+    </div>
+    <button class="btn-primary" style="margin:0 16px 10px; width:calc(100% - 32px);" onclick="confirmAddOrderItem('${orderId}', '${productId}')">Agregar al pedido</button>
+    <button class="btn-secondary" style="margin:0 16px 16px;" onclick="openAddOrderItemModal('${orderId}')">‹ Volver a buscar</button>
+  `;
+}
+// Agrega el item nuevo al pedido con el precio según si el cliente es
+// mayorista y si el producto tiene oferta activa, y descuenta stock (solo
+// para productos vendidos por unidad — por peso nunca descuentan stock).
+function confirmAddOrderItem(orderId, productId){
+  const order = state.orders.find(o=>o.id===orderId);
+  const product = state.products.find(p=>p.id===productId);
+  if(!order || !product) return;
+  const input = document.getElementById('aoi-qty');
+  const val = Number(input.value);
+  if(!val || val<=0){ toast('Ingresá una cantidad válida', 'err'); return; }
+
+  const clientPhone = order.customer && order.customer.phone ? normalizePhone(order.customer.phone) : null;
+  const client = clientPhone ? state.clients[clientPhone] : null;
+  const isWholesale = !!(client && client.wholesale);
+  const promo = activePromo(product);
+
+  const newItem = { id: Number(product.id), name: product.name };
+  if(product.sellByWeight){
+    const pricePerKg = isWholesale ? (product.wholesalePricePerKg || product.pricePerKg) : (promo !== null ? promo : product.pricePerKg);
+    newItem.price = pricePerKg;
+    newItem.grams = val;
+    newItem.lineTotal = (pricePerKg/1000)*val;
+  } else {
+    const unitPrice = isWholesale ? (product.wholesalePrice || product.price) : (promo !== null ? promo : product.price);
+    newItem.price = unitPrice;
+    newItem.qty = val;
+    newItem.lineTotal = unitPrice*val;
+    product.stock = Math.max(0, (product.stock||0) - val);
+    apiPatchProductStock(product);
+  }
+  order.items.push(newItem);
+  recalcOrderTotal(order);
+  saveState(); render();
+  apiUpdateOrderItems(order);
+  closeAddOrderItemModal();
+  toast('Producto agregado al pedido', 'ok');
 }
 async function apiPatchProductStock(p){
   if(!IS_ADMIN_APP || !p._apiId) return;
@@ -7439,6 +7718,8 @@ function renderAdminConfig(){
     </div>
     <div class="form-group"><label>% IVA aplicado</label><input type="number" value="${state.fiscal.ivaPorcentaje}" onchange="updateFiscal('ivaPorcentaje', Number(this.value))"></div>
     <div class="form-group"><label>Alias para transferencias</label><input value="${state.fiscal.aliasTransferencia||''}" placeholder="Ej: SABORES.ROYAL.MAIPU" onchange="updateFiscal('aliasTransferencia', this.value)"></div>
+    <div class="form-group"><label>Punto de venta AFIP (Factura Electrónica)</label><input type="number" value="${state.fiscal.puntoVenta||''}" placeholder="Ej: 4" onchange="updateFiscal('puntoVenta', Number(this.value)||null)"></div>
+    <p style="font-size:11.5px; color:rgba(255,255,255,0.45); margin:-8px 16px 12px;">El número de punto de venta que habilitaste en AFIP para Facturación Electrónica (no el de esta app). Solo hace falta si vas a facturar con CAE real — el que uses tiene que coincidir con el configurado en el servidor.</p>
     <div style="padding:0 16px 16px;">
       <button class="btn-outline-gold" onclick="resetFiscalDefaults()">Restablecer datos fiscales a los valores correctos</button>
     </div>
@@ -7628,11 +7909,32 @@ function calcIVADiscriminado(total){
   return {pct, neto, iva, total};
 }
 
+// Pide el CAE a AFIP (Factura B, vía public/api/facturar.js) para los importes
+// ya calculados. Devuelve {cae, caeVencimiento, numeroComprobante, puntoVenta,
+// tipoComprobante, ambiente} o null si AFIP la rechazó / no se pudo conectar
+// (ya avisa con un toast en ese caso — el llamador no genera el comprobante).
+async function requestAfipCae({total, neto, iva, ivaPct, docNumber}){
+  try{
+    const res = await fetch('/api/facturar', {
+      method: 'POST',
+      headers: {'Content-Type':'application/json', 'Authorization':'Bearer '+((adminSession&&adminSession.access_token)||'')},
+      body: JSON.stringify({total, neto, iva, ivaPct, docNumber: docNumber||null, puntoVenta: state.fiscal.puntoVenta||null}),
+    });
+    const data = await res.json().catch(()=>({}));
+    if(!res.ok) throw new Error(data.error || ('Error '+res.status));
+    return data;
+  }catch(e){
+    toast('No se pudo autorizar la factura ante AFIP: '+e.message, 'err');
+    return null;
+  }
+}
+
 /* Create a voucher object from a list of {name, qty, price} items.
    includeIVA: only meaningful for type 'factura' — whether to show IVA breakdown.
-   Remito and Ticket never show IVA breakdown regardless of this flag. */
-function createVoucher(type, items, customer, orderId, includeIVA, generalDiscount){
-  const number = nextVoucherNumber(type);
+   Remito and Ticket never show IVA breakdown regardless of this flag.
+   For type 'factura' this is async: pide el CAE a AFIP antes de guardar nada,
+   y devuelve null (sin tocar contadores ni estado) si AFIP no la autoriza. */
+async function createVoucher(type, items, customer, orderId, includeIVA, generalDiscount){
   const afterItemDiscounts = items.reduce((s,it)=>{
     const lineTotal = it.price*it.qty;
     const discPct = Number(it.discountPct)||0;
@@ -7645,6 +7947,14 @@ function createVoucher(type, items, customer, orderId, includeIVA, generalDiscou
   const total = Math.max(0, afterItemDiscounts - generalDiscountAmount);
   const showIVA = type === "factura" && !!includeIVA;
   const ivaCalc = calcIVADiscriminado(total);
+
+  let afip = null;
+  if(type === "factura"){
+    afip = await requestAfipCae({total, neto: ivaCalc.neto, iva: ivaCalc.iva, ivaPct: ivaCalc.pct, docNumber: customer&&customer.doc});
+    if(!afip) return null;
+  }
+
+  const number = nextVoucherNumber(type);
   const voucher = {
     id: "v"+Date.now()+Math.floor(Math.random()*1000),
     type, number,
@@ -7656,6 +7966,15 @@ function createVoucher(type, items, customer, orderId, includeIVA, generalDiscou
     showIVA,
     ivaPct: ivaCalc.pct, iva: ivaCalc.iva, neto: ivaCalc.neto,
     orderId: orderId||null,
+    afipCae: afip ? afip.cae : null,
+    afipCaeVencimiento: afip ? afip.caeVencimiento : null,
+    afipNumero: afip ? afip.numeroComprobante : null,
+    afipPuntoVenta: afip ? afip.puntoVenta : null,
+    afipTipoComprobante: afip ? afip.tipoComprobante : null,
+    afipAmbiente: afip ? afip.ambiente : null,
+    afipDocTipo: afip ? afip.docTipo : null,
+    afipDocNro: afip ? afip.docNro : null,
+    afipCuitEmisor: afip ? afip.cuitEmisor : null,
   };
   state.vouchers.unshift(voucher);
   // Credit points only for vouchers not tied to an order (orders already credit
@@ -7709,11 +8028,16 @@ function closeVoucherPickerModal(){
   const el = document.getElementById("voucher-picker-overlay");
   if(el) el.remove();
 }
-function generateVoucherFromOrder(orderId, type, includeIVA){
+async function generateVoucherFromOrder(orderId, type, includeIVA){
   const order = state.orders.find(o=>o.id===orderId);
   if(!order) return;
   const items = order.items.map(it=>({name:it.name, qty:it.qty, price:it.price}));
-  const voucher = createVoucher(type, items, order.customer, order.id, includeIVA);
+  if(type === "factura"){
+    const overlay = document.getElementById("voucher-picker-overlay");
+    if(overlay) overlay.querySelector(".modal-sheet").innerHTML = `<div class="modal-handle"></div><h3 class="modal-title">Factura</h3><p style="padding:24px 16px; font-size:13px; color:rgba(255,255,255,0.6); text-align:center;"><span class="spin" style="display:inline-block;">${ic('sparkle')}</span><br><br>Solicitando CAE a AFIP…</p>`;
+  }
+  const voucher = await createVoucher(type, items, order.customer, order.id, includeIVA);
+  if(!voucher){ if(type==="factura") onPickOrderVoucherType(orderId, "factura"); return; }
   closeVoucherPickerModal();
   viewVoucher(voucher.id);
 }
@@ -7725,9 +8049,26 @@ function openManualVoucherModal(){
   manualVoucherDraft = { type:"factura", items:[], customerName:"", customerPhone:"", customerAddress:"", customerDoc:"", includeIVA:false, searchQuery:"", clientSearchQuery:"", generalDiscountType:"percent", generalDiscountValue:0, editingVoucherId:null };
   renderManualVoucherModal();
 }
+// Abre el comprobante manual precargado con el cliente de un pedido, para
+// facturarle aparte una diferencia de mercadería (ej. le mandaste más
+// cantidad de la que tenía cargada el pedido original) sin tocar ese pedido.
+function openManualVoucherModalForOrder(orderId){
+  const order = state.orders.find(o=>o.id===orderId);
+  if(!order) return;
+  manualVoucherDraft = {
+    type: "factura", items: [],
+    customerName: order.customer.name||"", customerPhone: order.customer.phone||"", customerAddress: order.customer.address||"", customerDoc: "",
+    includeIVA: false, searchQuery: "", clientSearchQuery: "", generalDiscountType: "percent", generalDiscountValue: 0, editingVoucherId: null,
+  };
+  renderManualVoucherModal();
+}
 function openEditVoucherModal(voucherId){
   const v = state.vouchers.find(vc=>vc.id===voucherId);
   if(!v) return;
+  // Una factura ya autorizada por AFIP no se puede editar ni volver a
+  // enviar — el CAE queda atado a los datos exactos que se autorizaron.
+  // Para corregirla hace falta una Nota de Crédito (no implementada acá).
+  if(v.type==="factura" && v.afipCae){ toast("Esta factura ya tiene CAE de AFIP y no se puede editar", "err"); return; }
   manualVoucherDraft = {
     type: v.type,
     items: v.items.map(it=>{
@@ -7847,7 +8188,7 @@ function renderManualVoucherModal(){
 
       <div style="display:flex; gap:10px;">
         <button class="btn-secondary" style="flex:1;" onclick="closeManualVoucherModal()">Cancelar</button>
-        <button class="btn-primary" style="flex:1;" onclick="confirmManualVoucher()">${d.editingVoucherId ? 'Guardar cambios' : 'Generar'}</button>
+        <button class="btn-primary" id="btn-confirm-voucher" style="flex:1;" onclick="confirmManualVoucher()">${d.editingVoucherId ? 'Guardar cambios' : 'Generar'}</button>
       </div>
     </div>
   `;
@@ -7983,7 +8324,7 @@ function closeManualVoucherModal(){
   const el = document.getElementById("manual-voucher-overlay");
   if(el) el.remove();
 }
-function confirmManualVoucher(){
+async function confirmManualVoucher(){
   const d = manualVoucherDraft;
   if(d.items.length===0){ toast("Agregá al menos un producto", "err"); return; }
   const items = d.items.map(it=>({name: it.name||"Producto", qty:Number(it.qty)||1, price:it.price||0, discountPct:Number(it.discountPct)||0}));
@@ -7997,7 +8338,11 @@ function confirmManualVoucher(){
     return;
   }
   const isNewClient = d.type !== "presupuesto" && customer.phone && !state.clients[normalizePhone(customer.phone)];
-  const voucher = createVoucher(d.type, items, customer, null, d.includeIVA, generalDiscount);
+  const btn = document.getElementById("btn-confirm-voucher");
+  const originalLabel = btn ? btn.innerHTML : null;
+  if(d.type==="factura" && btn){ btn.innerHTML = `<span class="spin">${ic('sparkle')}</span> Solicitando CAE a AFIP…`; btn.disabled = true; }
+  const voucher = await createVoucher(d.type, items, customer, null, d.includeIVA, generalDiscount);
+  if(!voucher){ if(btn){ btn.innerHTML = originalLabel; btn.disabled = false; } return; }
   closeManualVoucherModal();
   if(isNewClient){
     openSaveClientPrompt(customer, voucher.total, voucher.id);
@@ -8082,6 +8427,33 @@ function confirmDeleteVoucher(voucherId){
   nav("admin");
 }
 
+// "20260815" -> "15/08/2026"
+function formatAfipDate(yyyymmdd){
+  const s = String(yyyymmdd||'');
+  if(s.length!==8) return s;
+  return s.slice(6,8)+'/'+s.slice(4,6)+'/'+s.slice(0,4);
+}
+// Arma la URL del QR obligatorio en comprobantes electrónicos (RG 4291 de
+// AFIP) a partir de los datos que devolvió AFIP al autorizar la factura.
+function buildAfipQrUrl(voucher){
+  const payload = {
+    ver: 1,
+    fecha: String(voucher.date||'').slice(0,10),
+    cuit: Number(voucher.afipCuitEmisor)||0,
+    ptoVta: voucher.afipPuntoVenta,
+    tipoCmp: voucher.afipTipoComprobante,
+    nroCmp: voucher.afipNumero,
+    importe: voucher.total,
+    moneda: 'PES',
+    ctz: 1,
+    tipoDocRec: voucher.afipDocTipo,
+    nroDocRec: Number(voucher.afipDocNro)||0,
+    tipoCodAut: 'E',
+    codAut: Number(voucher.afipCae)||0,
+  };
+  return 'https://www.afip.gob.ar/fe/qr/?p=' + btoa(JSON.stringify(payload));
+}
+
 /* ---------- Voucher document rendering (screen / print / pdf) ---------- */
 function buildVoucherDocHTML(voucher){
   const meta = VOUCHER_META[voucher.type];
@@ -8140,7 +8512,17 @@ function buildVoucherDocHTML(voucher){
       <div class="vd-totals"><div class="row final"><span>Total de bultos/ítems</span><span>${voucher.items.reduce((s,it)=>s+it.qty,0)}</span></div></div>
     `}
     ${state.fiscal.aliasTransferencia && voucher.type!=='presupuesto' ? `<div class="vd-alias" style="margin-top:16px; padding:10px 14px; border-radius:8px; background-color:#f6efd9; border:1px solid #d9c277; text-align:center; font-size:13px; color:#5a4a12;">Transferencias a alias: <span style="font-size:14px; font-weight:700; letter-spacing:0.3px;">${state.fiscal.aliasTransferencia}</span></div>` : ''}
-    <div class="vd-footer">${voucher.type==='presupuesto' ? 'Presupuesto sin cargo, sujeto a confirmación y disponibilidad de stock' : 'Comprobante interno no válido como factura fiscal AFIP'} · Sabores Royal — ${state.fiscal.domicilio}${voucher.editedAt ? ` · Editado el ${new Date(voucher.editedAt).toLocaleDateString('es-AR')}` : ''}</div>
+    ${voucher.type==='factura' && voucher.afipCae ? `
+      <div style="display:flex; align-items:center; justify-content:center; gap:14px; margin-top:16px; padding-top:12px; border-top:1px dashed #ccc;">
+        <img src="https://api.qrserver.com/v1/create-qr-code/?size=110x110&qzone=1&data=${encodeURIComponent(buildAfipQrUrl(voucher))}" alt="QR AFIP" style="width:90px; height:90px; flex:none;">
+        <div style="font-size:11px; color:#555; text-align:left; line-height:1.6;">
+          <div><b>CAE:</b> ${voucher.afipCae}</div>
+          <div><b>Vto. CAE:</b> ${formatAfipDate(voucher.afipCaeVencimiento)}</div>
+          ${voucher.afipAmbiente==='homologacion' ? `<div style="color:#c5a028; font-weight:800;">COMPROBANTE DE PRUEBA (homologación AFIP) — sin validez fiscal</div>` : ''}
+        </div>
+      </div>
+    ` : ''}
+    <div class="vd-footer">${voucher.type==='presupuesto' ? 'Presupuesto sin cargo, sujeto a confirmación y disponibilidad de stock' : (voucher.type==='factura' && voucher.afipCae ? 'Comprobante autorizado por AFIP — Factura B' : 'Comprobante interno no válido como factura fiscal AFIP')} · Sabores Royal — ${state.fiscal.domicilio}${voucher.editedAt ? ` · Editado el ${new Date(voucher.editedAt).toLocaleDateString('es-AR')}` : ''}</div>
   `;
 }
 
