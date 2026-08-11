@@ -7,6 +7,8 @@
 <title>Sabores Royal — Dashboard de Cajas</title>
 <script src="https://cdnjs.cloudflare.com/ajax/libs/Chart.js/4.4.1/chart.umd.min.js"></script>
 <script src="https://cdnjs.cloudflare.com/ajax/libs/xlsx/0.18.5/xlsx.full.min.js"></script>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/jspdf/2.5.1/jspdf.umd.min.js"></script>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/jspdf-autotable/3.8.2/jspdf.plugin.autotable.min.js"></script>
 <style>
 @import url('https://fonts.googleapis.com/css2?family=DM+Mono:wght@400;500&family=Syne:wght@700;800&family=DM+Sans:wght@300;400;500;600&display=swap');
 
@@ -2045,12 +2047,17 @@ function renderBusquedaGastos() {
   }
 
   const totalFiltrado = resultados.reduce((s,r)=>s+r.monto,0);
+  window._gastosResultadosActuales = resultados;
 
   container.innerHTML = `
     <div class="card">
-      <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:16px;">
+      <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:16px;flex-wrap:wrap;gap:10px;">
         <div class="card-title" style="margin:0;"><div class="dot"></div>${resultados.length} RESULTADO${resultados.length!==1?'S':''}</div>
-        <div style="font-family:var(--mono);font-size:16px;color:var(--red);">Total: ${pesos(totalFiltrado)}</div>
+        <div style="display:flex;align-items:center;gap:14px;flex-wrap:wrap;">
+          <button class="btn btn-green" style="font-size:12px;padding:6px 14px;" onclick="exportarGastosXLS()">📥 Exportar XLS</button>
+          <button class="btn btn-green" style="font-size:12px;padding:6px 14px;" onclick="exportarGastosPDF()">📄 Exportar PDF</button>
+          <div style="font-family:var(--mono);font-size:16px;color:var(--red);">Total: ${pesos(totalFiltrado)}</div>
+        </div>
       </div>
       <table>
         <thead><tr><th>Fecha</th><th>Caja</th><th>Cajero</th><th>Concepto</th><th class="num">Monto</th></tr></thead>
@@ -2065,6 +2072,42 @@ function renderBusquedaGastos() {
         </tbody>
       </table>
     </div>`;
+}
+
+function exportarGastosXLS() {
+  const resultados = window._gastosResultadosActuales || [];
+  if(!resultados.length) { alert('No hay gastos para exportar.'); return; }
+  const rows = [['Fecha','Caja','Cajero','Concepto','Monto']];
+  resultados.forEach(r=>{
+    rows.push([r.fecha, r.caja, r.cajero, r.concepto, r.monto]);
+  });
+  rows.push(['','','','TOTAL', resultados.reduce((s,r)=>s+r.monto,0)]);
+  const ws = XLSX.utils.aoa_to_sheet(rows);
+  ws['!cols'] = [{wch:12},{wch:20},{wch:16},{wch:28},{wch:14}];
+  const wb = XLSX.utils.book_new();
+  XLSX.utils.book_append_sheet(wb, ws, 'Gastos');
+  XLSX.writeFile(wb, `Gastos_SaboresRoyal_${todayStr()}.xlsx`);
+}
+
+function exportarGastosPDF() {
+  const resultados = window._gastosResultadosActuales || [];
+  if(!resultados.length) { alert('No hay gastos para exportar.'); return; }
+  const { jsPDF } = window.jspdf;
+  const doc = new jsPDF();
+  const total = resultados.reduce((s,r)=>s+r.monto,0);
+  doc.setFontSize(14);
+  doc.text('Sabores Royal — Gastos', 14, 16);
+  doc.setFontSize(10);
+  doc.text(`Generado: ${todayStr()}    Total: ${pesos(total)}`, 14, 23);
+  doc.autoTable({
+    startY: 28,
+    head: [['Fecha','Caja','Cajero','Concepto','Monto']],
+    body: resultados.map(r=>[r.fecha, r.caja, r.cajero, r.concepto, pesos(r.monto)]),
+    styles: { fontSize: 9 },
+    headStyles: { fillColor: [197,160,40] },
+    columnStyles: { 4: { halign: 'right' } },
+  });
+  doc.save(`Gastos_SaboresRoyal_${todayStr()}.pdf`);
 }
 
 // ============================================================

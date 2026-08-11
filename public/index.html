@@ -4243,6 +4243,56 @@ function updateRentMonthlyAmount(val){
   saveState();
   apiSaveRent();
 }
+function updateRentLandlordPhone(val){
+  state.rentLedger.landlordPhone = val.replace(/\D/g,'');
+  saveState();
+  apiSaveRent();
+}
+// Arma el detalle de movimientos (cargos y pagos) con saldo corrido, para
+// mandarle al dueño del local un resumen claro de cuánto se debe y por qué.
+function buildRentWAMessage(){
+  const ledger = state.rentLedger;
+  const movs = [...(ledger.movements||[])].sort((a,b)=> (a.date||'').localeCompare(b.date||''));
+  let running = 0;
+  const rows = movs.map(m=>{ running += (m.type==='pago' ? -m.amount : m.amount); return Object.assign({}, m, {running}); });
+  const balance = running;
+  let msg = `*Detalle de Alquiler — Sabores Royal*\n`;
+  msg += `_Actualizado al ${fmtDateAR(new Date().toISOString().slice(0,10))}_\n\n`;
+  rows.forEach(m=>{
+    const label = m.note || (m.type==='pago'?'Pago':'Cargo');
+    const signo = m.type==='pago' ? '-' : '+';
+    msg += `${fmtDateAR(m.date)} — ${label}: ${signo}${money(m.amount)}\n`;
+  });
+  msg += `\n*Saldo actual: ${money(balance)}*`;
+  if(balance>0) msg += ' (a favor del propietario)';
+  else if(balance<0) msg += ' (a favor del local)';
+  return msg;
+}
+function openRentWAShare(){
+  const overlay = document.createElement("div");
+  overlay.className = "modal-overlay";
+  overlay.id = "rent-wa-overlay";
+  const phone = state.rentLedger.landlordPhone || '';
+  overlay.innerHTML = `
+    <div class="modal-sheet">
+      <div class="modal-handle"></div>
+      <h3 class="modal-title">Enviar detalle de alquiler</h3>
+      <div class="form-group"><label>Teléfono del dueño (opcional)</label><input id="rent-wa-phone" value="${escapeHtml(phone)}" placeholder="Ej: 5493411234567"></div>
+      <button class="btn-primary" onclick="sendRentWA()">${ic('wa')} Enviar por WhatsApp</button>
+      <button class="btn-secondary" style="margin-top:10px;" onclick="document.getElementById('rent-wa-overlay').remove()">Cancelar</button>
+    </div>`;
+  document.body.appendChild(overlay);
+}
+function sendRentWA(){
+  const phoneInput = document.getElementById("rent-wa-phone");
+  const phone = phoneInput ? phoneInput.value.replace(/\D/g,'') : '';
+  if(phone !== (state.rentLedger.landlordPhone||'')) updateRentLandlordPhone(phone);
+  const msg = buildRentWAMessage();
+  const url = phone ? ("https://wa.me/"+phone+"?text="+encodeURIComponent(msg)) : ("https://wa.me/?text="+encodeURIComponent(msg));
+  window.open(url, "_blank");
+  const overlay = document.getElementById("rent-wa-overlay");
+  if(overlay) overlay.remove();
+}
 function openRentPaymentModal(){
   const overlay = document.createElement("div");
   overlay.className = "modal-overlay";
@@ -4782,8 +4832,16 @@ function renderAdminAlquiler(){
         <input type="number" value="${ledger.monthlyAmount}" onchange="updateRentMonthlyAmount(this.value)"
           style="width:120px; background:var(--glass); border:1px solid var(--glass-bd); border-radius:8px; color:var(--white); padding:4px 8px; font-size:12px; text-align:center;">
       </div>
+      <div style="font-size:12px; color:rgba(255,255,255,0.4); display:flex; align-items:center; justify-content:center; gap:6px; margin-top:8px;">
+        WhatsApp del dueño:
+        <input type="text" value="${escapeHtml(ledger.landlordPhone||'')}" onchange="updateRentLandlordPhone(this.value)" placeholder="Ej: 5493411234567"
+          style="width:150px; background:var(--glass); border:1px solid var(--glass-bd); border-radius:8px; color:var(--white); padding:4px 8px; font-size:12px; text-align:center;">
+      </div>
     </div>
-    <button class="btn-primary" style="width:100%; margin-bottom:16px;" onclick="openRentPaymentModal()">+ Registrar pago</button>
+    <div style="display:flex; gap:10px; margin-bottom:16px;">
+      <button class="btn-primary" style="flex:1;" onclick="openRentPaymentModal()">+ Registrar pago</button>
+      <button class="btn-secondary" style="flex:1;" onclick="openRentWAShare()">${ic('wa')} Enviar detalle</button>
+    </div>
     <div style="font-size:13px; font-weight:700; color:rgba(255,255,255,0.6); margin-bottom:8px; text-transform:uppercase; letter-spacing:.4px;">Movimientos</div>
     ${rows.length===0 ? `<div style="padding:30px; text-align:center; color:rgba(255,255,255,0.4);">Sin movimientos todavía.</div>` : rows.slice().reverse().map(m=>`
       <div style="display:flex; justify-content:space-between; align-items:center; gap:10px; padding:12px 14px; background:var(--glass); border:1px solid var(--glass-bd); border-radius:12px; margin-bottom:8px;">
