@@ -89,7 +89,7 @@ export default async function handler(req, res) {
   }
   if (!auth.ok) return res.status(auth.status).json({ error: auth.error });
 
-  const { text, filename } = req.body || {};
+  const { text, filename, notes } = req.body || {};
   if (!text || typeof text !== 'string' || !text.trim()) {
     return res.status(400).json({ error: 'Falta el texto de la lista' });
   }
@@ -100,6 +100,16 @@ export default async function handler(req, res) {
   const wasTruncated = text.length > 60000;
   const inputText = wasTruncated ? text.slice(0, 60000) : text;
 
+  // Notas propias del proveedor (cargadas una vez al darlo de alta): le
+  // aclaran a la IA cómo leer SU lista puntual — ej. qué columna usar como
+  // precio cuando hay varias parecidas (con/sin IVA, por unidad/por bulto).
+  // Es sólo para la EXTRACCIÓN; los cálculos de descuento/IVA se hacen
+  // aparte en el frontend (cmpApplyAdjust) para no depender de que la IA
+  // haga bien la aritmética.
+  const system = notes && typeof notes === 'string' && notes.trim()
+    ? `${SYSTEM_PROMPT}\n\nNotas de este proveedor en particular (seguilas al pie de la letra):\n${notes.trim()}`
+    : SYSTEM_PROMPT;
+
   try {
     const anthropic = new Anthropic();
     const response = await anthropic.messages.create({
@@ -109,7 +119,7 @@ export default async function handler(req, res) {
         effort: 'medium',
         format: { type: 'json_schema', schema: ITEM_SCHEMA },
       },
-      system: SYSTEM_PROMPT,
+      system,
       messages: [
         { role: 'user', content: `Archivo: ${filename || 'sin nombre'}\n\n${inputText}` },
       ],

@@ -765,6 +765,7 @@ let state = {
   clients: {},
   clientsSeenMigrated: false,
   currentClientPhone: null,
+  checkoutPointsRedeemed: 0,
   route: {screen:"home"},
   adminAuthed: false,
   adminIsSuperAdmin: false,
@@ -1908,6 +1909,36 @@ function tierFor(points){
   return {key:"bronce", label:"Bronce"};
 }
 
+/* ---------- Canje de Puntos Royal por descuento ---------- */
+// 1000 puntos = 5% de descuento, sin tope: 3000 puntos canjeados en un
+// mismo pedido/comprobante son 15%. Se canjea siempre en bloques enteros
+// de 1000 (no hay canjes parciales de un bloque).
+const POINTS_REDEEM_BLOCK = 1000;
+const POINTS_REDEEM_PCT_PER_BLOCK = 5;
+function maxRedeemablePoints(points){
+  return Math.floor((points||0)/POINTS_REDEEM_BLOCK) * POINTS_REDEEM_BLOCK;
+}
+function pointsRedeemPct(pointsToRedeem){
+  return Math.floor((pointsToRedeem||0)/POINTS_REDEEM_BLOCK) * POINTS_REDEEM_PCT_PER_BLOCK;
+}
+// Resta puntos ya canjeados por un descuento (delta en puntos, no en pesos
+// como creditPointsToClient). Reusa credit_client_points con delta negativo,
+// igual que hace editClientPoints para correcciones manuales — esa función
+// ya corta en 0 de forma atómica en el servidor, así que nunca deja saldo
+// negativo aunque dos canjes lleguen casi al mismo tiempo.
+function redeemClientPoints(phone, pointsToRedeem){
+  if(!phone || !pointsToRedeem) return;
+  const p = normalizePhone(phone);
+  const c = state.clients[p];
+  if(c) c.points = Math.max(0, (c.points||0) - pointsToRedeem);
+  rpcFetch('credit_client_points', {p_phone: p, p_delta: -pointsToRedeem, p_name: c?c.name:null})
+    .then(row=>{
+      const saved = Array.isArray(row) ? row[0] : row;
+      if(saved && state.clients[p]){ state.clients[p].points = saved.points; saveState(); }
+    })
+    .catch(e=>console.warn('No se pudieron descontar los puntos canjeados en el servidor:', e));
+}
+
 /* =========================================================
    WHATSAPP MESSAGE BUILDERS
    ========================================================= */
@@ -2656,7 +2687,7 @@ function renderCart(){
       ${(()=>{ const pct=clientDiscountPct(); const base=cartTotal(); if(pct>0){ const disc=Math.round(base*pct/100); return `<div class="summary-row"><span>Subtotal</span><span>${money(base)}</span></div><div class="summary-row" style="color:var(--ok);"><span>Tu descuento (${pct}%)</span><span>-${money(disc)}</span></div><div class="summary-row total"><span>Total</span><span>${money(base-disc)}</span></div>`; } return `<div class="summary-row total"><span>Total</span><span>${money(base)}</span></div>`; })()}
     </div>
     <div style="padding:0 16px 90px;">
-      <button class="btn-primary" onclick="nav('checkout')">Continuar al pedido</button>
+      <button class="btn-primary" onclick="state.checkoutPointsRedeemed=0; nav('checkout')">Continuar al pedido</button>
     </div>
   </div>`;
 }
@@ -2674,16 +2705,32 @@ function renderCart(){
 // mostrar un total y cobrar otro.
 function renderCheckoutSummaryHtml(){
   const base = cartTotal();
-  const discPct = clientDiscountPct();
+  const specialPct = clientDiscountPct();
+  const client = state.currentClientPhone ? state.clients[state.currentClientPhone] : null;
+  const maxRedeemable = maxRedeemablePoints(client ? client.points : 0);
+  if(state.checkoutPointsRedeemed > maxRedeemable) state.checkoutPointsRedeemed = maxRedeemable;
+  const redeemed = state.checkoutPointsRedeemed || 0;
+  const redeemPct = pointsRedeemPct(redeemed);
+  const discPct = specialPct + redeemPct;
   const discAmount = discPct > 0 ? Math.round(base * discPct / 100) : 0;
   const finalTotal = base - discAmount;
-  const client = state.currentClientPhone ? state.clients[state.currentClientPhone] : null;
   const isWholesale = !!(client && client.wholesale);
   return `
     ${isWholesale ? `<div class="summary-row" style="color:#6db8e8;"><span>👑 Precio mayorista aplicado</span><span></span></div>` : ''}
+    ${maxRedeemable >= POINTS_REDEEM_BLOCK ? `
+      <div class="summary-row" style="align-items:center;">
+        <span>👑 Canjear puntos (tenés ${client.points})</span>
+        <div style="display:flex; align-items:center; gap:10px;">
+          <button onclick="adjustCheckoutPoints(-${POINTS_REDEEM_BLOCK})" ${redeemed<=0?'disabled':''} style="width:26px; height:26px; border-radius:50%; border:1px solid var(--glass-bd); background:var(--glass); color:var(--cream); font-size:16px; line-height:1;">−</button>
+          <span style="min-width:40px; text-align:center;">${redeemed}</span>
+          <button onclick="adjustCheckoutPoints(${POINTS_REDEEM_BLOCK})" ${redeemed>=maxRedeemable?'disabled':''} style="width:26px; height:26px; border-radius:50%; border:1px solid var(--glass-bd); background:var(--glass); color:var(--cream); font-size:16px; line-height:1;">+</button>
+        </div>
+      </div>
+    ` : ''}
     ${discPct > 0 ? `
       <div class="summary-row"><span>Subtotal</span><span>${money(base)}</span></div>
-      <div class="summary-row" style="color:var(--ok);"><span>Descuento especial (${discPct}%)</span><span>-${money(discAmount)}</span></div>
+      ${specialPct > 0 ? `<div class="summary-row" style="color:var(--ok);"><span>Descuento especial (${specialPct}%)</span><span>-${money(Math.round(base*specialPct/100))}</span></div>` : ''}
+      ${redeemPct > 0 ? `<div class="summary-row" style="color:var(--ok);"><span>Canje de puntos (${redeemPct}%)</span><span>-${money(Math.round(base*redeemPct/100))}</span></div>` : ''}
     ` : ''}
     <div class="summary-row total"><span>Total a pagar</span><span>${money(finalTotal)}</span></div>
   `;
@@ -2694,7 +2741,16 @@ function renderCheckoutSummaryHtml(){
 function onCheckoutPhoneInput(){
   const rawPhone = (document.getElementById("ck-phone")||{}).value || '';
   const phone = rawPhone.trim() ? normalizePhone(rawPhone) : null;
-  state.currentClientPhone = (phone && state.clients[phone]) ? phone : null;
+  const resolved = (phone && state.clients[phone]) ? phone : null;
+  if(resolved !== state.currentClientPhone) state.checkoutPointsRedeemed = 0;
+  state.currentClientPhone = resolved;
+  const summaryEl = document.getElementById("ck-summary");
+  if(summaryEl) summaryEl.innerHTML = renderCheckoutSummaryHtml();
+}
+function adjustCheckoutPoints(delta){
+  const client = state.currentClientPhone ? state.clients[state.currentClientPhone] : null;
+  const maxRedeemable = maxRedeemablePoints(client ? client.points : 0);
+  state.checkoutPointsRedeemed = Math.min(maxRedeemable, Math.max(0, (state.checkoutPointsRedeemed||0) + delta));
   const summaryEl = document.getElementById("ck-summary");
   if(summaryEl) summaryEl.innerHTML = renderCheckoutSummaryHtml();
 }
@@ -2726,7 +2782,11 @@ async function submitOrder(){
   const phone = normalizePhone(rawPhone);
   state.currentClientPhone = phone;
   const clientForDiscount = state.clients[phone];
-  const discPct = clientForDiscount && clientForDiscount.discountPct ? Number(clientForDiscount.discountPct) : 0;
+  const specialPct = clientForDiscount && clientForDiscount.discountPct ? Number(clientForDiscount.discountPct) : 0;
+  // Recorta contra el saldo real del cliente por si el estado quedó desactualizado
+  // (p.ej. el teléfono tipeado nunca disparó onCheckoutPhoneInput).
+  const redeemedPoints = Math.min(state.checkoutPointsRedeemed||0, maxRedeemablePoints(clientForDiscount?clientForDiscount.points:0));
+  const discPct = specialPct + pointsRedeemPct(redeemedPoints);
   // Reservamos la pestaña de WhatsApp ACÁ, antes de cualquier await: en
   // iOS/Safari (y varios navegadores mobile) un window.open() que se llama
   // después de una llamada de red ya no cuenta como "toque del usuario" y
@@ -2740,6 +2800,7 @@ async function submitOrder(){
     // manda igual por WhatsApp, que es donde realmente se coordina el
     // pedido, así no se pierde lo que el cliente aclaró.
     order.notes = notes;
+    if(redeemedPoints > 0){ redeemClientPoints(phone, redeemedPoints); state.checkoutPointsRedeemed = 0; }
     saveState();
     const msg = buildOrderWAMessage(order);
     openWaWindow(waWin, msg);
@@ -2760,6 +2821,7 @@ async function submitOrder(){
     console.warn('No se pudo guardar el pedido en el servidor, se manda igual por WhatsApp:', e);
     const order = placeOrderLocalFallback({name, phone, address}, discPct);
     order.notes = notes;
+    if(redeemedPoints > 0){ redeemClientPoints(phone, redeemedPoints); state.checkoutPointsRedeemed = 0; }
     await confirmOrderNotSaved(e);
     const msg = buildOrderWAMessage(order, true);
     openWaWindow(waWin, msg);
@@ -3299,6 +3361,33 @@ function cmpNorm(s){
     .replace(/[^a-z0-9\s]/g,' ').replace(/\s+/g,' ').trim();
 }
 function cmpMoney(v){ const n=parseFloat(v); return isNaN(n)?'-':'$'+n.toLocaleString('es-AR',{minimumFractionDigits:2,maximumFractionDigits:2}); }
+// Condiciones de precio del proveedor: lista de % que se aplican en cascada
+// (cada uno sobre el resultado del anterior) al precio bruto que figura en
+// la lista, para llegar al precio real de compra — ej: la lista trae el
+// precio de lista y hay que restarle descuentos y sumarle IVA: [-5,-2,-3,21].
+// Se cargan una vez al dar de alta el proveedor y se aplican solos en cada
+// importación, para no tener que recalcular a mano lista por lista.
+function cmpProvAdjustPcts(prov){
+  const a=prov&&prov.mapping&&Array.isArray(prov.mapping.priceAdjustPct)?prov.mapping.priceAdjustPct:[];
+  return a.filter(n=>typeof n==='number'&&!isNaN(n));
+}
+function cmpApplyAdjust(price,prov){
+  const final=cmpProvAdjustPcts(prov).reduce((p,pct)=>p*(1+pct/100),price);
+  return Math.round(final*100)/100;
+}
+function cmpParseAdjustInput(str){
+  return String(str||'').split(',').map(s=>s.trim()).filter(s=>s!=='').map(s=>parseFloat(s.replace('%','').replace(',','.'))).filter(n=>!isNaN(n));
+}
+function cmpAdjustPreviewText(pcts,base){
+  if(!pcts.length) return cmpMoney(base)+' (sin cambios)';
+  const final=pcts.reduce((p,pct)=>p*(1+pct/100),base);
+  return cmpMoney(base)+' → '+cmpMoney(Math.round(final*100)/100);
+}
+function cmpAdjustPreview(){
+  const el=document.getElementById('cpadj-prev'); if(!el) return;
+  const pcts=cmpParseAdjustInput(document.getElementById('cpadj').value);
+  el.textContent=cmpAdjustPreviewText(pcts,7989.07);
+}
 const CMP_COLORS=['#1a6b4a','#6b1a4a','#1a3a6b','#6b4a1a','#4a1a6b','#6b1a1a'];
 function cmpColor(id){ let h=0; for(let i=0;i<id.length;i++) h=(h*31+id.charCodeAt(i))|0; return CMP_COLORS[Math.abs(h)%CMP_COLORS.length]; }
 function cmpInitial(name){ return String(name||'').trim().charAt(0).toUpperCase(); }
@@ -3468,10 +3557,28 @@ function cmpHtmlProveedores(){
 
 function cmpModalProv(id){
   const p=id?cmpDB.proveedores.find(x=>x.id===id):null;
+  const adjPcts=p?cmpProvAdjustPcts(p):[];
+  const pricePerUnit=!!(p&&p.mapping&&p.mapping.pricePerUnit);
+  const aiNotes=(p&&p.mapping&&p.mapping.aiNotes)||'';
   cmpOpenModal(`<div class="cmp-modal-title">${p?'Editar':'Nuevo'} Proveedor</div>
     <div class="cmp-field"><label>Nombre</label><input class="cmp-inp" id="cpn" value="${p?cmpEsc(p.name):''}" placeholder="Ej: Distribuidora Lopez"></div>
     <div class="cmp-field"><label>WhatsApp (opcional)</label><input class="cmp-inp" id="cpph" value="${p&&p.phone?cmpEsc(p.phone):''}" placeholder="Ej: 5493411234567"></div>
     ${p?`<input type="hidden" id="cpid" value="${cmpEsc(id)}">`:''}
+    <div class="cmp-field">
+      <label>Descuentos/IVA a aplicar (opcional)</label>
+      <input class="cmp-inp" id="cpadj" value="${cmpEsc(adjPcts.join(', '))}" placeholder="Ej: -5, -2, -3, 21" oninput="cmpAdjustPreview()">
+      <div style="font-size:11px;color:rgba(255,255,255,0.4);margin-top:4px;">Si el precio de la lista NO es el precio final, cargá acá los % a aplicar en cascada (uno sobre el resultado del anterior), en el orden que corresponda: descuentos primero (negativos), IVA al final. Dejalo vacío si la lista ya trae el precio final.<br>Ejemplo con $7.989,07: <b id="cpadj-prev">${cmpEsc(cmpAdjustPreviewText(adjPcts,7989.07))}</b></div>
+    </div>
+    <div class="cmp-field" style="display:flex;align-items:center;gap:8px;">
+      <input type="checkbox" id="cpunit" ${pricePerUnit?'checked':''} style="width:18px;height:18px;">
+      <label style="margin:0;" for="cpunit">El precio de la lista ya es por unidad (no por bulto/caja)</label>
+    </div>
+    <div style="font-size:11px;color:rgba(255,255,255,0.4);margin:-6px 0 12px;">Tildalo si el proveedor cotiza por unidad aunque la lista tenga una columna de "cantidad por caja" — para no dividir el precio por esa cantidad al comparar.</div>
+    <div class="cmp-field">
+      <label>Instrucciones para la IA al importar (opcional)</label>
+      <textarea class="cmp-inp" id="cpnotes" rows="3" placeholder="Ej: la lista tiene columnas código, cantidad por caja, precio sin IVA y precio final — usá siempre la última columna (precio final) como precio.">${cmpEsc(aiNotes)}</textarea>
+      <div style="font-size:11px;color:rgba(255,255,255,0.4);margin-top:4px;">Útil cuando la lista tiene varias columnas de precio o números parecidos y la IA podría confundirse sobre cuál usar.</div>
+    </div>
     <div style="display:flex;gap:10px;margin-top:8px;">
       <button class="btn-secondary" style="flex:1;" onclick="cmpCloseModal()">Cancelar</button>
       <button class="btn-primary" style="flex:1;" onclick="cmpSaveProv()">Guardar</button>
@@ -3482,14 +3589,18 @@ function cmpModalProv(id){
 async function cmpSaveProv(){
   const name=(document.getElementById('cpn').value||'').trim();
   const phone=(document.getElementById('cpph').value||'').trim();
+  const priceAdjustPct=cmpParseAdjustInput(document.getElementById('cpadj').value);
+  const pricePerUnit=!!document.getElementById('cpunit').checked;
+  const aiNotes=(document.getElementById('cpnotes').value||'').trim();
+  const mapping={priceAdjustPct,pricePerUnit,aiNotes};
   const idEl=document.getElementById('cpid');
   const id=idEl?idEl.value:'';
   if(!name){ toast('Ingresá un nombre','err'); return; }
   let prov;
   if(id){
-    prov=cmpDB.proveedores.find(x=>x.id===id); if(prov){ prov.name=name; prov.phone=phone; }
+    prov=cmpDB.proveedores.find(x=>x.id===id); if(prov){ prov.name=name; prov.phone=phone; prov.mapping=mapping; }
   } else {
-    prov={id:'p'+Date.now(),name,phone,lastImport:null,mapping:null};
+    prov={id:'p'+Date.now(),name,phone,lastImport:null,mapping};
     cmpDB.proveedores.push(prov);
   }
   cmpCloseModal();
@@ -3636,11 +3747,13 @@ async function cmpAiParse(text,filename){
     <span class="spin" style="display:inline-block;font-size:22px;">${ic('sparkle')}</span>
     <p style="margin-top:10px;font-size:13px;color:rgba(255,255,255,0.6);">Analizando &ldquo;${cmpEsc(filename)}&rdquo; con IA&hellip;</p>
   </div>`;
+  const prov=cmpDB.proveedores.find(p=>p.id===provId);
+  const notes=(prov&&prov.mapping&&prov.mapping.aiNotes)||'';
   try{
     const res=await fetch('/api/comparador-parse',{
       method:'POST',
       headers:{'Content-Type':'application/json','Authorization':'Bearer '+((adminSession&&adminSession.access_token)||'')},
-      body:JSON.stringify({text,filename})
+      body:JSON.stringify({text,filename,notes})
     });
     const data=await res.json().catch(()=>({}));
     if(!res.ok) throw new Error(data.error||('Error '+res.status));
@@ -3659,17 +3772,29 @@ async function cmpAiParse(text,filename){
 function cmpRenderAiPreview(){
   const el=document.getElementById('cmp-imp-preview');
   if(!el) return;
+  const provId=(document.getElementById('cmp-prov')||{}).value||'';
+  const prov=cmpDB.proveedores.find(p=>p.id===provId);
+  const forceUnit=!!(prov&&prov.mapping&&prov.mapping.pricePerUnit);
+  const hasAdj=cmpProvAdjustPcts(prov).length>0;
   const items=_cmpAiItems||[];
-  const rowsHtml=items.map((it,i)=>`
+  const rowsHtml=items.map((it,i)=>{
+    const finalPrice=cmpApplyAdjust(it.price,prov);
+    const effQty=forceUnit?1:(it.unitQty||1);
+    return `
     <tr>
       <td><input class="cmp-inp" style="padding:6px 8px;font-size:12px;" value="${cmpEsc(it.name)}" oninput="_cmpAiItems[${i}].name=this.value"></td>
-      <td><input class="cmp-inp" style="padding:6px 8px;font-size:12px;width:80px;" type="number" step="0.01" value="${it.price}" oninput="_cmpAiItems[${i}].price=parseFloat(this.value)||0"></td>
-      <td><input class="cmp-inp" style="padding:6px 8px;font-size:12px;width:64px;" type="number" step="1" value="${it.unitQty}" oninput="_cmpAiItems[${i}].unitQty=parseInt(this.value)||1"></td>
+      <td>
+        <input class="cmp-inp" style="padding:6px 8px;font-size:12px;width:80px;" type="number" step="0.01" value="${it.price}" oninput="_cmpAiItems[${i}].price=parseFloat(this.value)||0;cmpRenderAiPreview()">
+        ${hasAdj?`<div style="font-size:10px;color:rgba(255,255,255,0.4);margin-top:2px;">→ ${cmpMoney(finalPrice)}</div>`:''}
+      </td>
+      <td><input class="cmp-inp" style="padding:6px 8px;font-size:12px;width:64px;" type="number" step="1" value="${it.unitQty}" ${forceUnit?'disabled':''} oninput="_cmpAiItems[${i}].unitQty=parseInt(this.value)||1">
+        ${forceUnit?`<div style="font-size:10px;color:rgba(255,255,255,0.4);margin-top:2px;">forzado a 1</div>`:''}
+      </td>
       <td><button class="icon-btn" onclick="cmpAiRemoveItem(${i})">${ic('trash')}</button></td>
-    </tr>`).join('');
+    </tr>`;}).join('');
   el.innerHTML=`<div style="background:var(--glass);border:1px solid var(--glass-bd);border-radius:14px;padding:14px;">
     <div style="font-size:11px;font-weight:700;color:var(--gold2);text-transform:uppercase;letter-spacing:.5px;margin-bottom:4px;">Archivo: ${cmpEsc(_cmpAiFilename)}</div>
-    <div style="font-size:12px;color:rgba(255,255,255,0.4);margin-bottom:12px;">${items.length} producto(s) detectados por IA &middot; revisá antes de importar</div>
+    <div style="font-size:12px;color:rgba(255,255,255,0.4);margin-bottom:12px;">${items.length} producto(s) detectados por IA &middot; revisá antes de importar${hasAdj?' &middot; el precio final ya incluye los descuentos/IVA cargados en el proveedor':''}${forceUnit?' &middot; cantidad forzada a 1 (precio por unidad)':''}</div>
     <div class="cmp-tbl-wrap"><table>
       <tr><th>Producto</th><th>Precio</th><th>Uds/bulto</th><th></th></tr>
       ${rowsHtml}
@@ -3687,16 +3812,17 @@ function cmpAiRemoveItem(i){
 async function cmpDoAiImport(){
   const provId=(document.getElementById('cmp-prov')||{}).value||'';
   if(!provId){ toast('Seleccioná un proveedor','err'); return; }
+  const prov=cmpDB.proveedores.find(p=>p.id===provId);
+  const forceUnit=!!(prov&&prov.mapping&&prov.mapping.pricePerUnit);
   const items=_cmpAiItems||[];
   const rows=items.filter(it=>it.name&&it.price>0).map(it=>({
-    name:it.name, price:it.price, unit:it.unit||'', unitQty:it.unitQty||1, code:it.code||'', norm:cmpNorm(it.name)
+    name:it.name, price:cmpApplyAdjust(it.price,prov), priceRaw:it.price, unit:it.unit||'', unitQty:forceUnit?1:(it.unitQty||1), code:it.code||'', norm:cmpNorm(it.name)
   }));
   if(!rows.length){ toast('No hay productos para importar','err'); return; }
   const now=new Date().toISOString();
   const lista={provId,rows,at:now};
   const idx=cmpDB.listas.findIndex(l=>l.provId===provId);
   if(idx>=0) cmpDB.listas[idx]=lista; else cmpDB.listas.push(lista);
-  const prov=cmpDB.proveedores.find(p=>p.id===provId);
   if(prov) prov.lastImport=now;
   _cmpAiItems=null;
   try{
@@ -8073,16 +8199,21 @@ async function requestAfipCae({total, neto, iva, ivaPct, docNumber}){
    Remito and Ticket never show IVA breakdown regardless of this flag.
    For type 'factura' this is async: pide el CAE a AFIP antes de guardar nada,
    y devuelve null (sin tocar contadores ni estado) si AFIP no la autoriza. */
-async function createVoucher(type, items, customer, orderId, includeIVA, generalDiscount){
+async function createVoucher(type, items, customer, orderId, includeIVA, generalDiscount, pointsRedeemed){
   const afterItemDiscounts = items.reduce((s,it)=>{
     const lineTotal = it.price*it.qty;
     const discPct = Number(it.discountPct)||0;
     return s + lineTotal*(1-discPct/100);
   }, 0);
   const gd = generalDiscount || {type:"percent", value:0};
-  const generalDiscountAmount = gd.value>0
+  const manualDiscountAmount = gd.value>0
     ? (gd.type==="percent" ? afterItemDiscounts*(gd.value/100) : Math.min(gd.value, afterItemDiscounts))
     : 0;
+  // Canje de Puntos Royal: siempre un % sobre afterItemDiscounts, se suma al
+  // descuento general que haya cargado el admin en vez de reemplazarlo.
+  const pointsPct = pointsRedeemPct(pointsRedeemed);
+  const pointsDiscountAmount = pointsPct > 0 ? afterItemDiscounts * (pointsPct/100) : 0;
+  const generalDiscountAmount = manualDiscountAmount + pointsDiscountAmount;
   const total = Math.max(0, afterItemDiscounts - generalDiscountAmount);
   const showIVA = type === "factura" && !!includeIVA;
   const ivaCalc = calcIVADiscriminado(total);
@@ -8100,7 +8231,7 @@ async function createVoucher(type, items, customer, orderId, includeIVA, general
     date: new Date().toISOString(),
     items, customer: customer||{name:"Consumidor Final", phone:"", address:""},
     total,
-    generalDiscount: gd.value>0 ? gd : null,
+    generalDiscount: (gd.value>0 || pointsPct>0) ? {...gd, pointsRedeemed: pointsRedeemed||0, pointsDiscountPct: pointsPct, pointsDiscountAmount} : null,
     generalDiscountAmount,
     showIVA,
     ivaPct: ivaCalc.pct, iva: ivaCalc.iva, neto: ivaCalc.neto,
@@ -8122,6 +8253,9 @@ async function createVoucher(type, items, customer, orderId, includeIVA, general
   // offered a save prompt instead, to respect the "ask before saving" preference.
   if(!orderId && type !== "presupuesto" && customer && customer.phone && state.clients[normalizePhone(customer.phone)]){
     creditPointsToClient(customer, total, voucher.id);
+  }
+  if(pointsRedeemed > 0 && customer && customer.phone){
+    redeemClientPoints(customer.phone, pointsRedeemed);
   }
   saveState();
   apiSaveVoucher(voucher);
@@ -8189,10 +8323,10 @@ async function generateVoucherFromOrder(orderId, type, includeIVA){
 }
 
 /* ---------- Manual voucher creation ---------- */
-let manualVoucherDraft = { type:"factura", items:[], customerName:"", customerPhone:"", customerAddress:"", customerDoc:"", includeIVA:false, searchQuery:"", clientSearchQuery:"", generalDiscountType:"percent", generalDiscountValue:0, editingVoucherId:null };
+let manualVoucherDraft = { type:"factura", items:[], customerName:"", customerPhone:"", customerAddress:"", customerDoc:"", includeIVA:false, searchQuery:"", clientSearchQuery:"", generalDiscountType:"percent", generalDiscountValue:0, pointsRedeemed:0, editingVoucherId:null };
 
 function openManualVoucherModal(){
-  manualVoucherDraft = { type:"factura", items:[], customerName:"", customerPhone:"", customerAddress:"", customerDoc:"", includeIVA:false, searchQuery:"", clientSearchQuery:"", generalDiscountType:"percent", generalDiscountValue:0, editingVoucherId:null };
+  manualVoucherDraft = { type:"factura", items:[], customerName:"", customerPhone:"", customerAddress:"", customerDoc:"", includeIVA:false, searchQuery:"", clientSearchQuery:"", generalDiscountType:"percent", generalDiscountValue:0, pointsRedeemed:0, editingVoucherId:null };
   renderManualVoucherModal();
 }
 // Abre el comprobante manual precargado con el cliente de un pedido, para
@@ -8204,7 +8338,7 @@ function openManualVoucherModalForOrder(orderId){
   manualVoucherDraft = {
     type: "factura", items: [],
     customerName: order.customer.name||"", customerPhone: order.customer.phone||"", customerAddress: order.customer.address||"", customerDoc: "",
-    includeIVA: false, searchQuery: "", clientSearchQuery: "", generalDiscountType: "percent", generalDiscountValue: 0, editingVoucherId: null,
+    includeIVA: false, searchQuery: "", clientSearchQuery: "", generalDiscountType: "percent", generalDiscountValue: 0, pointsRedeemed: 0, editingVoucherId: null,
   };
   renderManualVoucherModal();
 }
@@ -8321,6 +8455,8 @@ function renderManualVoucherModal(){
         </div>
       ` : ''}
 
+      ${manualVoucherRedeemUiHtml()}
+
       ${d.type==="factura" ? `
         <div class="settings-row" style="margin:4px 16px 0; border-radius:12px; background:var(--glass); border:1px solid var(--glass-bd); border-bottom:1px solid var(--glass-bd);">
           <span>Discriminar IVA (ya incluido en el precio)</span>
@@ -8339,9 +8475,45 @@ function renderManualVoucherModal(){
     </div>
   `;
 }
+// Cliente detrás del teléfono cargado en el comprobante manual (si ya es
+// un cliente conocido) — de ahí sale el saldo de puntos disponible para canjear.
+function manualVoucherClient(){
+  const d = manualVoucherDraft;
+  const phone = (d.customerPhone||"").trim();
+  if(!phone) return null;
+  return state.clients[normalizePhone(phone)] || null;
+}
+// Control de canje de puntos del comprobante manual: solo aparece para
+// comprobantes nuevos (no al editar uno ya emitido) y con un cliente
+// conocido con al menos 1000 puntos.
+function manualVoucherRedeemUiHtml(){
+  const d = manualVoucherDraft;
+  if(d.editingVoucherId || d.items.length===0) return '';
+  const client = manualVoucherClient();
+  const maxRedeemable = maxRedeemablePoints(client ? client.points : 0);
+  if(maxRedeemable < POINTS_REDEEM_BLOCK) return '';
+  const redeemed = d.pointsRedeemed||0;
+  return `
+    <div class="form-group">
+      <label>👑 Canjear puntos de ${escapeHtml(client.name)} (tiene ${client.points})</label>
+      <div style="display:flex; align-items:center; gap:10px;">
+        <button onclick="adjustManualVoucherPoints(-${POINTS_REDEEM_BLOCK})" ${redeemed<=0?'disabled':''} style="width:30px; height:30px; border-radius:50%; border:1px solid var(--glass-bd); background:var(--glass); color:var(--cream); font-size:16px; line-height:1;">−</button>
+        <span style="min-width:100px; text-align:center;">${redeemed} pts (${pointsRedeemPct(redeemed)}%)</span>
+        <button onclick="adjustManualVoucherPoints(${POINTS_REDEEM_BLOCK})" ${redeemed>=maxRedeemable?'disabled':''} style="width:30px; height:30px; border-radius:50%; border:1px solid var(--glass-bd); background:var(--glass); color:var(--cream); font-size:16px; line-height:1;">+</button>
+      </div>
+    </div>
+  `;
+}
+function adjustManualVoucherPoints(delta){
+  const client = manualVoucherClient();
+  const maxRedeemable = maxRedeemablePoints(client ? client.points : 0);
+  manualVoucherDraft.pointsRedeemed = Math.min(maxRedeemable, Math.max(0, (manualVoucherDraft.pointsRedeemed||0) + delta));
+  renderManualVoucherModal();
+}
 /* Computes the final total for the manual voucher draft, applying per-item
-   discounts first, then the general discount (percent or fixed amount) on
-   top of that subtotal. Returns the breakdown so the UI can show each step. */
+   discounts first, then the general discount (percent or fixed amount) and
+   the points-redeem discount (always additive on top of it) on top of that
+   subtotal. Returns the breakdown so the UI can show each step. */
 function computeManualVoucherTotal(d){
   const subtotal = d.items.reduce((s,it)=>s+(it.price||0)*(Number(it.qty)||0),0);
   const afterItemDiscounts = d.items.reduce((s,it)=>{
@@ -8355,8 +8527,10 @@ function computeManualVoucherTotal(d){
   if(gdValue > 0){
     generalDiscountAmount = gdType === "percent" ? afterItemDiscounts*(gdValue/100) : Math.min(gdValue, afterItemDiscounts);
   }
-  const total = Math.max(0, afterItemDiscounts - generalDiscountAmount);
-  return { subtotal, afterItemDiscounts, generalDiscountAmount, total };
+  const pointsDiscountPct = pointsRedeemPct(d.pointsRedeemed);
+  const pointsDiscountAmount = pointsDiscountPct > 0 ? afterItemDiscounts*(pointsDiscountPct/100) : 0;
+  const total = Math.max(0, afterItemDiscounts - generalDiscountAmount - pointsDiscountAmount);
+  return { subtotal, afterItemDiscounts, generalDiscountAmount, pointsDiscountPct, pointsDiscountAmount, total };
 }
 function renderManualVoucherTotals(){
   const d = manualVoucherDraft;
@@ -8369,6 +8543,9 @@ function renderManualVoucherTotals(){
   }
   if(breakdown.generalDiscountAmount > 0){
     rows += `<div class="summary-row"><span>Descuento general</span><span>-${money(breakdown.generalDiscountAmount)}</span></div>`;
+  }
+  if(breakdown.pointsDiscountAmount > 0){
+    rows += `<div class="summary-row" style="color:var(--ok);"><span>Canje de puntos (${breakdown.pointsDiscountPct}%)</span><span>-${money(breakdown.pointsDiscountAmount)}</span></div>`;
   }
   if(d.type==="factura" && d.includeIVA){
     const c = calcIVADiscriminado(breakdown.total);
@@ -8487,7 +8664,7 @@ async function confirmManualVoucher(){
   const btn = document.getElementById("btn-confirm-voucher");
   const originalLabel = btn ? btn.innerHTML : null;
   if(d.type==="factura" && btn){ btn.innerHTML = `<span class="spin">${ic('sparkle')}</span> Solicitando CAE a AFIP…`; btn.disabled = true; }
-  const voucher = await createVoucher(d.type, items, customer, null, d.includeIVA, generalDiscount);
+  const voucher = await createVoucher(d.type, items, customer, null, d.includeIVA, generalDiscount, d.pointsRedeemed||0);
   if(!voucher){ if(btn){ btn.innerHTML = originalLabel; btn.disabled = false; } return; }
   closeManualVoucherModal();
   if(isNewClient){
@@ -8647,7 +8824,20 @@ function buildVoucherDocHTML(voucher){
     </table>
     ${showPrices ? `
       <div class="vd-totals">
-        ${voucher.generalDiscountAmount>0?`<div class="row"><span>Descuento ${voucher.generalDiscount.type==='percent'?`(${voucher.generalDiscount.value}%)`:'general'}</span><span>-${money(voucher.generalDiscountAmount)}</span></div>`:''}
+        ${(()=>{
+          const gd = voucher.generalDiscount;
+          if(!gd) return '';
+          const pointsAmount = gd.pointsDiscountAmount||0;
+          const manualAmount = voucher.generalDiscountAmount - pointsAmount;
+          let html = '';
+          if(manualAmount > 0){
+            html += `<div class="row"><span>Descuento ${gd.type==='percent'?`(${gd.value}%)`:'general'}</span><span>-${money(manualAmount)}</span></div>`;
+          }
+          if(pointsAmount > 0){
+            html += `<div class="row"><span>👑 Canje de puntos (${gd.pointsDiscountPct}%)</span><span>-${money(pointsAmount)}</span></div>`;
+          }
+          return html;
+        })()}
         ${showIVA?`
           <div class="row"><span>Neto</span><span>${money(voucher.neto)}</span></div>
           <div class="row"><span>IVA (${voucher.ivaPct}%, incluido)</span><span>${money(voucher.iva)}</span></div>
