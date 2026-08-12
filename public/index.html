@@ -3371,6 +3371,16 @@ function cmpProvAdjustPcts(prov){
   const a=prov&&prov.mapping&&Array.isArray(prov.mapping.priceAdjustPct)?prov.mapping.priceAdjustPct:[];
   return a.filter(n=>typeof n==='number'&&!isNaN(n));
 }
+// Muchos proveedores (sobre todo Tyna) escriben el tamaño del bulto en el
+// propio nombre del producto como "N*M" (ej: "6*220 ML" = 6 latas por
+// bulto) — el precio del comparador siempre es por unidad individual (para
+// poder comparar entre proveedores), pero al armar el pedido real hay que
+// pedirlo por bulto cerrado, no lata por lata.
+function cmpPackSize(name){
+  const m=String(name||'').match(/(\d+)\s*\*\s*\d/);
+  const n=m?parseInt(m[1],10):1;
+  return (n>1&&n<1000)?n:1;
+}
 function cmpApplyAdjust(price,prov){
   const final=cmpProvAdjustPcts(prov).reduce((p,pct)=>p*(1+pct/100),price);
   return Math.round(final*100)/100;
@@ -4064,10 +4074,11 @@ function cmpDoSearch(){
 function cmpCartAdd(idx){
   const ctx=_cmpRowIdx[idx]; if(!ctx) return;
   const key=(ctx.code||ctx.name).toLowerCase();
+  const pack=cmpPackSize(ctx.name);
   const arr=state.cmpCart[ctx.provId]=state.cmpCart[ctx.provId]||[];
   const existing=arr.find(it=>it.key===key);
-  if(existing) existing.qty+=1;
-  else arr.push({key,name:ctx.name,price:ctx.price,unit:ctx.unit,unitQty:ctx.unitQty,code:ctx.code,qty:1});
+  if(existing) existing.qty+=pack;
+  else arr.push({key,name:ctx.name,price:ctx.price,unit:ctx.unit,unitQty:ctx.unitQty,code:ctx.code,qty:pack});
   saveState();
   const prov=cmpDB.proveedores.find(p=>p.id===ctx.provId);
   toast('Agregado al pedido de '+(prov?prov.name:'proveedor'));
@@ -4122,20 +4133,26 @@ function cmpHtmlPedidos(){
           <div style="flex:1;font-weight:700;">${cmpEsc(prov?prov.name:'Proveedor eliminado')}</div>
           <button style="background:none;border:none;color:rgba(255,255,255,0.35);font-size:12px;cursor:pointer;" onclick="cmpCartClearProv('${cmpEsc(pid)}')">Vaciar</button>
         </div>
-        ${items.map(it=>`
+        ${items.map(it=>{
+          const pack=cmpPackSize(it.name);
+          const bultos=Math.round(it.qty/pack);
+          return `
           <div style="display:flex;align-items:center;gap:8px;padding:6px 0;border-bottom:1px solid rgba(255,255,255,0.06);">
             <div style="flex:1;min-width:0;">
               <div style="font-size:13px;font-weight:600;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;">${cmpEsc(it.name)}</div>
-              <div style="font-size:11px;color:rgba(255,255,255,0.4);">${cmpMoney(it.price)}${it.unit?' &middot; '+cmpEsc(it.unit):''}</div>
+              <div style="font-size:11px;color:rgba(255,255,255,0.4);">${cmpMoney(it.price)}/u${it.unit?' &middot; '+cmpEsc(it.unit):''}${pack>1?' &middot; bulto de '+pack+'u':''}</div>
             </div>
-            <div style="display:flex;align-items:center;gap:6px;">
-              <button class="cmp-qty-btn" onclick="cmpCartQty('${cmpEsc(pid)}','${cmpEsc(it.key)}',-1)">&minus;</button>
-              <span style="min-width:18px;text-align:center;font-size:13px;font-weight:700;">${it.qty}</span>
-              <button class="cmp-qty-btn" onclick="cmpCartQty('${cmpEsc(pid)}','${cmpEsc(it.key)}',1)">+</button>
+            <div style="display:flex;flex-direction:column;align-items:center;gap:2px;">
+              <div style="display:flex;align-items:center;gap:6px;">
+                <button class="cmp-qty-btn" onclick="cmpCartQty('${cmpEsc(pid)}','${cmpEsc(it.key)}',${-pack})">&minus;</button>
+                <span style="min-width:18px;text-align:center;font-size:13px;font-weight:700;">${bultos}</span>
+                <button class="cmp-qty-btn" onclick="cmpCartQty('${cmpEsc(pid)}','${cmpEsc(it.key)}',${pack})">+</button>
+              </div>
+              ${pack>1?`<div style="font-size:9.5px;color:rgba(255,255,255,0.35);">bulto${bultos===1?'':'s'} &middot; ${it.qty}u</div>`:''}
             </div>
             <div style="width:76px;text-align:right;font-size:13px;font-weight:700;">${cmpMoney(it.price*it.qty)}</div>
           </div>
-        `).join('')}
+        `;}).join('')}
         <div style="display:flex;justify-content:space-between;align-items:center;margin-top:10px;padding-top:10px;border-top:1px solid var(--glass-bd);">
           <div style="font-size:13px;color:rgba(255,255,255,0.5);">Total</div>
           <div style="font-size:16px;font-weight:800;color:var(--gold2);">${cmpMoney(total)}</div>
@@ -4177,7 +4194,7 @@ function cmpOpenPedidoDetail(id){
     <div style="font-size:12px;color:rgba(255,255,255,0.4);margin-bottom:12px;">${cmpFmtDate(ped.createdAt)}</div>
     <div class="cmp-tbl-wrap"><table>
       <tr><th>Producto</th><th>Cant.</th><th>Precio</th><th>Subtotal</th></tr>
-      ${ped.items.map(it=>`<tr><td>${it.code?`<b>${cmpEsc(it.code)}</b> — `:''}${cmpEsc(it.name)}</td><td>${it.qty}</td><td>${cmpMoney(it.price)}</td><td>${cmpMoney(it.price*it.qty)}</td></tr>`).join('')}
+      ${ped.items.map(it=>{ const pack=cmpPackSize(it.name); return `<tr><td>${it.code?`<b>${cmpEsc(it.code)}</b> — `:''}${cmpEsc(it.name)}</td><td>${pack>1?Math.round(it.qty/pack)+' bulto('+pack+'u)':it.qty}</td><td>${cmpMoney(it.price)}</td><td>${cmpMoney(it.price*it.qty)}</td></tr>`;}).join('')}
     </table></div>
     <div style="display:flex;justify-content:space-between;align-items:center;margin:10px 0 16px;">
       <span style="font-weight:700;">Total</span>
@@ -4222,7 +4239,11 @@ async function cmpDelPedido(id){
 function cmpPedidoWAText(ped,prov){
   let msg=`Pedido${prov?' para '+prov.name:''} — Sabores Royal\n`;
   msg+=`Fecha: ${cmpFmtDate(ped.createdAt)}\n\n`;
-  ped.items.forEach(it=>{ msg+=`• ${it.qty} x ${it.code?'['+it.code+'] ':''}${it.name} — ${cmpMoney(it.price)} = ${cmpMoney(it.price*it.qty)}\n`; });
+  ped.items.forEach(it=>{
+    const pack=cmpPackSize(it.name);
+    const cantTxt=pack>1?Math.round(it.qty/pack)+' bulto(s) de '+pack+'u':it.qty+' u';
+    msg+=`• ${cantTxt} — ${it.code?'['+it.code+'] ':''}${it.name} — ${cmpMoney(it.price)}/u = ${cmpMoney(it.price*it.qty)}\n`;
+  });
   msg+=`\nTOTAL: ${cmpMoney(ped.total)}`;
   return msg;
 }
@@ -4236,7 +4257,7 @@ function cmpSendPedidoWA(id){
 function cmpPrintPedido(id){
   const ped=cmpDB.pedidos.find(p=>p.id===id); if(!ped) return;
   const prov=cmpDB.proveedores.find(p=>p.id===ped.provId);
-  const rows=ped.items.map(it=>`<tr><td>${it.code?`<b>${cmpEsc(it.code)}</b> — `:''}${cmpEsc(it.name)}</td><td style="text-align:center;">${it.qty}</td><td style="text-align:right;">${cmpMoney(it.price)}</td><td style="text-align:right;">${cmpMoney(it.price*it.qty)}</td></tr>`).join('');
+  const rows=ped.items.map(it=>{ const pack=cmpPackSize(it.name); return `<tr><td>${it.code?`<b>${cmpEsc(it.code)}</b> — `:''}${cmpEsc(it.name)}</td><td style="text-align:center;">${pack>1?Math.round(it.qty/pack)+' bulto('+pack+'u)':it.qty}</td><td style="text-align:right;">${cmpMoney(it.price)}</td><td style="text-align:right;">${cmpMoney(it.price*it.qty)}</td></tr>`;}).join('');
   const win=window.open("","_blank");
   win.document.write(`
     <html><head><title>Pedido — ${cmpEsc(prov?prov.name:'')}</title>
