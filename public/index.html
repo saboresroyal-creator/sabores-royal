@@ -3904,6 +3904,10 @@ function cmpRenderAiPreview(){
     <div style="font-size:11px;font-weight:700;color:var(--gold2);text-transform:uppercase;letter-spacing:.5px;margin-bottom:4px;">Archivo: ${cmpEsc(_cmpAiFilename)}</div>
     <div style="font-size:12px;color:rgba(255,255,255,0.4);margin-bottom:12px;">${items.length} producto(s) detectados &middot; revisá antes de importar${hasAdj?' &middot; el precio final ya incluye los descuentos/IVA cargados en el proveedor':''}${forceUnit?' &middot; cantidad forzada a 1 (precio por unidad)':''}</div>
     ${diff?`<div class="cmp-note" style="margin-bottom:12px;">Comparado con la lista anterior de este proveedor: <b style="color:var(--warn)">${upCount} subieron</b>, <b style="color:var(--ok)">${downCount} bajaron</b>, <b style="color:var(--gold2)">${newCount} nuevos</b>${diff.discontinued.length?`, y <b style="color:var(--danger)">${diff.discontinued.length} ya no están en este archivo</b> y van a dejar de listarse para este proveedor al importar`:''}.</div>`:''}
+    <div style="display:flex;gap:10px;margin-bottom:12px;">
+      <button class="btn-primary" style="flex:1;" onclick="cmpDoAiImport()">Importar ${items.length} producto(s)</button>
+      <button class="btn-secondary" style="flex:none;font-size:12.5px;" onclick="_cmpAiItems=null;_cmpImportSkipAdjust=false;render()">Cancelar</button>
+    </div>
     <div class="cmp-tbl-wrap"><table>
       <tr><th>Producto</th><th>Precio</th><th>Uds/bulto</th><th></th></tr>
       ${rowsHtml}
