@@ -3979,17 +3979,28 @@ function cmpDoSearch(){
     const key=h.prov.id+'|'+h.row.norm;
     if(used[key]) return;
     const g={name:h.row.name,byProv:{}}; g.byProv[h.prov.id]={row:h.row,prov:h.prov}; used[key]=1;
+    // Por cada proveedor nos quedamos con el candidato de MAYOR similitud,
+    // no con el primero que supere el umbral — antes, si dos productos del
+    // mismo proveedor pasaban el 0.7 (ej: "Shot Tableta 90g" y "Shot
+    // Tableta Chocolate 170g"), se quedaba con el que apareciera primero en
+    // la lista aunque el otro fuera una coincidencia mucho mejor, mezclando
+    // presentaciones distintas en la misma fila.
+    const bestByProv={};
     allHits.forEach(h2=>{
       if(h2.prov.id===h.prov.id) return;
       const k2=h2.prov.id+'|'+h2.row.norm;
-      if(used[k2]||g.byProv[h2.prov.id]) return;
+      if(used[k2]) return;
       // 0.55 emparejaba variantes de un mismo producto que en realidad son
       // presentaciones distintas (ej: "Cofler Block 24x300g" con "Cofler
       // Block 40grs 36u Simple") porque comparten marca+línea y las
       // palabras de cantidad se ignoran a propósito. Más exigente para que
       // haga falta coincidencia real más allá del nombre de la línea.
-      if(cmpProdSim(h.row.norm,h2.row.norm)>=0.7){ g.byProv[h2.prov.id]={row:h2.row,prov:h2.prov}; used[k2]=1; }
+      const sim=cmpProdSim(h.row.norm,h2.row.norm);
+      if(sim<0.7) return;
+      const cur=bestByProv[h2.prov.id];
+      if(!cur||sim>cur.sim) bestByProv[h2.prov.id]={row:h2.row,prov:h2.prov,sim,key:k2};
     });
+    Object.values(bestByProv).forEach(b=>{ g.byProv[b.prov.id]={row:b.row,prov:b.prov}; used[b.key]=1; });
     groups.push(g);
   });
   let html=`<div style="padding:0 16px 8px;font-size:12px;color:rgba(255,255,255,0.35);">${groups.length} producto(s)</div>`;
