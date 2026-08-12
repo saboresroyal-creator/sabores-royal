@@ -3648,6 +3648,15 @@ function cmpHtmlImportar(){
       <textarea class="cmp-inp" id="cmp-paste" style="min-height:80px;font-size:12px;font-family:monospace;resize:vertical;" placeholder="Peg&aacute; ac&aacute; la lista tal cual la tengas — la IA la entiende igual..."></textarea>
       <button class="btn-secondary" style="width:100%;margin-top:8px;font-size:13px;" onclick="cmpParseText()">Analizar con IA</button>
     </div>
+    <div style="background:var(--glass);border:1px solid var(--glass-bd);border-radius:14px;padding:14px;margin-bottom:12px;">
+      <div style="font-size:11px;font-weight:700;color:var(--gold2);text-transform:uppercase;letter-spacing:.5px;margin-bottom:6px;">3. O importá un CSV ya limpio (sin IA, gratis)</div>
+      <p style="font-size:11px;color:rgba(255,255,255,0.4);margin-bottom:10px;">Para archivos que ya tienen el precio final resuelto, con columnas <b>Producto</b>, <b>Precio</b> y opcionalmente <b>Cant x Bulto</b> — se lee directo en el navegador, sin llamar a la IA ni tener costo.</p>
+      <div class="cmp-upload-zone" onclick="document.getElementById('cmp-fi-csv').click()">
+        <div style="font-size:24px;">&#128196;</div>
+        <p style="font-weight:700;margin-top:4px;font-size:13px;">Tocar para seleccionar CSV</p>
+        <input type="file" id="cmp-fi-csv" accept=".csv" style="display:none" onchange="cmpOnSimpleCsv(this)">
+      </div>
+    </div>
     <div id="cmp-imp-preview"></div>
   </div>`;
 }
@@ -3733,6 +3742,66 @@ function cmpParseText(){
   cmpAiParse(txt,'texto pegado');
 }
 
+// Importar un CSV que ya viene prolijo (Producto, Precio, [Cant x Bulto],
+// [Codigo]) sin pasar por la IA — no tiene costo, para listas que ya se
+// limpiaron a mano de antemano. A diferencia del camino con IA, el precio
+// de la columna se usa TAL CUAL como precio final: no se le aplican los
+// descuentos/IVA cargados en el proveedor (ver _cmpImportSkipAdjust).
+let _cmpImportSkipAdjust = false;
+function cmpOnSimpleCsv(input){
+  const f=input.files[0]; if(!f) return;
+  const provId=(document.getElementById('cmp-prov')||{}).value||'';
+  if(!provId){ toast('Seleccioná un proveedor primero','err'); return; }
+  const r=new FileReader();
+  r.onload=e=>{
+    const items=cmpParseSimpleCsv(e.target.result);
+    if(!items){ toast('No reconozco las columnas de este CSV — necesita al menos "Producto" y "Precio"','err'); return; }
+    if(!items.length){ toast('El archivo no tiene productos','err'); return; }
+    _cmpAiFilename=f.name;
+    _cmpAiItems=items;
+    _cmpImportSkipAdjust=true;
+    cmpRenderAiPreview();
+  };
+  r.readAsText(f,'UTF-8');
+}
+function cmpParseSimpleCsv(text){
+  const lines=String(text||'').split(/\r\n|\n/).filter(l=>l.trim()!=='');
+  if(!lines.length) return null;
+  const parseLine=(line)=>{
+    const out=[]; let cur=''; let inQ=false;
+    for(let i=0;i<line.length;i++){
+      const c=line[i];
+      if(inQ){
+        if(c==='"'){ if(line[i+1]==='"'){ cur+='"'; i++; } else inQ=false; }
+        else cur+=c;
+      } else {
+        if(c==='"') inQ=true;
+        else if(c===','){ out.push(cur); cur=''; }
+        else cur+=c;
+      }
+    }
+    out.push(cur);
+    return out.map(s=>s.trim());
+  };
+  const header=parseLine(lines[0]).map(h=>h.toLowerCase());
+  const idxName=header.findIndex(h=>/producto|nombre|descrip/.test(h));
+  const idxPrice=header.findIndex(h=>/precio/.test(h));
+  const idxQty=header.findIndex(h=>/cant.*bulto|unitqty|cantidad/.test(h));
+  const idxCode=header.findIndex(h=>/codigo|código|sku/.test(h));
+  if(idxName<0||idxPrice<0) return null;
+  const items=[];
+  for(let i=1;i<lines.length;i++){
+    const cols=parseLine(lines[i]);
+    const name=(cols[idxName]||'').trim();
+    const price=parseFloat(cols[idxPrice]);
+    if(!name||!(price>0)) continue;
+    const qty=idxQty>=0?(parseInt(cols[idxQty])||1):1;
+    const code=idxCode>=0?(cols[idxCode]||'').trim():'';
+    items.push({name,price,unit:'',unitQty:qty,code});
+  }
+  return items;
+}
+
 // Le mandamos el texto crudo (CSV, texto de PDF, o pegado a mano) a una IA
 // en el backend, que devuelve {name, price, unit, unitQty, code} por
 // producto ya limpio — reemplaza el mapeo manual de columnas de antes.
@@ -3742,6 +3811,7 @@ async function cmpAiParse(text,filename){
   if(!provId){ toast('Seleccioná un proveedor primero','err'); return; }
   if(!text||!text.trim()){ toast('El archivo parece vacío','err'); return; }
   _cmpAiFilename=filename;
+  _cmpImportSkipAdjust=false;
   const el=document.getElementById('cmp-imp-preview');
   if(el) el.innerHTML=`<div style="background:var(--glass);border:1px solid var(--glass-bd);border-radius:14px;padding:28px 14px;text-align:center;">
     <span class="spin" style="display:inline-block;font-size:22px;">${ic('sparkle')}</span>
@@ -3775,10 +3845,10 @@ function cmpRenderAiPreview(){
   const provId=(document.getElementById('cmp-prov')||{}).value||'';
   const prov=cmpDB.proveedores.find(p=>p.id===provId);
   const forceUnit=!!(prov&&prov.mapping&&prov.mapping.pricePerUnit);
-  const hasAdj=cmpProvAdjustPcts(prov).length>0;
+  const hasAdj=!_cmpImportSkipAdjust && cmpProvAdjustPcts(prov).length>0;
   const items=_cmpAiItems||[];
   const rowsHtml=items.map((it,i)=>{
-    const finalPrice=cmpApplyAdjust(it.price,prov);
+    const finalPrice=_cmpImportSkipAdjust?it.price:cmpApplyAdjust(it.price,prov);
     const effQty=forceUnit?1:(it.unitQty||1);
     return `
     <tr>
@@ -3800,7 +3870,7 @@ function cmpRenderAiPreview(){
       ${rowsHtml}
     </table></div>
     <button class="btn-primary" style="width:100%;margin-top:14px;" onclick="cmpDoAiImport()">Importar ${items.length} producto(s)</button>
-    <button class="btn-secondary" style="width:100%;margin-top:8px;font-size:12.5px;" onclick="_cmpAiItems=null;render()">Cancelar</button>
+    <button class="btn-secondary" style="width:100%;margin-top:8px;font-size:12.5px;" onclick="_cmpAiItems=null;_cmpImportSkipAdjust=false;render()">Cancelar</button>
   </div>`;
 }
 
@@ -3816,7 +3886,7 @@ async function cmpDoAiImport(){
   const forceUnit=!!(prov&&prov.mapping&&prov.mapping.pricePerUnit);
   const items=_cmpAiItems||[];
   const rows=items.filter(it=>it.name&&it.price>0).map(it=>({
-    name:it.name, price:cmpApplyAdjust(it.price,prov), priceRaw:it.price, unit:it.unit||'', unitQty:forceUnit?1:(it.unitQty||1), code:it.code||'', norm:cmpNorm(it.name)
+    name:it.name, price:_cmpImportSkipAdjust?it.price:cmpApplyAdjust(it.price,prov), priceRaw:it.price, unit:it.unit||'', unitQty:forceUnit?1:(it.unitQty||1), code:it.code||'', norm:cmpNorm(it.name)
   }));
   if(!rows.length){ toast('No hay productos para importar','err'); return; }
   const now=new Date().toISOString();
@@ -3825,6 +3895,7 @@ async function cmpDoAiImport(){
   if(idx>=0) cmpDB.listas[idx]=lista; else cmpDB.listas.push(lista);
   if(prov) prov.lastImport=now;
   _cmpAiItems=null;
+  _cmpImportSkipAdjust=false;
   try{
     await Promise.all([cmpSaveListaSupa(lista),prov?cmpSaveProvSupa(prov):Promise.resolve()]);
     toast(rows.length+' productos importados');
