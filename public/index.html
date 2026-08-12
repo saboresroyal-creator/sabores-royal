@@ -3839,6 +3839,35 @@ async function cmpAiParse(text,filename){
   }
 }
 
+// Compara la lista nueva (todavía sin importar) contra la que ya estaba
+// guardada para este proveedor, matcheando por nombre normalizado exacto
+// (cmpNorm) — no la búsqueda difusa del comparador, esto es solo para dar
+// un aviso rápido de qué cambió antes de pisar la lista vieja. Devuelve
+// null si el proveedor no tenía lista previa (nada para comparar).
+function cmpDiffAgainstPrevList(items, prov, provId){
+  const oldLista=cmpDB.listas.find(l=>l.provId===provId);
+  if(!oldLista || !oldLista.rows.length) return null;
+  const oldByNorm={};
+  oldLista.rows.forEach(r=>{ oldByNorm[r.norm]=r; });
+  const newNorms={};
+  const perItem=items.map(it=>{
+    const norm=cmpNorm(it.name);
+    newNorms[norm]=1;
+    const finalPrice=_cmpImportSkipAdjust?it.price:cmpApplyAdjust(it.price,prov);
+    const forceUnit=!!(prov&&prov.mapping&&prov.mapping.pricePerUnit);
+    const qty=forceUnit?1:(it.unitQty||1);
+    const newUnit=finalPrice/(qty||1);
+    const old=oldByNorm[norm];
+    if(!old) return {status:'new'};
+    const oldUnit=old.price/(old.unitQty||1);
+    if(!(oldUnit>0) || Math.abs(newUnit-oldUnit)<0.01) return {status:'same'};
+    const pct=Math.round((newUnit-oldUnit)/oldUnit*100);
+    return {status:pct>0?'up':'down', pct, oldUnit};
+  });
+  const discontinued=oldLista.rows.filter(r=>!newNorms[r.norm]);
+  return {perItem, discontinued};
+}
+
 function cmpRenderAiPreview(){
   const el=document.getElementById('cmp-imp-preview');
   if(!el) return;
@@ -3847,12 +3876,21 @@ function cmpRenderAiPreview(){
   const forceUnit=!!(prov&&prov.mapping&&prov.mapping.pricePerUnit);
   const hasAdj=!_cmpImportSkipAdjust && cmpProvAdjustPcts(prov).length>0;
   const items=_cmpAiItems||[];
+  const diff=cmpDiffAgainstPrevList(items, prov, provId);
+  const upCount=diff?diff.perItem.filter(d=>d.status==='up').length:0;
+  const downCount=diff?diff.perItem.filter(d=>d.status==='down').length:0;
+  const newCount=diff?diff.perItem.filter(d=>d.status==='new').length:0;
   const rowsHtml=items.map((it,i)=>{
     const finalPrice=_cmpImportSkipAdjust?it.price:cmpApplyAdjust(it.price,prov);
     const effQty=forceUnit?1:(it.unitQty||1);
+    const d=diff?diff.perItem[i]:null;
+    let diffBadge='';
+    if(d&&d.status==='up') diffBadge=`<div style="font-size:10px;color:var(--warn);margin-top:2px;">▲ +${d.pct}% (antes ${cmpMoney(d.oldUnit)}/u)</div>`;
+    else if(d&&d.status==='down') diffBadge=`<div style="font-size:10px;color:var(--ok);margin-top:2px;">▼ ${d.pct}% (antes ${cmpMoney(d.oldUnit)}/u)</div>`;
+    else if(d&&d.status==='new') diffBadge=`<div style="font-size:10px;color:var(--gold2);margin-top:2px;">NUEVO</div>`;
     return `
     <tr>
-      <td><input class="cmp-inp" style="padding:6px 8px;font-size:12px;" value="${cmpEsc(it.name)}" oninput="_cmpAiItems[${i}].name=this.value"></td>
+      <td><input class="cmp-inp" style="padding:6px 8px;font-size:12px;" value="${cmpEsc(it.name)}" oninput="_cmpAiItems[${i}].name=this.value">${diffBadge}</td>
       <td>
         <input class="cmp-inp" style="padding:6px 8px;font-size:12px;width:80px;" type="number" step="0.01" value="${it.price}" oninput="_cmpAiItems[${i}].price=parseFloat(this.value)||0;cmpRenderAiPreview()">
         ${hasAdj?`<div style="font-size:10px;color:rgba(255,255,255,0.4);margin-top:2px;">→ ${cmpMoney(finalPrice)}</div>`:''}
@@ -3864,7 +3902,8 @@ function cmpRenderAiPreview(){
     </tr>`;}).join('');
   el.innerHTML=`<div style="background:var(--glass);border:1px solid var(--glass-bd);border-radius:14px;padding:14px;">
     <div style="font-size:11px;font-weight:700;color:var(--gold2);text-transform:uppercase;letter-spacing:.5px;margin-bottom:4px;">Archivo: ${cmpEsc(_cmpAiFilename)}</div>
-    <div style="font-size:12px;color:rgba(255,255,255,0.4);margin-bottom:12px;">${items.length} producto(s) detectados por IA &middot; revisá antes de importar${hasAdj?' &middot; el precio final ya incluye los descuentos/IVA cargados en el proveedor':''}${forceUnit?' &middot; cantidad forzada a 1 (precio por unidad)':''}</div>
+    <div style="font-size:12px;color:rgba(255,255,255,0.4);margin-bottom:12px;">${items.length} producto(s) detectados &middot; revisá antes de importar${hasAdj?' &middot; el precio final ya incluye los descuentos/IVA cargados en el proveedor':''}${forceUnit?' &middot; cantidad forzada a 1 (precio por unidad)':''}</div>
+    ${diff?`<div class="cmp-note" style="margin-bottom:12px;">Comparado con la lista anterior de este proveedor: <b style="color:var(--warn)">${upCount} subieron</b>, <b style="color:var(--ok)">${downCount} bajaron</b>, <b style="color:var(--gold2)">${newCount} nuevos</b>${diff.discontinued.length?`, y <b style="color:var(--danger)">${diff.discontinued.length} ya no están en este archivo</b> y van a dejar de listarse para este proveedor al importar`:''}.</div>`:''}
     <div class="cmp-tbl-wrap"><table>
       <tr><th>Producto</th><th>Precio</th><th>Uds/bulto</th><th></th></tr>
       ${rowsHtml}
