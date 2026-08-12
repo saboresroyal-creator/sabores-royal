@@ -4177,7 +4177,7 @@ function cmpOpenPedidoDetail(id){
     <div style="font-size:12px;color:rgba(255,255,255,0.4);margin-bottom:12px;">${cmpFmtDate(ped.createdAt)}</div>
     <div class="cmp-tbl-wrap"><table>
       <tr><th>Producto</th><th>Cant.</th><th>Precio</th><th>Subtotal</th></tr>
-      ${ped.items.map(it=>`<tr><td>${cmpEsc(it.name)}</td><td>${it.qty}</td><td>${cmpMoney(it.price)}</td><td>${cmpMoney(it.price*it.qty)}</td></tr>`).join('')}
+      ${ped.items.map(it=>`<tr><td>${it.code?`<b>${cmpEsc(it.code)}</b> — `:''}${cmpEsc(it.name)}</td><td>${it.qty}</td><td>${cmpMoney(it.price)}</td><td>${cmpMoney(it.price*it.qty)}</td></tr>`).join('')}
     </table></div>
     <div style="display:flex;justify-content:space-between;align-items:center;margin:10px 0 16px;">
       <span style="font-weight:700;">Total</span>
@@ -4222,7 +4222,7 @@ async function cmpDelPedido(id){
 function cmpPedidoWAText(ped,prov){
   let msg=`Pedido${prov?' para '+prov.name:''} — Sabores Royal\n`;
   msg+=`Fecha: ${cmpFmtDate(ped.createdAt)}\n\n`;
-  ped.items.forEach(it=>{ msg+=`• ${it.qty} x ${it.name} — ${cmpMoney(it.price)} = ${cmpMoney(it.price*it.qty)}\n`; });
+  ped.items.forEach(it=>{ msg+=`• ${it.qty} x ${it.code?'['+it.code+'] ':''}${it.name} — ${cmpMoney(it.price)} = ${cmpMoney(it.price*it.qty)}\n`; });
   msg+=`\nTOTAL: ${cmpMoney(ped.total)}`;
   return msg;
 }
@@ -4236,7 +4236,7 @@ function cmpSendPedidoWA(id){
 function cmpPrintPedido(id){
   const ped=cmpDB.pedidos.find(p=>p.id===id); if(!ped) return;
   const prov=cmpDB.proveedores.find(p=>p.id===ped.provId);
-  const rows=ped.items.map(it=>`<tr><td>${cmpEsc(it.name)}</td><td style="text-align:center;">${it.qty}</td><td style="text-align:right;">${cmpMoney(it.price)}</td><td style="text-align:right;">${cmpMoney(it.price*it.qty)}</td></tr>`).join('');
+  const rows=ped.items.map(it=>`<tr><td>${it.code?`<b>${cmpEsc(it.code)}</b> — `:''}${cmpEsc(it.name)}</td><td style="text-align:center;">${it.qty}</td><td style="text-align:right;">${cmpMoney(it.price)}</td><td style="text-align:right;">${cmpMoney(it.price*it.qty)}</td></tr>`).join('');
   const win=window.open("","_blank");
   win.document.write(`
     <html><head><title>Pedido — ${cmpEsc(prov?prov.name:'')}</title>
