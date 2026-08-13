@@ -4085,11 +4085,12 @@ function cmpDoSearch(){
     Object.values(bestByProv).forEach(b=>{ g.byProv[b.prov.id]={row:b.row,prov:b.prov}; used[b.key]=1; });
     groups.push(g);
   });
-  let html=`<div style="padding:0 16px 8px;font-size:12px;color:rgba(255,255,255,0.35);">${groups.length} producto(s)</div>`;
+  const SHOW_MAX=150;
+  html=`<div style="padding:0 16px 8px;font-size:12px;color:rgba(255,255,255,0.35);">${groups.length} producto(s)${groups.length>SHOW_MAX?' — mostrando los primeros '+SHOW_MAX+', afiná la búsqueda para ver el resto':''}</div>`;
   html+=`<div class="cmp-wrap"><table class="cmp-table"><thead><tr><th>Producto</th>`;
   provs.forEach(pl=>{ html+=`<th><div class="cmp-prov-th-av" style="background:${cmpColor(pl.prov.id)}">${cmpInitial(pl.prov.name)}</div><br>${cmpEsc(pl.prov.name)}</th>`; });
   html+=`</tr></thead><tbody>`;
-  groups.slice(0,50).forEach(g=>{
+  groups.slice(0,SHOW_MAX).forEach(g=>{
     // El qty por proveedor sale SOLO de lo que se mapeó al importar (columna
     // "Cant x Bulto" o texto de presentación). Si el proveedor tiene
     // "pricePerUnit" (el precio de lista ya es por unidad, ej. Milenium),
