@@ -3449,7 +3449,38 @@ const CMP_SYNONYMS = {blanco:'simple', blanca:'simple', negro:'chocolate', negra
 function cmpMatchTokens(s){
   return cmpTokenize(s).filter(t=>!cmpIsNoiseToken(t)).map(t=>CMP_SYNONYMS[t]||t);
 }
+// Intenta sacar el tamaño individual del producto (900ml, 1.5l, 38grs...),
+// normalizado a una unidad base (ml o gramos) — para no confundir
+// presentaciones distintas del mismo producto (ej: una botella de 900ml
+// con un bidón de 5 litros) que el matcheo de texto por sí solo trataría
+// como "el mismo producto", porque las palabras de cantidad se ignoran a
+// propósito arriba para tolerar que cada proveedor las escriba distinto.
+// Devuelve el número más grande que encuentre (para no quedarse con la
+// cantidad de bulto, ej. el "4" de "4*5 LTS", en vez del tamaño real).
+// Recibe el nombre CRUDO (no el normalizado con cmpNorm), porque cmpNorm
+// saca los puntos y rompe los decimales ("1.5" → "1 5", que se leería
+// mal como "5").
+function cmpExtractSize(name){
+  const s=String(name||'').toLowerCase();
+  const re=/(\d+(?:[.,]\d+)?)\s*(ml|mls|cc|l|lt|lts|litros|kg|kgs|kilos|kilo|gr|grs|gramos|g)\b/g;
+  let m,best=null;
+  while((m=re.exec(s))){
+    let val=parseFloat(m[1].replace(',','.'));
+    if(/^(l|lt|lts|litros)$/.test(m[2])) val*=1000;
+    else if(/^(kg|kgs|kilos|kilo)$/.test(m[2])) val*=1000;
+    if(best===null||val>best) best=val;
+  }
+  return best;
+}
+// a,b acá son los NOMBRES (no .norm) — cmpMatchTokens/cmpTokenize
+// normalizan por su cuenta adentro, y cmpExtractSize necesita el texto
+// crudo para no perder los decimales.
 function cmpProdSim(a,b){
+  const sizeA=cmpExtractSize(a),sizeB=cmpExtractSize(b);
+  if(sizeA!==null&&sizeB!==null){
+    const diff=Math.abs(sizeA-sizeB)/Math.max(sizeA,sizeB);
+    if(diff>0.08) return 0; // tamaños claramente distintos: no es el mismo producto
+  }
   const ta=cmpMatchTokens(a),tb=cmpMatchTokens(b);
   if(!ta.length||!tb.length) return 0;
   let matched=0; const usedB={};
@@ -3995,9 +4026,16 @@ function cmpDoSearch(){
     return;
   }
   allHits.sort((a,b)=>b.sc-a.sc);
+  // Armar los grupos compara cada resultado contra todos los demás (para
+  // encontrar la mejor coincidencia de cada proveedor) — con listas de
+  // varios miles de productos (ej: Tyna) y una búsqueda corta que matchea
+  // de más, esa comparación de a pares podía tardar varios segundos y
+  // trababa el navegador mientras se escribía. Solo se muestran 50
+  // productos igual, así que alcanza con mirar los mejores resultados.
+  const capped=allHits.slice(0,250);
   _cmpRowIdx=[];
   const groups=[],used={};
-  allHits.forEach(h=>{
+  capped.forEach(h=>{
     const key=h.prov.id+'|'+h.row.norm;
     if(used[key]) return;
     const g={name:h.row.name,byProv:{}}; g.byProv[h.prov.id]={row:h.row,prov:h.prov}; used[key]=1;
@@ -4008,7 +4046,7 @@ function cmpDoSearch(){
     // la lista aunque el otro fuera una coincidencia mucho mejor, mezclando
     // presentaciones distintas en la misma fila.
     const bestByProv={};
-    allHits.forEach(h2=>{
+    capped.forEach(h2=>{
       if(h2.prov.id===h.prov.id) return;
       const k2=h2.prov.id+'|'+h2.row.norm;
       if(used[k2]) return;
@@ -4017,7 +4055,7 @@ function cmpDoSearch(){
       // Block 40grs 36u Simple") porque comparten marca+línea y las
       // palabras de cantidad se ignoran a propósito. Más exigente para que
       // haga falta coincidencia real más allá del nombre de la línea.
-      const sim=cmpProdSim(h.row.norm,h2.row.norm);
+      const sim=cmpProdSim(h.row.name,h2.row.name);
       if(sim<0.7) return;
       const cur=bestByProv[h2.prov.id];
       if(!cur||sim>cur.sim) bestByProv[h2.prov.id]={row:h2.row,prov:h2.prov,sim,key:k2};
