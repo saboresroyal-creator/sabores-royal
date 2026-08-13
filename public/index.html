@@ -613,6 +613,8 @@ img{display:block; max-width:100%;}
 .cmp-status-pendiente{background:rgba(197,160,40,0.15);color:var(--gold2);}
 .cmp-status-enviado{background:rgba(90,140,255,0.15);color:#7ea6ff;}
 .cmp-status-recibido{background:rgba(62,207,142,.15);color:var(--ok);}
+.cmp-qty-inp{-moz-appearance:textfield;}
+.cmp-qty-inp::-webkit-inner-spin-button,.cmp-qty-inp::-webkit-outer-spin-button{-webkit-appearance:none;margin:0;}
 </style>
 </head>
 <body>
@@ -4155,7 +4157,7 @@ function cmpHtmlPedidos(){
             <div style="display:flex;flex-direction:column;align-items:center;gap:2px;flex:none;">
               <div style="display:flex;align-items:center;gap:4px;">
                 <button class="cmp-qty-btn" onclick="cmpCartQty('${cmpEsc(pid)}','${cmpEsc(it.key)}',${-pack})">&minus;</button>
-                <input type="number" min="0" step="1" value="${bultos}" style="width:42px;text-align:center;font-size:13px;font-weight:700;background:var(--glass);border:1px solid var(--glass-bd);border-radius:6px;color:var(--white);padding:3px 2px;" onchange="cmpCartSetQty('${cmpEsc(pid)}','${cmpEsc(it.key)}',this.value,${pack})">
+                <input type="number" min="0" step="1" value="${bultos}" class="cmp-qty-inp" style="width:42px;text-align:center;font-size:13px;font-weight:700;background:var(--glass);border:1px solid var(--glass-bd);border-radius:6px;color:var(--white);padding:3px 2px;" onchange="cmpCartSetQty('${cmpEsc(pid)}','${cmpEsc(it.key)}',this.value,${pack})">
                 <button class="cmp-qty-btn" onclick="cmpCartQty('${cmpEsc(pid)}','${cmpEsc(it.key)}',${pack})">+</button>
               </div>
               ${pack>1?`<div style="font-size:9.5px;color:rgba(255,255,255,0.35);">bulto${bultos===1?'':'s'} &middot; ${it.qty}u</div>`:''}
