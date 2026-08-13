@@ -4090,6 +4090,16 @@ function cmpCartQty(pid,key,delta){
   if(it.qty<=0) state.cmpCart[pid]=arr.filter(x=>x.key!==key);
   saveState(); render();
 }
+// Escribir la cantidad a mano en vez de tocar +/- — value viene en "bultos"
+// (o unidades sueltas si el producto no tiene patrón de bulto en el nombre).
+function cmpCartSetQty(pid,key,value,pack){
+  const arr=state.cmpCart[pid]; if(!arr) return;
+  const it=arr.find(x=>x.key===key); if(!it) return;
+  const n=Math.max(0,parseInt(value)||0);
+  it.qty=n*pack;
+  if(it.qty<=0) state.cmpCart[pid]=arr.filter(x=>x.key!==key);
+  saveState(); render();
+}
 function cmpCartClearProv(pid){
   if(!confirm('¿Vaciar el pedido en curso de este proveedor?')) return;
   delete state.cmpCart[pid];
@@ -4137,15 +4147,15 @@ function cmpHtmlPedidos(){
           const pack=cmpPackSize(it.name);
           const bultos=Math.round(it.qty/pack);
           return `
-          <div style="display:flex;align-items:center;gap:8px;padding:6px 0;border-bottom:1px solid rgba(255,255,255,0.06);">
+          <div style="display:flex;align-items:center;gap:8px;padding:8px 0;border-bottom:1px solid rgba(255,255,255,0.06);">
             <div style="flex:1;min-width:0;">
-              <div style="font-size:13px;font-weight:600;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;">${cmpEsc(it.name)}</div>
+              <div style="font-size:13px;font-weight:600;white-space:normal;word-break:break-word;">${cmpEsc(it.name)}</div>
               <div style="font-size:11px;color:rgba(255,255,255,0.4);">${cmpMoney(it.price)}/u${it.unit?' &middot; '+cmpEsc(it.unit):''}${pack>1?' &middot; bulto de '+pack+'u':''}</div>
             </div>
-            <div style="display:flex;flex-direction:column;align-items:center;gap:2px;">
-              <div style="display:flex;align-items:center;gap:6px;">
+            <div style="display:flex;flex-direction:column;align-items:center;gap:2px;flex:none;">
+              <div style="display:flex;align-items:center;gap:4px;">
                 <button class="cmp-qty-btn" onclick="cmpCartQty('${cmpEsc(pid)}','${cmpEsc(it.key)}',${-pack})">&minus;</button>
-                <span style="min-width:18px;text-align:center;font-size:13px;font-weight:700;">${bultos}</span>
+                <input type="number" min="0" step="1" value="${bultos}" style="width:42px;text-align:center;font-size:13px;font-weight:700;background:var(--glass);border:1px solid var(--glass-bd);border-radius:6px;color:var(--white);padding:3px 2px;" onchange="cmpCartSetQty('${cmpEsc(pid)}','${cmpEsc(it.key)}',this.value,${pack})">
                 <button class="cmp-qty-btn" onclick="cmpCartQty('${cmpEsc(pid)}','${cmpEsc(it.key)}',${pack})">+</button>
               </div>
               ${pack>1?`<div style="font-size:9.5px;color:rgba(255,255,255,0.35);">bulto${bultos===1?'':'s'} &middot; ${it.qty}u</div>`:''}
