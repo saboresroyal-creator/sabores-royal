@@ -3399,6 +3399,14 @@ function cmpApplyAdjust(price,prov){
   const final=cmpProvAdjustPcts(prov).reduce((p,pct)=>p*(1+pct/100),price);
   return Math.round(final*100)/100;
 }
+// Precio por unidad de una fila ya importada, para comparar entre
+// proveedores: si el proveedor tiene "pricePerUnit" el precio de lista ya
+// es por unidad (no se divide de nuevo); si no, se divide por la cantidad
+// del bulto.
+function cmpRowUPrice(row,prov){
+  const pricePerUnit=!!(prov&&prov.mapping&&prov.mapping.pricePerUnit);
+  return pricePerUnit?row.price:row.price/(row.unitQty||1);
+}
 function cmpParseAdjustInput(str){
   return String(str||'').split(',').map(s=>s.trim()).filter(s=>s!=='').map(s=>parseFloat(s.replace('%','').replace(',','.'))).filter(n=>!isNaN(n));
 }
@@ -4045,6 +4053,7 @@ function cmpDoSearch(){
     // Tableta Chocolate 170g"), se quedaba con el que apareciera primero en
     // la lista aunque el otro fuera una coincidencia mucho mejor, mezclando
     // presentaciones distintas en la misma fila.
+    const seedUPrice=cmpRowUPrice(h.row,h.prov);
     const bestByProv={};
     capped.forEach(h2=>{
       if(h2.prov.id===h.prov.id) return;
@@ -4057,6 +4066,19 @@ function cmpDoSearch(){
       // haga falta coincidencia real más allá del nombre de la línea.
       const sim=cmpProdSim(h.row.name,h2.row.name);
       if(sim<0.7) return;
+      // Algunos proveedores cuentan "la unidad" distinto para el mismo tipo
+      // de producto (ej: Tyna calcula el precio "por unidad" de una bolsa
+      // de 700g de caramelos como precio por BOLSA, mientras que Emporio
+      // calcula precio por CARAMELO SUELTO dividiendo por los 210 que
+      // trae) — el nombre matchea pero no es la misma unidad, y termina
+      // mostrando diferencias de precio sin sentido (+2000%). Si el precio
+      // por unidad resultante es 4 veces o más distinto, mejor no
+      // emparejarlos que mostrar una comparación falsa.
+      const candUPrice=cmpRowUPrice(h2.row,h2.prov);
+      if(seedUPrice>0&&candUPrice>0){
+        const ratio=Math.max(seedUPrice,candUPrice)/Math.min(seedUPrice,candUPrice);
+        if(ratio>4) return;
+      }
       const cur=bestByProv[h2.prov.id];
       if(!cur||sim>cur.sim) bestByProv[h2.prov.id]={row:h2.row,prov:h2.prov,sim,key:k2};
     });
