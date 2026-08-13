@@ -3383,6 +3383,18 @@ function cmpPackSize(name){
   const n=m?parseInt(m[1],10):1;
   return (n>1&&n<1000)?n:1;
 }
+// Cuántas unidades individuales entran en "un bulto" para pedir de a bulto
+// cerrado. Primero intenta el patrón "N*M" del nombre (Tyna); si no hay,
+// y el proveedor vende por unidad (precio ya por unidad, ej. Milenium/
+// Cuneo) y la lista trae la cantidad real por bulto, usa esa cantidad.
+// OJO: si el precio es por BULTO (ej. Emporio), NO corresponde multiplicar
+// de nuevo por unitQty — ahí "1" en el carrito ya es 1 bulto completo.
+function cmpItemPack(it){
+  const fromName=cmpPackSize(it.name);
+  if(fromName>1) return fromName;
+  if(it.pricePerUnit && it.unitQty>1) return it.unitQty;
+  return 1;
+}
 function cmpApplyAdjust(price,prov){
   const final=cmpProvAdjustPcts(prov).reduce((p,pct)=>p*(1+pct/100),price);
   return Math.round(final*100)/100;
@@ -3862,16 +3874,16 @@ function cmpDiffAgainstPrevList(items, prov, provId){
   const oldByNorm={};
   oldLista.rows.forEach(r=>{ oldByNorm[r.norm]=r; });
   const newNorms={};
+  const pricePerUnit=!!(prov&&prov.mapping&&prov.mapping.pricePerUnit);
   const perItem=items.map(it=>{
     const norm=cmpNorm(it.name);
     newNorms[norm]=1;
     const finalPrice=_cmpImportSkipAdjust?it.price:cmpApplyAdjust(it.price,prov);
-    const forceUnit=!!(prov&&prov.mapping&&prov.mapping.pricePerUnit);
-    const qty=forceUnit?1:(it.unitQty||1);
-    const newUnit=finalPrice/(qty||1);
+    const qty=it.unitQty||1;
+    const newUnit=pricePerUnit?finalPrice:finalPrice/(qty||1);
     const old=oldByNorm[norm];
     if(!old) return {status:'new'};
-    const oldUnit=old.price/(old.unitQty||1);
+    const oldUnit=pricePerUnit?old.price:old.price/(old.unitQty||1);
     if(!(oldUnit>0) || Math.abs(newUnit-oldUnit)<0.01) return {status:'same'};
     const pct=Math.round((newUnit-oldUnit)/oldUnit*100);
     return {status:pct>0?'up':'down', pct, oldUnit};
@@ -3885,7 +3897,7 @@ function cmpRenderAiPreview(){
   if(!el) return;
   const provId=(document.getElementById('cmp-prov')||{}).value||'';
   const prov=cmpDB.proveedores.find(p=>p.id===provId);
-  const forceUnit=!!(prov&&prov.mapping&&prov.mapping.pricePerUnit);
+  const pricePerUnit=!!(prov&&prov.mapping&&prov.mapping.pricePerUnit);
   const hasAdj=!_cmpImportSkipAdjust && cmpProvAdjustPcts(prov).length>0;
   const items=_cmpAiItems||[];
   const diff=cmpDiffAgainstPrevList(items, prov, provId);
@@ -3894,7 +3906,6 @@ function cmpRenderAiPreview(){
   const newCount=diff?diff.perItem.filter(d=>d.status==='new').length:0;
   const rowsHtml=items.map((it,i)=>{
     const finalPrice=_cmpImportSkipAdjust?it.price:cmpApplyAdjust(it.price,prov);
-    const effQty=forceUnit?1:(it.unitQty||1);
     const d=diff?diff.perItem[i]:null;
     let diffBadge='';
     if(d&&d.status==='up') diffBadge=`<div style="font-size:10px;color:var(--warn);margin-top:2px;">▲ +${d.pct}% (antes ${cmpMoney(d.oldUnit)}/u)</div>`;
@@ -3907,14 +3918,14 @@ function cmpRenderAiPreview(){
         <input class="cmp-inp" style="padding:6px 8px;font-size:12px;width:80px;" type="number" step="0.01" value="${it.price}" oninput="_cmpAiItems[${i}].price=parseFloat(this.value)||0;cmpRenderAiPreview()">
         ${hasAdj?`<div style="font-size:10px;color:rgba(255,255,255,0.4);margin-top:2px;">→ ${cmpMoney(finalPrice)}</div>`:''}
       </td>
-      <td><input class="cmp-inp" style="padding:6px 8px;font-size:12px;width:64px;" type="number" step="1" value="${it.unitQty}" ${forceUnit?'disabled':''} oninput="_cmpAiItems[${i}].unitQty=parseInt(this.value)||1">
-        ${forceUnit?`<div style="font-size:10px;color:rgba(255,255,255,0.4);margin-top:2px;">forzado a 1</div>`:''}
+      <td><input class="cmp-inp" style="padding:6px 8px;font-size:12px;width:64px;" type="number" step="1" value="${it.unitQty}" oninput="_cmpAiItems[${i}].unitQty=parseInt(this.value)||1">
+        ${pricePerUnit?`<div style="font-size:10px;color:rgba(255,255,255,0.4);margin-top:2px;">no divide el precio</div>`:''}
       </td>
       <td><button class="icon-btn" onclick="cmpAiRemoveItem(${i})">${ic('trash')}</button></td>
     </tr>`;}).join('');
   el.innerHTML=`<div style="background:var(--glass);border:1px solid var(--glass-bd);border-radius:14px;padding:14px;">
     <div style="font-size:11px;font-weight:700;color:var(--gold2);text-transform:uppercase;letter-spacing:.5px;margin-bottom:4px;">Archivo: ${cmpEsc(_cmpAiFilename)}</div>
-    <div style="font-size:12px;color:rgba(255,255,255,0.4);margin-bottom:12px;">${items.length} producto(s) detectados &middot; revisá antes de importar${hasAdj?' &middot; el precio final ya incluye los descuentos/IVA cargados en el proveedor':''}${forceUnit?' &middot; cantidad forzada a 1 (precio por unidad)':''}</div>
+    <div style="font-size:12px;color:rgba(255,255,255,0.4);margin-bottom:12px;">${items.length} producto(s) detectados &middot; revisá antes de importar${hasAdj?' &middot; el precio final ya incluye los descuentos/IVA cargados en el proveedor':''}${pricePerUnit?' &middot; el precio ya es por unidad, "Uds/bulto" es solo informativo para pedir por bulto':''}</div>
     ${diff?`<div class="cmp-note" style="margin-bottom:12px;">Comparado con la lista anterior de este proveedor: <b style="color:var(--warn)">${upCount} subieron</b>, <b style="color:var(--ok)">${downCount} bajaron</b>, <b style="color:var(--gold2)">${newCount} nuevos</b>${diff.discontinued.length?`, y <b style="color:var(--danger)">${diff.discontinued.length} ya no están en este archivo</b> y van a dejar de listarse para este proveedor al importar`:''}.</div>`:''}
     <div style="display:flex;gap:10px;margin-bottom:12px;">
       <button class="btn-primary" style="flex:1;" onclick="cmpDoAiImport()">Importar ${items.length} producto(s)</button>
@@ -3938,10 +3949,9 @@ async function cmpDoAiImport(){
   const provId=(document.getElementById('cmp-prov')||{}).value||'';
   if(!provId){ toast('Seleccioná un proveedor','err'); return; }
   const prov=cmpDB.proveedores.find(p=>p.id===provId);
-  const forceUnit=!!(prov&&prov.mapping&&prov.mapping.pricePerUnit);
   const items=_cmpAiItems||[];
   const rows=items.filter(it=>it.name&&it.price>0).map(it=>({
-    name:it.name, price:_cmpImportSkipAdjust?it.price:cmpApplyAdjust(it.price,prov), priceRaw:it.price, unit:it.unit||'', unitQty:forceUnit?1:(it.unitQty||1), code:it.code||'', norm:cmpNorm(it.name)
+    name:it.name, price:_cmpImportSkipAdjust?it.price:cmpApplyAdjust(it.price,prov), priceRaw:it.price, unit:it.unit||'', unitQty:it.unitQty||1, code:it.code||'', norm:cmpNorm(it.name)
   }));
   if(!rows.length){ toast('No hay productos para importar','err'); return; }
   const now=new Date().toISOString();
@@ -4021,21 +4031,21 @@ function cmpDoSearch(){
   html+=`</tr></thead><tbody>`;
   groups.slice(0,50).forEach(g=>{
     // El qty por proveedor sale SOLO de lo que se mapeó al importar (columna
-    // "Cant x Bulto" o texto de presentación). Antes, si no había ese dato,
-    // se intentaba "adivinar" la cantidad buscando patrones tipo "24u" en el
-    // nombre del producto — pero el nombre describe el packaging exista o
-    // no bulto en el precio, así que terminaba dividiendo mal listas donde
-    // el precio ya es por unidad. Mejor mostrar "sin datos de bulto" que
-    // adivinar y mostrar un precio por unidad incorrecto.
+    // "Cant x Bulto" o texto de presentación). Si el proveedor tiene
+    // "pricePerUnit" (el precio de lista ya es por unidad, ej. Milenium),
+    // esa cantidad es solo informativa (cuántas unidades trae el bulto para
+    // pedir) y NO se usa para dividir el precio — dividirlo de nuevo daría
+    // un precio por unidad absurdamente chico.
     const provQtys={};
     provs.forEach(pl=>{
       if(g.byProv[pl.prov.id]){
         const r=g.byProv[pl.prov.id].row;
-        provQtys[pl.prov.id]={qty:r.unitQty||1, inferred:false};
+        const pricePerUnit=!!(pl.prov.mapping&&pl.prov.mapping.pricePerUnit);
+        provQtys[pl.prov.id]={qty:r.unitQty||1, pricePerUnit};
       }
     });
     const unitPrices=[];
-    provs.forEach(pl=>{ if(g.byProv[pl.prov.id]){ const r=g.byProv[pl.prov.id].row; unitPrices.push(r.price/provQtys[pl.prov.id].qty); } });
+    provs.forEach(pl=>{ if(g.byProv[pl.prov.id]){ const r=g.byProv[pl.prov.id].row; const qInfo=provQtys[pl.prov.id]; unitPrices.push(qInfo.pricePerUnit?r.price:r.price/qInfo.qty); } });
     const minU=unitPrices.length?Math.min(...unitPrices):null;
     const hasBulto=provs.some(pl=>g.byProv[pl.prov.id]&&provQtys[pl.prov.id]&&provQtys[pl.prov.id].qty>1);
     html+=`<tr><td>${cmpEsc(g.name)}</td>`;
@@ -4043,14 +4053,14 @@ function cmpDoSearch(){
       const entry=g.byProv[pl.prov.id];
       if(!entry){ html+=`<td class="cmp-cell-empty">&mdash;</td>`; return; }
       const r=entry.row;
-      const qInfo=provQtys[pl.prov.id],qty=qInfo.qty,uPrice=r.price/qty;
+      const qInfo=provQtys[pl.prov.id],qty=qInfo.qty,uPrice=qInfo.pricePerUnit?r.price:r.price/qty;
       const isBest=minU!==null&&Math.abs(uPrice-minU)<0.01&&unitPrices.length>1;
       const diffPct=(minU&&uPrice>minU)?Math.round((uPrice-minU)/minU*100):0;
-      const rowIdx=_cmpRowIdx.push({provId:pl.prov.id,name:r.name,price:r.price,unit:r.unit,unitQty:qty,code:r.code})-1;
+      const rowIdx=_cmpRowIdx.push({provId:pl.prov.id,name:r.name,price:r.price,unit:r.unit,unitQty:qty,code:r.code,pricePerUnit:qInfo.pricePerUnit})-1;
       html+=`<td${isBest?' class="cmp-cell-best"':''}>`;
       if(hasBulto){
         html+=`<span class="cmp-cell-price">${cmpMoney(uPrice)}<span style="font-size:10px;font-weight:400;color:rgba(255,255,255,0.4)">/u</span></span>`;
-        if(qty>1) html+=`<span class="cmp-cell-unit">${cmpMoney(r.price)} &times; ${qty}u${qInfo.inferred?'*':''}${r.unit?' &middot; '+cmpEsc(r.unit):''}</span>`;
+        if(qty>1) html+=`<span class="cmp-cell-unit">${qInfo.pricePerUnit?'bulto de '+qty+'u ('+cmpMoney(r.price*qty)+')':cmpMoney(r.price)+' &times; '+qty+'u'}${r.unit?' &middot; '+cmpEsc(r.unit):''}</span>`;
         else html+=`<span class="cmp-cell-unit" style="color:var(--warn)">&#9888; sin datos de bulto</span>`;
       } else {
         html+=`<span class="cmp-cell-price">${cmpMoney(r.price)}</span>`;
@@ -4076,11 +4086,11 @@ function cmpDoSearch(){
 function cmpCartAdd(idx){
   const ctx=_cmpRowIdx[idx]; if(!ctx) return;
   const key=(ctx.code||ctx.name).toLowerCase();
-  const pack=cmpPackSize(ctx.name);
+  const pack=cmpItemPack(ctx);
   const arr=state.cmpCart[ctx.provId]=state.cmpCart[ctx.provId]||[];
   const existing=arr.find(it=>it.key===key);
   if(existing) existing.qty+=pack;
-  else arr.push({key,name:ctx.name,price:ctx.price,unit:ctx.unit,unitQty:ctx.unitQty,code:ctx.code,qty:pack});
+  else arr.push({key,name:ctx.name,price:ctx.price,unit:ctx.unit,unitQty:ctx.unitQty,code:ctx.code,pricePerUnit:ctx.pricePerUnit,qty:pack});
   saveState();
   const prov=cmpDB.proveedores.find(p=>p.id===ctx.provId);
   toast('Agregado al pedido de '+(prov?prov.name:'proveedor'));
@@ -4146,7 +4156,7 @@ function cmpHtmlPedidos(){
           <button style="background:none;border:none;color:rgba(255,255,255,0.35);font-size:12px;cursor:pointer;" onclick="cmpCartClearProv('${cmpEsc(pid)}')">Vaciar</button>
         </div>
         ${items.map(it=>{
-          const pack=cmpPackSize(it.name);
+          const pack=cmpItemPack(it);
           const bultos=Math.round(it.qty/pack);
           return `
           <div style="display:flex;align-items:center;gap:8px;padding:8px 0;border-bottom:1px solid rgba(255,255,255,0.06);">
@@ -4206,7 +4216,7 @@ function cmpOpenPedidoDetail(id){
     <div style="font-size:12px;color:rgba(255,255,255,0.4);margin-bottom:12px;">${cmpFmtDate(ped.createdAt)}</div>
     <div class="cmp-tbl-wrap"><table>
       <tr><th>Producto</th><th>Cant.</th><th>Precio</th><th>Subtotal</th></tr>
-      ${ped.items.map(it=>{ const pack=cmpPackSize(it.name); return `<tr><td>${it.code?`<b>${cmpEsc(it.code)}</b> — `:''}${cmpEsc(it.name)}</td><td>${pack>1?Math.round(it.qty/pack)+' bulto('+pack+'u)':it.qty}</td><td>${cmpMoney(it.price)}</td><td>${cmpMoney(it.price*it.qty)}</td></tr>`;}).join('')}
+      ${ped.items.map(it=>{ const pack=cmpItemPack(it); return `<tr><td>${it.code?`<b>${cmpEsc(it.code)}</b> — `:''}${cmpEsc(it.name)}</td><td>${pack>1?Math.round(it.qty/pack)+' bulto('+pack+'u)':it.qty}</td><td>${cmpMoney(it.price)}</td><td>${cmpMoney(it.price*it.qty)}</td></tr>`;}).join('')}
     </table></div>
     <div style="display:flex;justify-content:space-between;align-items:center;margin:10px 0 16px;">
       <span style="font-weight:700;">Total</span>
@@ -4252,7 +4262,7 @@ function cmpPedidoWAText(ped,prov){
   let msg=`Pedido${prov?' para '+prov.name:''} — Sabores Royal\n`;
   msg+=`Fecha: ${cmpFmtDate(ped.createdAt)}\n\n`;
   ped.items.forEach(it=>{
-    const pack=cmpPackSize(it.name);
+    const pack=cmpItemPack(it);
     const cantTxt=pack>1?Math.round(it.qty/pack)+' bulto(s) de '+pack+'u':it.qty+' u';
     msg+=`• ${cantTxt} — ${it.code?'['+it.code+'] ':''}${it.name} — ${cmpMoney(it.price)}/u = ${cmpMoney(it.price*it.qty)}\n`;
   });
@@ -4269,7 +4279,7 @@ function cmpSendPedidoWA(id){
 function cmpPrintPedido(id){
   const ped=cmpDB.pedidos.find(p=>p.id===id); if(!ped) return;
   const prov=cmpDB.proveedores.find(p=>p.id===ped.provId);
-  const rows=ped.items.map(it=>{ const pack=cmpPackSize(it.name); return `<tr><td>${it.code?`<b>${cmpEsc(it.code)}</b> — `:''}${cmpEsc(it.name)}</td><td style="text-align:center;">${pack>1?Math.round(it.qty/pack)+' bulto('+pack+'u)':it.qty}</td><td style="text-align:right;">${cmpMoney(it.price)}</td><td style="text-align:right;">${cmpMoney(it.price*it.qty)}</td></tr>`;}).join('');
+  const rows=ped.items.map(it=>{ const pack=cmpItemPack(it); return `<tr><td>${it.code?`<b>${cmpEsc(it.code)}</b> — `:''}${cmpEsc(it.name)}</td><td style="text-align:center;">${pack>1?Math.round(it.qty/pack)+' bulto('+pack+'u)':it.qty}</td><td style="text-align:right;">${cmpMoney(it.price)}</td><td style="text-align:right;">${cmpMoney(it.price*it.qty)}</td></tr>`;}).join('');
   const win=window.open("","_blank");
   win.document.write(`
     <html><head><title>Pedido — ${cmpEsc(prov?prov.name:'')}</title>
