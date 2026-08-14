@@ -3454,8 +3454,18 @@ function cmpIsNoiseToken(t){
 // le dice distinto a lo mismo (blanco/simple, negro/chocolate). Se puede ir
 // agregando más pares acá a medida que aparezcan casos reales.
 const CMP_SYNONYMS = {blanco:'simple', blanca:'simple', negro:'chocolate', negra:'chocolate'};
+// Tokens de 1 letra (ej: la "c" que queda de "C/PASTA" → "c pasta") nunca
+// pueden matchear nada porque cmpTokSim exige longitud >=2, así que solo
+// restaban puntaje sin aportar nada. Y una palabra repetida dentro del
+// mismo nombre (ej: "MANTECOL ALFAJOR RELLENO C/PASTA MANTECOL 24*40 GR."
+// dice "mantecol" dos veces) no suma información nueva para matchear —
+// solo la primera aparición puede emparejar con el otro nombre, y la
+// segunda inflaba el denominador y bajaba el score de nombres verbosos
+// (con relleno descriptivo) contra nombres cortos que en realidad son el
+// mismo producto. Por eso se filtran los de 1 letra y se deduplica.
 function cmpMatchTokens(s){
-  return cmpTokenize(s).filter(t=>!cmpIsNoiseToken(t)).map(t=>CMP_SYNONYMS[t]||t);
+  const toks=cmpTokenize(s).filter(t=>!cmpIsNoiseToken(t)&&t.length>=2).map(t=>CMP_SYNONYMS[t]||t);
+  return [...new Set(toks)];
 }
 // Intenta sacar el tamaño individual del producto (900ml, 1.5l, 38grs...),
 // normalizado a una unidad base (ml o gramos) — para no confundir
@@ -4292,6 +4302,9 @@ function cmpOpenPedidoDetail(id){
       <button class="btn-primary" style="flex:1;" onclick="cmpSendPedidoWA('${cmpEsc(id)}')">${ic('wa')} WhatsApp</button>
       <button class="btn-secondary" style="flex:1;" onclick="cmpPrintPedido('${cmpEsc(id)}')">Imprimir</button>
     </div>
+    <div style="margin-bottom:8px;">
+      <button class="btn-secondary" style="width:100%;" onclick="cmpExportPedidoExcel('${cmpEsc(id)}')">Descargar Excel</button>
+    </div>
     <button style="width:100%;background:var(--danger);color:#fff;border-radius:10px;padding:10px;font-weight:700;" onclick="cmpConfirmDelPedido('${cmpEsc(id)}')">Eliminar pedido</button>
   `);
 }
@@ -4362,6 +4375,39 @@ function cmpPrintPedido(id){
   `);
   win.document.close();
   setTimeout(()=>{ win.print(); },300);
+}
+// Excel real (formato SpreadsheetML de Office) armado a mano como texto,
+// sin librerías — algunos proveedores (ej. Milenium) piden el pedido en
+// planilla en vez de WhatsApp/PDF. Se guarda con extensión .xls, que Excel
+// abre nativamente como planilla (a diferencia de exportar un <table> HTML
+// con esa extensión, que Excel abre con un cartel de advertencia).
+function cmpXlsEsc(s){ return String(s||'').replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;'); }
+function cmpXlsCell(v){
+  return (typeof v==='number')?`<Cell><Data ss:Type="Number">${v}</Data></Cell>`:`<Cell><Data ss:Type="String">${cmpXlsEsc(v)}</Data></Cell>`;
+}
+function cmpXlsRow(cells){ return `<Row>${cells.map(cmpXlsCell).join('')}</Row>`; }
+function cmpPedidoExcelXml(ped,prov){
+  const header=cmpXlsRow(['Código','Producto','Cantidad','Unidad','Precio unitario','Subtotal']);
+  const rows=ped.items.map(it=>{
+    const pack=cmpItemPack(it);
+    const cant=pack>1?Math.round(it.qty/pack):it.qty;
+    const unidad=pack>1?'bulto x'+pack+'u':'u';
+    return cmpXlsRow([it.code||'', it.name, cant, unidad, it.price, Math.round(it.price*it.qty*100)/100]);
+  }).join('');
+  const totalRow=cmpXlsRow(['','','','','TOTAL', ped.total]);
+  return `<?xml version="1.0"?>\n<?mso-application progid="Excel.Sheet"?>\n<Workbook xmlns="urn:schemas-microsoft-com:office:spreadsheet" xmlns:o="urn:schemas-microsoft-com:office:office" xmlns:x="urn:schemas-microsoft-com:office:excel" xmlns:ss="urn:schemas-microsoft-com:office:spreadsheet">\n<Worksheet ss:Name="Pedido">\n<Table>\n${header}\n${rows}\n${totalRow}\n</Table>\n</Worksheet>\n</Workbook>`;
+}
+function cmpExportPedidoExcel(id){
+  const ped=cmpDB.pedidos.find(p=>p.id===id); if(!ped) return;
+  const prov=cmpDB.proveedores.find(p=>p.id===ped.provId);
+  const xml=cmpPedidoExcelXml(ped,prov);
+  const blob=new Blob([xml],{type:'application/vnd.ms-excel'});
+  const provName=(prov?prov.name:'proveedor').replace(/[^a-z0-9]+/gi,'_');
+  const a=document.createElement('a');
+  a.href=URL.createObjectURL(blob);
+  a.download='Pedido_'+provName+'_'+cmpFmtDate(ped.createdAt).replace(/\//g,'-')+'.xls';
+  document.body.appendChild(a); a.click(); document.body.removeChild(a);
+  toast('Excel descargado');
 }
 
 // ── BACKUP / RESTORE ────────────────────────────────────
