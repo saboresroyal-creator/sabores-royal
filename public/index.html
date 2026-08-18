@@ -2248,7 +2248,10 @@ function renderCatalogResults(section){
   const baseProducts = section==="sinazucar"
     ? state.products.filter(p=>!p.hidden && (p.sinAzucar || p.section===section))
     : state.products.filter(p=>!p.hidden && p.section===section);
-  let products = baseProducts;
+  // Al buscar, no limitar a la sección actual: si escribís "fantoche" desde
+  // Market tiene que aparecer aunque el producto esté cargado en Golosinas,
+  // si no parece que el buscador no encuentra nada.
+  let products = q ? state.products.filter(p=>!p.hidden) : baseProducts;
   if(activeCat) products = products.filter(p=>p.cat===activeCat);
   if(sinTaccOnly) products = products.filter(p=>p.sinTacc);
   if(sinAzucarOnly) products = products.filter(p=>p.sinAzucar);
