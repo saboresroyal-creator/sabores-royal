@@ -204,17 +204,6 @@ img{display:block; max-width:100%;}
   border-radius:14px; background:var(--glass); border:1px solid var(--glass-bd);}
 .search-bar input{background:none; border:none; outline:none; color:var(--cream); flex:1; font-size:14px;}
 .search-bar svg{width:17px; height:17px; opacity:.5;}
-.search-suggestions{display:none; position:absolute; left:0; right:0; top:calc(100% + 5px);
-  background:#0d1840; border:1px solid var(--glass-bd); border-radius:14px; overflow:hidden;
-  z-index:100; box-shadow:0 8px 28px rgba(0,0,0,0.55);}
-.search-sug-item{padding:9px 14px; font-size:13px; color:var(--cream);
-  border-bottom:1px solid rgba(255,255,255,0.06); cursor:pointer;
-  display:flex; align-items:center; gap:10px;}
-.search-sug-item:last-child{border-bottom:none;}
-.search-sug-item:active{background:var(--glass);}
-.search-sug-img{width:38px; height:38px; flex:none; border-radius:8px; object-fit:cover; background:rgba(255,255,255,0.05);}
-.search-sug-body{flex:1; min-width:0;}
-.search-sug-cat{font-size:11px; color:rgba(255,255,255,0.4); margin-top:2px;}
 
 .chip-row{display:flex; gap:8px; padding:0 16px 12px; overflow-x:auto;}
 .chip{flex:none; padding:8px 16px; border-radius:20px; font-size:12.5px; font-weight:600;
@@ -266,10 +255,6 @@ img{display:block; max-width:100%;}
 .candy-catalog .search-bar input{color:var(--c-plum);}
 .candy-catalog .search-bar input::placeholder{color:#9c8aa8;}
 .candy-catalog .search-bar svg{color:var(--c-pink-deep); opacity:.7;}
-.candy-catalog .search-suggestions{background:#fff; border:none; box-shadow:0 10px 30px -10px rgba(20,0,50,0.45);}
-.candy-catalog .search-sug-item{color:var(--c-plum); border-bottom-color:rgba(44,15,82,0.08);}
-.candy-catalog .search-sug-item:active{background:rgba(255,61,129,0.08);}
-.candy-catalog .search-sug-cat{color:rgba(44,15,82,0.5);}
 .candy-catalog .chip{
   background:rgba(255,255,255,0.16); border:2px solid transparent; color:#fff;
   font-family:'Baloo 2',sans-serif; font-weight:700; border-radius:999px;
@@ -2227,9 +2212,8 @@ function renderCatalog(section){
     <div class="search-wrap">
       <div class="search-bar">
         ${ic('search')}
-        <input id="search-input" placeholder="Buscar productos..." value="${state.route.q||''}" oninput="onSearchInput(this.value)" onblur="setTimeout(()=>{const s=document.getElementById('search-suggestions');if(s)s.style.display='none';},150)">
+        <input id="search-input" placeholder="Buscar productos..." value="${state.route.q||''}" oninput="onSearchInput(this.value)">
       </div>
-      <div id="search-suggestions" class="search-suggestions"></div>
     </div>
     <div id="catalog-results">${renderCatalogResults(section)}</div>
   </div>`;
@@ -2301,29 +2285,6 @@ function onSearchInput(val){
   const section = state.route.section || "market";
   const resultsEl = document.getElementById("catalog-results");
   if(resultsEl) resultsEl.innerHTML = renderCatalogResults(section);
-  const sugEl = document.getElementById("search-suggestions");
-  if(!sugEl) return;
-  const q = val.trim().toLowerCase();
-  if(q.length < 2){ sugEl.style.display='none'; return; }
-  const re = new RegExp(q.replace(/[.*+?^${}()|[\]\\]/g,'\\$&'),'gi');
-  // Ordenado alfabético antes de recortar: sin esto, cuál de varios
-  // productos con nombres parecidos entra en las primeras 6 sugerencias
-  // depende del orden en que Supabase devuelve las filas (no garantizado),
-  // y un producto recién editado puede quedar afuera sin motivo aparente.
-  const qNorm = normText(q);
-  const matches = state.products.filter(p=>
-    !p.hidden && productMatchesSearch(p, qNorm)
-  ).sort((a,b)=>a.name.localeCompare(b.name,'es')).slice(0,12);
-  if(!matches.length){ sugEl.style.display='none'; return; }
-  sugEl.innerHTML = matches.map(p=>`
-    <div class="search-sug-item" onmousedown="openProduct('${p.id}')">
-      ${p.photo?`<img class="search-sug-img" src="${p.photoThumb||p.photo}" loading="lazy" onerror="this.style.visibility='hidden'">`:`<div class="search-sug-img"></div>`}
-      <div class="search-sug-body">
-        <div>${p.name.replace(re, m=>`<b style="color:var(--gold2);">${m}</b>`)}</div>
-        <div class="search-sug-cat">${p.cat||''}</div>
-      </div>
-    </div>`).join('');
-  sugEl.style.display='block';
 }
 function setCatalogCat(cat){ state.route.cat = cat; state.route.sinTaccOnly = false; state.route.sinAzucarOnly = false; render(); }
 function toggleSinTaccFilter(){ state.route.sinTaccOnly = !state.route.sinTaccOnly; state.route.sinAzucarOnly = false; state.route.cat = null; render(); }
