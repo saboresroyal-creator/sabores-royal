@@ -596,6 +596,9 @@ img{display:block; max-width:100%;}
 .cmp-note{background:rgba(197,160,40,0.08);border:1px solid rgba(197,160,40,0.25);border-radius:8px;padding:8px 10px;font-size:12px;color:rgba(255,255,255,0.55);margin:4px 0 10px;}
 .cmp-add-btn{margin-top:6px;width:22px;height:22px;border-radius:50%;border:1px solid var(--gold);background:none;color:var(--gold);font-size:14px;font-weight:700;line-height:1;cursor:pointer;display:inline-flex;align-items:center;justify-content:center;}
 .cmp-add-btn:active{background:var(--gold);color:#000;}
+.cmp-link-btn{margin-top:4px;border:none;background:none;color:rgba(255,255,255,0.35);font-size:12px;cursor:pointer;display:inline-flex;align-items:center;justify-content:center;padding:2px;}
+.cmp-link-btn:hover{color:var(--gold2);}
+.cmp-link-btn-active{color:var(--ok);margin-top:2px;margin-left:4px;}
 .cmp-qty-btn{width:24px;height:24px;border-radius:50%;border:1px solid var(--glass-bd);background:var(--glass);color:var(--white);font-size:15px;font-weight:700;cursor:pointer;line-height:1;}
 .cmp-status-badge{font-size:10px;font-weight:700;border-radius:6px;padding:2px 7px;display:inline-block;margin-top:3px;text-transform:uppercase;letter-spacing:.3px;}
 .cmp-status-pendiente{background:rgba(197,160,40,0.15);color:var(--gold2);}
@@ -809,8 +812,11 @@ let state = {
   barcodeCatalog: {},
 };
 
-let cmpDB = {proveedores:[], listas:[], pedidos:[]};
+let cmpDB = {proveedores:[], listas:[], pedidos:[], links:[]};
 let _cmpRowIdx = [];
+let _cmpLinkCtx = [];
+let _cmpLinkPickCtx = null;
+let _cmpLinkPickHits = null;
 let cmpLoaded = false;
 let _cmpAiItems = null;
 let _cmpAiFilename = '';
@@ -3567,6 +3573,12 @@ async function cmpLoadData(){
       const pedidos=await cmpFetch('/cmp_pedidos?select=*&order=created_at.desc');
       cmpDB.pedidos=(pedidos||[]).map(p=>({id:p.id,provId:p.prov_id,items:p.items||[],total:Number(p.total)||0,status:p.status||'pendiente',note:p.note||'',createdAt:p.created_at,updatedAt:p.updated_at}));
     }catch(pe){ cmpDB.pedidos=cmpDB.pedidos||[]; }
+    // Vínculos manuales — misma tabla-agregada-después / falla-en-silencio
+    // que pedidos, por si todavía no se corrió supabase-migration-cmp-links.sql.
+    try{
+      const links=await cmpFetch('/cmp_links?select=*');
+      cmpDB.links=(links||[]).map(l=>({id:l.id,groupId:l.group_id,provId:l.prov_id,norm:l.norm,name:l.name}));
+    }catch(le){ cmpDB.links=cmpDB.links||[]; }
     render();
   }catch(e){ toast('Error cargando comparador: '+e.message,'err'); }
 }
@@ -3591,6 +3603,12 @@ async function cmpUpdatePedidoSupa(id,patch){
 }
 async function cmpDelPedidoSupa(id){
   await cmpFetch('/cmp_pedidos?id=eq.'+encodeURIComponent(id),'DELETE');
+}
+async function cmpSaveLinkSupa(link){
+  await cmpFetch('/cmp_links','POST',{id:link.id,group_id:link.groupId,prov_id:link.provId,norm:link.norm,name:link.name},'resolution=merge-duplicates');
+}
+async function cmpDelLinkSupa(id){
+  await cmpFetch('/cmp_links?id=eq.'+encodeURIComponent(id),'DELETE');
 }
 
 // ── RENDER PRINCIPAL ────────────────────────────────────
@@ -3762,10 +3780,26 @@ function cmpOnFile(input){
   } else if(ext==='pdf'){
     cmpReadPdf(f);
   } else {
-    const r=new FileReader();
-    r.onload=e=>cmpAiParse(e.target.result,f.name);
-    r.readAsText(f,'UTF-8');
+    cmpReadTextSmart(f, text=>cmpAiParse(text,f.name));
   }
+}
+// Los CSV/TXT de proveedores muchas veces vienen guardados como
+// Windows-1252 (Excel en español), no UTF-8 — forzar 'UTF-8' rompe
+// tildes/Ñ (ej: "BAÑADO" queda "BAÃ'ADO"), y después ni el buscador ni
+// el matching encuentran esas filas por nombre. Se intenta UTF-8
+// estricto primero (fatal:true tira error ante cualquier byte
+// inválido, que es justo lo que pasa con tildes en Windows-1252); si
+// falla, se decodifica como Windows-1252 en vez de mostrar caracteres
+// rotos.
+function cmpReadTextSmart(file, cb){
+  const r=new FileReader();
+  r.onload=e=>{
+    let text;
+    try{ text=new TextDecoder('utf-8',{fatal:true}).decode(e.target.result); }
+    catch(err){ text=new TextDecoder('windows-1252').decode(e.target.result); }
+    cb(text);
+  };
+  r.readAsArrayBuffer(file);
 }
 
 async function cmpReadPdf(f){
@@ -3839,17 +3873,15 @@ function cmpOnSimpleCsv(input){
   const f=input.files[0]; if(!f) return;
   const provId=(document.getElementById('cmp-prov')||{}).value||'';
   if(!provId){ toast('Seleccioná un proveedor primero','err'); return; }
-  const r=new FileReader();
-  r.onload=e=>{
-    const items=cmpParseSimpleCsv(e.target.result);
+  cmpReadTextSmart(f, text=>{
+    const items=cmpParseSimpleCsv(text);
     if(!items){ toast('No reconozco las columnas de este CSV — necesita al menos "Producto" y "Precio"','err'); return; }
     if(!items.length){ toast('El archivo no tiene productos','err'); return; }
     _cmpAiFilename=f.name;
     _cmpAiItems=items;
     _cmpImportSkipAdjust=true;
     cmpRenderAiPreview();
-  };
-  r.readAsText(f,'UTF-8');
+  });
 }
 function cmpParseSimpleCsv(text){
   const lines=String(text||'').split(/\r\n|\n/).filter(l=>l.trim()!=='');
@@ -4075,7 +4107,46 @@ function cmpDoSearch(){
   // cada seed no trabe el navegador.
   const capped=allHits.slice(0,SHOW_MAX);
   _cmpRowIdx=[];
+  _cmpLinkCtx=[];
   const groups=[],used={};
+
+  // Vínculos manuales (ver cmpOpenLinkPicker/cmpCreateLink): índice por
+  // fila completa de cada proveedor (no solo lo que pasó el filtro de
+  // búsqueda — la pareja vinculada puede no matchear el texto tipeado,
+  // igual que el auto-match) y por grupo, para resolverlos en una
+  // primera pasada CON PRIORIDAD ABSOLUTA sobre el matching automático.
+  const rowIndex={};
+  provs.forEach(pl=>{ const idx=new Map(); pl.lista.rows.forEach(r=>{ if(!idx.has(r.norm)) idx.set(r.norm,r); }); rowIndex[pl.prov.id]=idx; });
+  const groupMembers={},groupIdByKey={};
+  (cmpDB.links||[]).forEach(l=>{
+    (groupMembers[l.groupId]=groupMembers[l.groupId]||[]).push(l);
+    groupIdByKey[l.provId+'|'+l.norm]=l.groupId;
+  });
+  const usedGroups={};
+
+  // Pasada 1: vínculos manuales. Corre ANTES del auto-match para que un
+  // vínculo confirmado por el usuario siempre gane — si el auto-match
+  // corriera primero, podría agarrarse una fila que en realidad ya
+  // pertenece a un vínculo, y el vínculo se quedaría sin esa pareja.
+  capped.forEach(h=>{
+    const key=h.prov.id+'|'+h.row.norm;
+    if(used[key]) return;
+    const groupId=groupIdByKey[key];
+    if(!groupId||usedGroups[groupId]) return;
+    const g={name:h.row.name,byProv:{}};
+    groupMembers[groupId].forEach(m=>{
+      const row=rowIndex[m.provId]&&rowIndex[m.provId].get(m.norm);
+      if(!row) return; // el proveedor reimportó y ya no tiene esa fila con ese nombre
+      const pl=provs.find(p=>p.prov.id===m.provId); if(!pl) return;
+      g.byProv[m.provId]={row,prov:pl.prov,linked:true};
+      used[m.provId+'|'+m.norm]=1;
+    });
+    usedGroups[groupId]=1;
+    if(Object.keys(g.byProv).length) groups.push(g);
+  });
+
+  // Pasada 2: matching automático por similitud, para todo lo que no
+  // quedó resuelto por un vínculo manual (used[key] ya filtra esas filas).
   capped.forEach(h=>{
     const key=h.prov.id+'|'+h.row.norm;
     if(used[key]) return;
@@ -4145,7 +4216,11 @@ function cmpDoSearch(){
     html+=`<tr><td>${cmpEsc(g.name)}</td>`;
     provs.forEach(pl=>{
       const entry=g.byProv[pl.prov.id];
-      if(!entry){ html+=`<td class="cmp-cell-empty">&mdash;</td>`; return; }
+      if(!entry){
+        const ctxIdx=_cmpLinkCtx.push({provId:pl.prov.id,members:Object.values(g.byProv).map(e=>({provId:e.prov.id,norm:e.row.norm,name:e.row.name}))})-1;
+        html+=`<td class="cmp-cell-empty">&mdash;<button class="cmp-link-btn" onclick="cmpOpenLinkPicker(${ctxIdx})" title="Vincular producto de ${cmpEsc(pl.prov.name)}">&#128279;</button></td>`;
+        return;
+      }
       const r=entry.row;
       const qInfo=provQtys[pl.prov.id],qty=qInfo.qty,uPrice=qInfo.pricePerUnit?r.price:r.price/qty;
       const isBest=minU!==null&&Math.abs(uPrice-minU)<0.01&&unitPrices.length>1;
@@ -4163,12 +4238,104 @@ function cmpDoSearch(){
       if(isBest&&unitPrices.length>1) html+=`<span class="cmp-best-tag">MEJOR PRECIO</span>`;
       else if(diffPct>0) html+=`<span class="cmp-cell-diff" style="color:var(--warn)">+${diffPct}% m&aacute;s caro</span>`;
       html+=`<button class="cmp-add-btn" onclick="cmpCartAdd(${rowIdx})" title="Agregar al pedido">+</button>`;
+      if(entry.linked) html+=`<button class="cmp-link-btn cmp-link-btn-active" onclick="cmpUnlinkRow('${pl.prov.id}','${r.norm}')" title="Vinculado a mano — click para desvincular">&#128279;</button>`;
       html+=`</td>`;
     });
     html+=`</tr>`;
   });
   html+=`</tbody></table></div>`;
   el.innerHTML=html;
+}
+
+// ── VÍNCULOS MANUALES ───────────────────────────────────
+// El matching automático (cmpProdSimRows) tiene un techo: nombres
+// abreviados sin correspondencia textual clara entre proveedores (ej.
+// "SA" vs "60%CACAO") nunca van a matchear de forma confiable, y bajar
+// el umbral para que matcheen aumenta el riesgo de unir productos que
+// en realidad son distintos. Esto deja vincular dos filas a mano, de
+// forma permanente — ver Pasada 1 en cmpDoSearch, que le da prioridad
+// absoluta sobre el auto-match.
+let _cmpLinkSt;
+function cmpOpenLinkPicker(ctxIdx){
+  const ctx=_cmpLinkCtx[ctxIdx]; if(!ctx) return;
+  const prov=cmpDB.proveedores.find(p=>p.id===ctx.provId);
+  _cmpLinkPickCtx=ctx;
+  _cmpLinkPickHits=null;
+  cmpOpenModal(`
+    <div class="cmp-modal-title">Vincular con ${cmpEsc(prov?prov.name:'proveedor')}</div>
+    <p style="color:rgba(255,255,255,0.5);font-size:13px;margin-bottom:10px;">Buscá el producto correcto en la lista completa de ${cmpEsc(prov?prov.name:'este proveedor')} (por nombre o código) para vincularlo con &ldquo;${cmpEsc(ctx.members[0]?ctx.members[0].name:'')}&rdquo;.</p>
+    <input id="cmp-link-q" class="cmp-inp" placeholder="Buscar por nombre o código..." autocomplete="off" oninput="cmpLinkPickerSearch()">
+    <div id="cmp-link-results" style="margin-top:10px;max-height:340px;overflow-y:auto;"></div>
+  `);
+  setTimeout(()=>{ const inp=document.getElementById('cmp-link-q'); if(inp) inp.focus(); },50);
+}
+function cmpLinkPickerSearch(){ clearTimeout(_cmpLinkSt); _cmpLinkSt=setTimeout(cmpDoLinkPickerSearch,180); }
+function cmpDoLinkPickerSearch(){
+  const el=document.getElementById('cmp-link-results'); if(!el||!_cmpLinkPickCtx) return;
+  const qRaw=(document.getElementById('cmp-link-q').value||'').trim();
+  if(qRaw.length<2){ el.innerHTML='<div style="padding:16px;text-align:center;color:rgba(255,255,255,0.35);font-size:13px;">Escribí al menos 2 letras.</div>'; return; }
+  const lista=cmpDB.listas.find(l=>l.provId===_cmpLinkPickCtx.provId);
+  const rows=lista?lista.rows:[];
+  const qLower=qRaw.toLowerCase(), qNorm=cmpNorm(qRaw);
+  // Matchea por nombre normalizado O por código — el código no se rompe
+  // con problemas de encoding del nombre (ver cmpReadTextSmart), así que
+  // sirve de red para encontrar filas con el nombre corrompido.
+  const hits=rows.filter(r=>(r.code&&String(r.code).toLowerCase().includes(qLower))||r.norm.includes(qNorm)).slice(0,30);
+  _cmpLinkPickHits=hits;
+  if(!hits.length){ el.innerHTML='<div style="padding:16px;text-align:center;color:rgba(255,255,255,0.35);font-size:13px;">Sin resultados.</div>'; return; }
+  el.innerHTML=hits.map((r,i)=>`<div class="cmp-prov-item" style="cursor:pointer;" onclick="cmpPickLinkRow(${i})">
+    <div style="flex:1;"><div style="font-weight:600;">${r.code?`<span style="color:rgba(255,255,255,0.4);">${cmpEsc(r.code)}</span> — `:''}${cmpEsc(r.name)}</div></div>
+    <div style="font-weight:700;color:var(--gold2);white-space:nowrap;">${cmpMoney(r.price)}</div>
+  </div>`).join('');
+}
+function cmpPickLinkRow(i){
+  if(!_cmpLinkPickCtx||!_cmpLinkPickHits||!_cmpLinkPickHits[i]) return;
+  cmpCreateLink(_cmpLinkPickCtx.members,_cmpLinkPickCtx.provId,_cmpLinkPickHits[i]);
+}
+function cmpLinkId(){ return 'lnk'+Date.now().toString(36)+Math.random().toString(36).slice(2,8); }
+async function cmpCreateLink(members,provId,row){
+  cmpDB.links=cmpDB.links||[];
+  // Si alguno de los miembros actuales de la fila ya pertenece a un
+  // vínculo (ej. se está completando un vínculo previo con un proveedor
+  // más), se reusa ese grupo en vez de crear uno nuevo.
+  let groupId=null;
+  for(const m of members){
+    const found=cmpDB.links.find(l=>l.provId===m.provId&&l.norm===m.norm);
+    if(found){ groupId=found.groupId; break; }
+  }
+  if(!groupId) groupId=cmpLinkId();
+  const toSave=[];
+  members.forEach(m=>{
+    if(!cmpDB.links.find(l=>l.provId===m.provId&&l.norm===m.norm)){
+      const l={id:cmpLinkId(),groupId,provId:m.provId,norm:m.norm,name:m.name};
+      cmpDB.links.push(l); toSave.push(l);
+    }
+  });
+  const newLink={id:cmpLinkId(),groupId,provId,norm:row.norm,name:row.name};
+  cmpDB.links.push(newLink); toSave.push(newLink);
+  cmpCloseModal();
+  try{
+    await Promise.all(toSave.map(cmpSaveLinkSupa));
+    toast('Producto vinculado');
+  }catch(e){
+    cmpDB.links=cmpDB.links.filter(l=>!toSave.includes(l));
+    toast('Error al vincular: '+e.message,'err');
+  }
+  cmpDoSearch();
+}
+async function cmpUnlinkRow(provId,norm){
+  const link=(cmpDB.links||[]).find(l=>l.provId===provId&&l.norm===norm);
+  if(!link) return;
+  const backup=cmpDB.links;
+  cmpDB.links=cmpDB.links.filter(l=>l.id!==link.id);
+  try{
+    await cmpDelLinkSupa(link.id);
+    toast('Vínculo eliminado');
+  }catch(e){
+    cmpDB.links=backup;
+    toast('Error: '+e.message,'err');
+  }
+  cmpDoSearch();
 }
 
 // ── PEDIDOS A PROVEEDORES ───────────────────────────────
