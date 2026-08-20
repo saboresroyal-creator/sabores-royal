@@ -3418,7 +3418,7 @@ function cmpTokSim(a,b){
 const CMP_UNIT_WORDS = new Set(['gr','grs','gramos','kg','kgs','mg','ml','mls','lt','lts','litros','cc','cm','u','un','und','unid','unidades','uds','pack','cja','caja','cajas','docena','display','bulto','fardo','kilo','kilos','x']);
 function cmpIsNoiseToken(t){
   if(/^x?\d+[a-z]{0,4}$/.test(t)) return true; // 38g, x38g, 40u, 500, 1kg...
-  if(/^\d+x\d+[a-z]{0,4}$/.test(t)) return true; // 6x822g, 24x40gr, 12x1kg — bulto*tamaño pegado sin espacios (proveedores que escriben "NOMBRE.6X822G" con puntos en vez de espacios), cmpNorm no separa la "x" porque es una letra
+  if(/^\d+(?:x\d+)+[a-z]{0,4}$/.test(t)) return true; // 6x822g, 24x40gr, 12x1kg, 12x5x14g (bulto de bulto) — cantidad*tamaño pegado sin espacios (proveedores que escriben "NOMBRE.6X822G" con puntos en vez de espacios), cmpNorm no separa la "x" porque es una letra
   return CMP_UNIT_WORDS.has(t);
 }
 // Sinónimos entre proveedores para la misma variante de producto — cada uno
