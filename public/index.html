@@ -3480,6 +3480,38 @@ function cmpProdSim(a,b){
   });
   return 2*matched/(ta.length+tb.length);
 }
+// Variante de cmpProdSim que compara FILAS (no nombres sueltos) cacheando
+// tamaño/tokens por fila en un WeakMap — el emparejamiento ahora busca la
+// pareja de cada producto en la lista COMPLETA de cada proveedor (no solo
+// entre lo que ya pasó el filtro de la búsqueda escrita, ver cmpDoSearch),
+// así que la misma fila se compara muchas veces por búsqueda; sin cachear
+// se recalculaba tamaño y tokens desde cero en cada comparación y con
+// listas de varios miles de filas (ej: Tyna) eso trababa el navegador.
+const _cmpSizeCache=new WeakMap(), _cmpTokCache=new WeakMap();
+function cmpRowSize(row){
+  if(_cmpSizeCache.has(row)) return _cmpSizeCache.get(row);
+  const v=cmpExtractSize(row.name); _cmpSizeCache.set(row,v); return v;
+}
+function cmpRowTokens(row){
+  if(_cmpTokCache.has(row)) return _cmpTokCache.get(row);
+  const v=cmpMatchTokens(row.name); _cmpTokCache.set(row,v); return v;
+}
+function cmpProdSimRows(rowA,rowB){
+  const sizeA=cmpRowSize(rowA),sizeB=cmpRowSize(rowB);
+  if(sizeA!==null&&sizeB!==null){
+    const diff=Math.abs(sizeA-sizeB)/Math.max(sizeA,sizeB);
+    if(diff>0.08) return 0;
+  }
+  const ta=cmpRowTokens(rowA),tb=cmpRowTokens(rowB);
+  if(!ta.length||!tb.length) return 0;
+  let matched=0; const usedB={};
+  ta.forEach(wa=>{
+    let best=0,bestI=-1;
+    tb.forEach((wb,i)=>{ if(usedB[i]) return; const s=cmpTokSim(wa,wb); if(s>best){best=s;bestI=i;} });
+    if(best>=0.75){matched+=best;if(bestI>=0)usedB[bestI]=1;}
+  });
+  return 2*matched/(ta.length+tb.length);
+}
 function cmpQScore(norm,qt){
   if(!qt.length) return 0;
   const pt=norm.split(/\s+/).filter(w=>w.length>0);
@@ -4015,58 +4047,67 @@ function cmpDoSearch(){
     return;
   }
   allHits.sort((a,b)=>b.sc-a.sc);
-  // Armar los grupos compara cada resultado contra todos los demás (para
-  // encontrar la mejor coincidencia de cada proveedor) — con listas de
-  // varios miles de productos (ej: Tyna) y una búsqueda corta que matchea
-  // de más, esa comparación de a pares podía tardar varios segundos y
-  // trababa el navegador mientras se escribía. Solo se muestran 50
-  // productos igual, así que alcanza con mirar los mejores resultados.
-  const capped=allHits.slice(0,250);
+  const SHOW_MAX=150;
+  // Los "seeds" (la fila que da nombre a cada grupo) salen de lo que
+  // matchea tu búsqueda, pero la PAREJA de cada proveedor se busca en su
+  // lista COMPLETA, no solo entre lo que también pasó el filtro de
+  // búsqueda — antes, si el nombre de un proveedor para el mismo producto
+  // no matcheaba bien contra el texto exacto que escribiste (ej: buscás
+  // "aceite de maiz" y ese proveedor lo tiene como "aceite maiz" sin "de",
+  // por eso no llegaba al 0.6 de cmpQScore), esa fila quedaba afuera del
+  // pool entero y nunca se emparentaba con nadie aunque su nombre
+  // matcheara perfecto contra el de otro proveedor vía cmpProdSim.
+  // Emparentar según lo que escribís y no según el producto en sí era
+  // justamente el bug: el mismo producto podía aparecer emparentado o
+  // suelto según la búsqueda. cmpProdSimRows cachea tamaño/tokens por fila
+  // (ver arriba) para que recorrer listas de varios miles de productos por
+  // cada seed no trabe el navegador.
+  const capped=allHits.slice(0,SHOW_MAX);
   _cmpRowIdx=[];
   const groups=[],used={};
   capped.forEach(h=>{
     const key=h.prov.id+'|'+h.row.norm;
     if(used[key]) return;
     const g={name:h.row.name,byProv:{}}; g.byProv[h.prov.id]={row:h.row,prov:h.prov}; used[key]=1;
-    // Por cada proveedor nos quedamos con el candidato de MAYOR similitud,
-    // no con el primero que supere el umbral — antes, si dos productos del
-    // mismo proveedor pasaban el 0.7 (ej: "Shot Tableta 90g" y "Shot
-    // Tableta Chocolate 170g"), se quedaba con el que apareciera primero en
-    // la lista aunque el otro fuera una coincidencia mucho mejor, mezclando
-    // presentaciones distintas en la misma fila.
     const seedUPrice=cmpRowUPrice(h.row,h.prov);
-    const bestByProv={};
-    capped.forEach(h2=>{
-      if(h2.prov.id===h.prov.id) return;
-      const k2=h2.prov.id+'|'+h2.row.norm;
-      if(used[k2]) return;
-      // 0.55 emparejaba variantes de un mismo producto que en realidad son
-      // presentaciones distintas (ej: "Cofler Block 24x300g" con "Cofler
-      // Block 40grs 36u Simple") porque comparten marca+línea y las
-      // palabras de cantidad se ignoran a propósito. Más exigente para que
-      // haga falta coincidencia real más allá del nombre de la línea.
-      const sim=cmpProdSim(h.row.name,h2.row.name);
-      if(sim<0.7) return;
-      // Algunos proveedores cuentan "la unidad" distinto para el mismo tipo
-      // de producto (ej: Tyna calcula el precio "por unidad" de una bolsa
-      // de 700g de caramelos como precio por BOLSA, mientras que Emporio
-      // calcula precio por CARAMELO SUELTO dividiendo por los 210 que
-      // trae) — el nombre matchea pero no es la misma unidad, y termina
-      // mostrando diferencias de precio sin sentido (+2000%). Si el precio
-      // por unidad resultante es 4 veces o más distinto, mejor no
-      // emparejarlos que mostrar una comparación falsa.
-      const candUPrice=cmpRowUPrice(h2.row,h2.prov);
-      if(seedUPrice>0&&candUPrice>0){
-        const ratio=Math.max(seedUPrice,candUPrice)/Math.min(seedUPrice,candUPrice);
-        if(ratio>4) return;
-      }
-      const cur=bestByProv[h2.prov.id];
-      if(!cur||sim>cur.sim) bestByProv[h2.prov.id]={row:h2.row,prov:h2.prov,sim,key:k2};
+    // Por cada proveedor nos quedamos con el candidato de MAYOR similitud
+    // de TODA su lista, no con el primero que supere el umbral — antes, si
+    // dos productos del mismo proveedor pasaban el 0.7 (ej: "Shot Tableta
+    // 90g" y "Shot Tableta Chocolate 170g"), se quedaba con el que
+    // apareciera primero en la lista aunque el otro fuera una coincidencia
+    // mucho mejor, mezclando presentaciones distintas en la misma fila.
+    provs.forEach(pl2=>{
+      if(pl2.prov.id===h.prov.id) return;
+      let best=null;
+      pl2.lista.rows.forEach(row2=>{
+        const k2=pl2.prov.id+'|'+row2.norm;
+        if(used[k2]) return;
+        // 0.55 emparejaba variantes de un mismo producto que en realidad son
+        // presentaciones distintas (ej: "Cofler Block 24x300g" con "Cofler
+        // Block 40grs 36u Simple") porque comparten marca+línea y las
+        // palabras de cantidad se ignoran a propósito. Más exigente para que
+        // haga falta coincidencia real más allá del nombre de la línea.
+        const sim=cmpProdSimRows(h.row,row2);
+        if(sim<0.7) return;
+        // Algunos proveedores cuentan "la unidad" distinto para el mismo tipo
+        // de producto (ej: Tyna calcula el precio "por unidad" de una bolsa
+        // de 700g de caramelos como precio por BOLSA, mientras que Emporio
+        // calcula precio por CARAMELO SUELTO dividiendo por los 210 que
+        // trae) — el nombre matchea pero no es la misma unidad, y termina
+        // mostrando diferencias de precio sin sentido (+2000%). Si el precio
+        // por unidad resultante es 4 veces o más distinto, mejor no
+        // emparejarlos que mostrar una comparación falsa.
+        const candUPrice=cmpRowUPrice(row2,pl2.prov);
+        if(seedUPrice>0&&candUPrice>0){
+          const ratio=Math.max(seedUPrice,candUPrice)/Math.min(seedUPrice,candUPrice);
+          if(ratio>4) return;
+        }
+        if(!best||sim>best.sim) best={row:row2,prov:pl2.prov,sim,key:k2};
+      });
+      if(best){ g.byProv[best.prov.id]={row:best.row,prov:best.prov}; used[best.key]=1; }
     });
-    Object.values(bestByProv).forEach(b=>{ g.byProv[b.prov.id]={row:b.row,prov:b.prov}; used[b.key]=1; });
     groups.push(g);
   });
-  const SHOW_MAX=150;
   html=`<div style="padding:0 16px 8px;font-size:12px;color:rgba(255,255,255,0.35);">${groups.length} producto(s)${groups.length>SHOW_MAX?' — mostrando los primeros '+SHOW_MAX+', afiná la búsqueda para ver el resto':''}</div>`;
   html+=`<div class="cmp-wrap"><table class="cmp-table"><thead><tr><th>Producto</th>`;
   provs.forEach(pl=>{ html+=`<th><div class="cmp-prov-th-av" style="background:${cmpColor(pl.prov.id)}">${cmpInitial(pl.prov.name)}</div><br>${cmpEsc(pl.prov.name)}</th>`; });
