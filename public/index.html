@@ -5040,7 +5040,10 @@ function renderAdminBancos(){
           <div style="font-size:13.5px; font-weight:600; color:var(--white);">${escapeHtml(l.banco)}${l.concepto?` · ${escapeHtml(l.concepto)}`:''}</div>
           <div style="font-size:11px; color:${isPast?'var(--danger)':'rgba(255,255,255,0.4)'};">${cuotasPend} cuota${cuotasPend!==1?'s':''} pendiente${cuotasPend!==1?'s':''}${proxima?` · próx. ${fmtDateAR(proxima.vencimiento)}${isPast?' (vencida)':''}`:''}</div>
         </div>
-        <div style="font-size:14px; font-weight:700; color:${saldo>0?'var(--danger)':'var(--ok)'};">${money(saldo)}</div>
+        <div style="text-align:right; flex:none;">
+          <div style="font-size:14px; font-weight:700; color:${saldo>0?'var(--danger)':'var(--ok)'};">${money(saldo)}</div>
+          ${proxima ? `<div style="font-size:11px; color:rgba(255,255,255,0.45);">cuota: ${money(proxima.monto)}</div>` : ''}
+        </div>
       </div>`;
     }).join('')}
   </div>`;
