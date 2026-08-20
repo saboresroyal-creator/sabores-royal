@@ -5001,12 +5001,17 @@ function renderAdminCajaDiaria(){
 function renderAdminBancos(){
   if(!bankLoansLoaded){ apiSyncBankLoans(); return `<div style="padding:40px;text-align:center;color:rgba(255,255,255,0.4);">Cargando...</div>`; }
   if(state.adminBancoId) return renderAdminBancoDetail(state.adminBancoId);
+  // Agrupa por día del mes de la próxima cuota (todos los que vencen el 3
+  // juntos, después los del 4, etc.) en vez de por fecha completa — así se
+  // ve de un vistazo qué hay que pagar cada día del mes, sin importar el mes.
   const loans = [...(state.bankLoans.items||[])].sort((a,b)=>{
     const va = loanProximaCuota(a)?.vencimiento;
     const vb = loanProximaCuota(b)?.vencimiento;
     if(!va && !vb) return 0;
     if(!va) return 1;
     if(!vb) return -1;
+    const da = +va.slice(8,10), db = +vb.slice(8,10);
+    if(da !== db) return da - db;
     return va.localeCompare(vb);
   });
   const total = loanTotalPendienteGeneral();
