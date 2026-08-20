@@ -4846,6 +4846,10 @@ function closeBankLoanDetail(){ state.adminBancoId = null; render(); }
 // la misma cotización re-simulada con otra fecha de 1° cuota — se cargan tal
 // cual, sin deduplicar, a pedido explícito.
 const BBVA_IMPORT_PRESET = [
+  {concepto:"Cuadro de marcha (45)", rows:[["2026-10-03",143622.75],["2026-11-03",107336.11],["2026-12-03",107039],["2027-01-03",106731.52],["2027-02-03",106413.3],["2027-03-03",106083.97],["2027-04-03",105743.14],["2027-05-03",105390.41],["2027-06-03",105025.37],["2027-07-03",104647.57],["2027-08-03",104256.59],["2027-09-03",103799.67]]},
+  {concepto:"Cuadro de marcha (44)", rows:[["2026-09-29",137194.26],["2026-10-29",107336.11],["2026-11-29",107039],["2026-12-29",106731.52],["2027-01-29",106413.3],["2027-02-28",106083.97],["2027-03-29",105743.14],["2027-04-29",105390.41],["2027-05-29",105025.37],["2027-06-29",104647.57],["2027-07-29",104256.59],["2027-08-29",103799.67]]},
+  {concepto:"Cuadro de marcha (43)", rows:[["2026-09-24",163457.21],["2026-10-24",134170.14],["2026-11-24",133798.75],["2026-12-24",133414.4],["2027-01-24",133016.63],["2027-02-24",132604.96],["2027-03-24",132178.92],["2027-04-24",131738.01],["2027-05-24",131281.7],["2027-06-24",130809.46],["2027-07-24",130320.74],["2027-08-24",129814.99]]},
+  {concepto:"Cuadro de marcha (42)", rows:[["2026-09-16",150600.23],["2026-10-16",134170.14],["2026-11-16",133798.75],["2026-12-16",133414.4],["2027-01-16",133016.63],["2027-02-16",132604.96],["2027-03-16",132178.92],["2027-04-16",131738.01],["2027-05-16",131281.7],["2027-06-16",130809.46],["2027-07-16",130320.74],["2027-08-16",129814.99]]},
   {concepto:"Cuadro de marcha (41)", rows:[["2026-09-17",132051.47],["2026-10-17",107336.11],["2026-11-17",107039],["2026-12-17",106731.52],["2027-01-17",106413.3],["2027-02-17",106083.97],["2027-03-17",105743.14],["2027-04-17",105390.41],["2027-05-17",105025.37],["2027-06-17",104647.57],["2027-07-17",104256.59],["2027-08-17",103799.67]]},
   {concepto:"Cuadro de marcha (40)", rows:[["2026-09-07",119194.48],["2026-10-07",107336.11],["2026-11-07",107039],["2026-12-07",106731.52],["2027-01-07",106413.3],["2027-02-07",106083.97],["2027-03-07",105743.14],["2027-04-07",105390.41],["2027-05-07",105025.37],["2027-06-07",104647.57],["2027-07-07",104256.59],["2027-08-07",103799.67]]},
   {concepto:"Cuadro de marcha (39)", rows:[["2026-09-02",112765.98],["2026-10-02",107336.11],["2026-11-02",107039],["2026-12-02",106731.52],["2027-01-02",106413.3],["2027-02-02",106083.97],["2027-03-02",105743.14],["2027-04-02",105390.41],["2027-05-02",105025.37],["2027-06-02",104647.57],["2027-07-02",104256.59],["2027-08-02",103799.67]]},
@@ -4888,6 +4892,29 @@ const BBVA_IMPORT_PRESET = [
   {concepto:"Cuadro de marcha (2)", rows:[["2025-11-21",578789.35],["2025-12-21",498826.95],["2026-01-21",497055.01],["2026-02-21",495179.87],["2026-03-21",493195.51],["2026-04-21",491095.55],["2026-05-21",488873.27],["2026-06-21",486521.54],["2026-07-21",484032.82],["2026-08-21",481399.13],["2026-09-21",478612.03],["2026-10-21",475662.56]]},
   {concepto:"Cuadro de marcha (1)", rows:[["2025-09-12",3177066.52],["2025-10-12",2375978.71],["2025-11-12",2369299.84],["2025-12-12",2362381.64],["2026-01-12",2355215.55],["2026-02-12",2347792.67],["2026-03-12",2340103.8],["2026-04-12",2332139.42],["2026-05-12",2323889.64],["2026-06-12",2315344.25],["2026-07-12",2306492.65],["2026-08-12",2297323.85]]},
 ];
+// Cuenta cuántos préstamos del preset todavía no están cargados en Bancos
+// (comparando por "concepto"), para el botón aditivo de abajo.
+function bbvaPresetMissingCount(){
+  const existing = new Set((state.bankLoans.items||[]).map(l=>l.concepto));
+  return BBVA_IMPORT_PRESET.filter(p=>!existing.has(p.concepto)).length;
+}
+// Suma al listado de Bancos los préstamos del preset que todavía no están
+// cargados (por "concepto"), sin tocar los que ya existen ni sus cuotas
+// marcadas como pagadas — a diferencia de importBbvaPreset(), que borra todo.
+async function importBbvaPresetMissing(){
+  const existing = new Set((state.bankLoans.items||[]).map(l=>l.concepto));
+  const missing = BBVA_IMPORT_PRESET.filter(p=>!existing.has(p.concepto));
+  if(!missing.length){ toast('No hay préstamos nuevos para agregar', 'err'); return; }
+  if(!confirm(`Se van a agregar ${missing.length} préstamo(s) nuevo(s) sin tocar los que ya están cargados:\n${missing.map(m=>m.concepto).join(', ')}\n¿Continuar?`)) return;
+  missing.forEach(preset=>{
+    const cuotas = preset.rows.map((r,i)=>({id:paymentsId('bl'), nro:i+1, monto:r[1], vencimiento:r[0], estado:'pendiente'}));
+    const montoTotal = cuotas.reduce((s,c)=>s+c.monto,0);
+    state.bankLoans.items.push({id:paymentsId('bank'), banco:'BBVA', concepto:preset.concepto, montoTotal, createdAt:new Date().toISOString().slice(0,10), cuotas});
+  });
+  saveState(); render();
+  try{ await apiSaveSetting('bank_loans', state.bankLoans); toast(missing.length+' préstamo(s) agregado(s)', 'ok'); }
+  catch(e){ toast('Error al guardar: '+e.message, 'err'); }
+}
 // Reemplaza TODO lo que haya en la solapa Bancos por el preset actual —
 // a pedido explícito de arrancar de cero con los cuadros de marcha nuevos,
 // en vez de sumarse a una carga anterior (que podía tener otra numeración
@@ -4998,6 +5025,7 @@ function renderAdminBancos(){
       </div>
     </div>
     <button class="btn-primary" style="width:100%; margin-bottom:16px;" onclick="openBankLoanModal()">+ Nuevo préstamo</button>
+    ${bbvaPresetMissingCount()>0 ? `<button class="btn-secondary" style="width:100%; margin-bottom:16px;" onclick="importBbvaPresetMissing()">+ Agregar los ${bbvaPresetMissingCount()} préstamos BBVA nuevos que pasaste</button>` : ''}
     <button class="btn-secondary" style="width:100%; margin-bottom:16px; color:var(--danger);" onclick="importBbvaPreset()">${loans.length===0?'Importar':'Reemplazar todo con'} los ${BBVA_IMPORT_PRESET.length} préstamos BBVA que pasaste</button>
     ${loans.length>0 ? `<button class="btn-secondary" style="width:100%; margin-bottom:16px;" onclick="openMarkPaidBeforeModal()">Marcar cuotas vencidas como pagadas</button>` : ''}
     ${loans.length>0 ? `<button class="btn-secondary" style="width:100%; margin-bottom:16px; color:var(--danger);" onclick="resetAllLoansToPendiente()">Revertir todo a pendiente</button>` : ''}
