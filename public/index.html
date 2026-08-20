@@ -3478,7 +3478,18 @@ function cmpProdSim(a,b){
     tb.forEach((wb,i)=>{ if(usedB[i]) return; const s=cmpTokSim(wa,wb); if(s>best){best=s;bestI=i;} });
     if(best>=0.75){matched+=best;if(bestI>=0)usedB[bestI]=1;}
   });
-  return 2*matched/(ta.length+tb.length);
+  // Coeficiente de solapamiento (matched / lado más corto), no Dice
+  // (2*matched/suma) — un proveedor que abrevia el nombre y se come la
+  // marca o la línea del producto (ej: "ALF. MINITORTA CLA 21X69G" vs
+  // "ARCOR ALFAJOR AGUILA MINITORTA CLASICO 21*69 GR.") matcheaba TODAS
+  // sus palabras contra el nombre largo, pero con Dice el nombre largo
+  // (con marca+línea de más) inflaba el denominador y el puntaje quedaba
+  // por debajo del umbral aunque fuera, sin dudas, el mismo producto. El
+  // gate de tamaño de arriba y el de precio por unidad en cmpDoSearch ya
+  // filtran presentaciones distintas, así que no hace falta que ambos
+  // nombres tengan la misma cantidad de palabras para considerarlos el
+  // mismo producto.
+  return matched/Math.min(ta.length,tb.length);
 }
 // Variante de cmpProdSim que compara FILAS (no nombres sueltos) cacheando
 // tamaño/tokens por fila en un WeakMap — el emparejamiento ahora busca la
@@ -3510,7 +3521,7 @@ function cmpProdSimRows(rowA,rowB){
     tb.forEach((wb,i)=>{ if(usedB[i]) return; const s=cmpTokSim(wa,wb); if(s>best){best=s;bestI=i;} });
     if(best>=0.75){matched+=best;if(bestI>=0)usedB[bestI]=1;}
   });
-  return 2*matched/(ta.length+tb.length);
+  return matched/Math.min(ta.length,tb.length);
 }
 function cmpQScore(norm,qt){
   if(!qt.length) return 0;
