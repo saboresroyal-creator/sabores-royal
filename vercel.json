@@ -1,4 +1,7 @@
 {
+  "rewrites": [
+    { "source": "/mayorista", "destination": "/mayorista.html" }
+  ],
   "headers": [
     {
       "source": "/(.*)",

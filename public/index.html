@@ -622,6 +622,8 @@ const SUPABASE_KEY = 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZ
 const SUPABASE_URL = (()=>{ try{ const r=JSON.parse(atob(SUPABASE_KEY.split('.')[1])).ref; return 'https://'+r+'.supabase.co'; }catch(e){ return 'https://topgunweqeztedhhthbl.supabase.co'; } })();
 const STORAGE_KEY = "sabores_royal_state_v1";
 const ADMIN_SESSION_KEY = "sabores_royal_admin_session_v1";
+const MIN_WHOLESALE_ORDER = 50000;
+const WHOLESALE_RUBROS = ["Kiosco","Almacén","Rotisería","Despensa","Panadería","Distribuidora","Verdulería","Otro"];
 
 function waLink(message){
   return "https://wa.me/" + WA_NUMBER + "?text=" + encodeURIComponent(message);
@@ -761,6 +763,7 @@ let state = {
   clients: {},
   clientsSeenMigrated: false,
   currentClientPhone: null,
+  viewingWholesale: false,
   checkoutPointsRedeemed: 0,
   route: {screen:"home"},
   adminAuthed: false,
@@ -1199,23 +1202,13 @@ async function apiSyncContent(){
           });
           if(blockChanged) changed = true;
         }
-        if(row.setting_key==='wholesale_clients'){
-          const list = parsed || [];
-          let blockChanged = false;
-          // Aplicar flag wholesale a los clientes en la lista
-          list.forEach(phone=>{
-            if(!state.clients[phone]) state.clients[phone] = {phone, name:'', address:'', doc:'', points:0, orders:[]};
-            if(!state.clients[phone].wholesale){ state.clients[phone].wholesale = true; blockChanged = true; }
-          });
-          // Quitar flag a clientes que ya no son mayoristas
-          Object.keys(state.clients).forEach(phone=>{
-            if(!list.includes(phone) && state.clients[phone].wholesale){
-              state.clients[phone].wholesale = false;
-              blockChanged = true;
-            }
-          });
-          if(blockChanged) changed = true;
-        }
+        // wholesale_clients (app_settings) ya no se lee: el flag mayorista
+        // vive en la columna real clients.wholesale (ver
+        // supabase-migration-mayorista-selfservice.sql). Se deja de leer
+        // acá porque, al sincronizar cada 30s para TODOS los visitantes
+        // (no solo admin), pisaba con `false` a los clientes que se
+        // autorregistraban como mayoristas por /mayorista apenas Supabase
+        // les devolvía la lista vieja.
       }catch(e){}
     });
     if(changed){ saveState(); if(!document.getElementById('content-modal-overlay')) render(); }
@@ -1313,22 +1306,25 @@ async function apiSyncSuggestions(){
 async function apiSyncClients(){
   if(!IS_ADMIN_APP || !state.adminAuthed) return;
   try{
-    const rows = await adminFetch('/clients?select=full_name,phone,address,email,points&order=created_at.desc&limit=500','GET');
+    const rows = await adminFetch('/clients?select=full_name,phone,address,email,points,wholesale,rubro&order=created_at.desc&limit=500','GET');
     if(!rows || rows.length===0) return;
     let changed = false;
     rows.forEach(c=>{
       if(!c.phone) return;
       const phone = c.phone.startsWith('+') ? c.phone : '+54'+c.phone;
       const points = c.points||0;
+      const wholesale = !!c.wholesale;
       const existing = state.clients[phone];
       if(!existing){
-        state.clients[phone] = { phone, name:c.full_name||'', address:c.address||'', email:c.email||'', doc:'', city:'', province:'', points, orders:[] };
+        state.clients[phone] = { phone, name:c.full_name||'', address:c.address||'', email:c.email||'', doc:'', city:'', province:'', points, orders:[], wholesale, rubro:c.rubro||'' };
         changed = true;
       }else{
         if(existing.points !== points){ existing.points = points; changed = true; }
         if(c.full_name && existing.name !== c.full_name){ existing.name = c.full_name; changed = true; }
         if(c.address && existing.address !== c.address){ existing.address = c.address; changed = true; }
         if(c.email && existing.email !== c.email){ existing.email = c.email; changed = true; }
+        if(!!existing.wholesale !== wholesale){ existing.wholesale = wholesale; changed = true; }
+        if(c.rubro && existing.rubro !== c.rubro){ existing.rubro = c.rubro; changed = true; }
       }
     });
     if(changed){ saveState(); render(); }
@@ -1718,8 +1714,7 @@ function cartItemLineTotal(item){
     return (effectivePriceForWeight(p)/1000) * item.grams;
   }
   const base = effectivePrice(p);
-  const _cl = state.currentClientPhone ? state.clients[state.currentClientPhone] : null;
-  if(p.displayQty && p.displayDiscount && item.qty >= p.displayQty && !(_cl && _cl.wholesale)){
+  if(p.displayQty && p.displayDiscount && item.qty >= p.displayQty){
     return Math.round(base * (1 - p.displayDiscount/100)) * item.qty;
   }
   return base * item.qty;
@@ -1732,6 +1727,13 @@ function cartCount(){
 }
 function money(n){
   return "$" + Number(n).toLocaleString("es-AR");
+}
+// Precios mayoristas visibles para cualquiera que tocó "Ver precios
+// mayoristas" (state.viewingWholesale, sin loguearse ni identificarse),
+// o para un cliente ya registrado como mayorista (client.wholesale). El
+// login/registro real recién pasa en submitOrder(), al comprar.
+function wholesaleModeActive(client){
+  return !!(client && client.wholesale) || !!state.viewingWholesale;
 }
 // Escapa texto que viene de clientes (nombre, dirección, mensajes de chat)
 // antes de insertarlo en innerHTML — evita XSS almacenado.
@@ -1759,7 +1761,7 @@ function productsOnPromo(){
   const client = state.currentClientPhone ? state.clients[state.currentClientPhone] : null;
   return state.products.filter(p=>{
     if(p.hidden) return false;
-    if(client && client.wholesale) return false;
+    if(wholesaleModeActive(client)) return false;
     return activePromo(p) !== null;
   });
 }
@@ -1822,13 +1824,167 @@ function renderOfertasScreen(){
     `}
   </div>`;
 }
+
+/* =========================================================
+   ARMADOR DE GOLOSINAS POR CANTIDAD DE CHICOS (CUMPLE)
+   Sugerencia por reglas simples (sin IA): gramos de golosinas sueltas
+   por chico según intensidad elegida, repartidos con variedad entre las
+   categorías de golosinas a peso que haya cargadas. El resultado es
+   editable antes de agregarlo al carrito — un punto de partida, no una
+   decisión final.
+   ========================================================= */
+const CUMPLE_GRAMOS_POR_CHICO = {poca:70, normal:100, abundante:150};
+let cumpleWizard = {kids:null, intensity:'normal', items:null};
+
+function generateCumpleSuggestion(kids, intensity){
+  const gramosPorChico = CUMPLE_GRAMOS_POR_CHICO[intensity] || CUMPLE_GRAMOS_POR_CHICO.normal;
+  const totalGramos = Math.max(0, kids) * gramosPorChico;
+  const candidatos = state.products.filter(p=>p.section==='golosinas' && p.sellByWeight && !p.hidden);
+  if(candidatos.length===0 || totalGramos<=0) return [];
+  // Variedad: agrupa por categoría y va turnando entre grupos, tope 6 productos.
+  const porCategoria = {};
+  candidatos.forEach(p=>{ const k=p.cat||'Otros'; (porCategoria[k]=porCategoria[k]||[]).push(p); });
+  const grupos = Object.values(porCategoria);
+  const elegidos = [];
+  const maxProductos = Math.min(6, candidatos.length);
+  let i = 0;
+  while(elegidos.length < maxProductos && grupos.length>0){
+    const gi = i % grupos.length;
+    const grupo = grupos[gi];
+    elegidos.push(grupo.shift());
+    if(grupo.length===0) grupos.splice(gi,1); else i++;
+  }
+  const base = Math.max(50, Math.round(totalGramos / elegidos.length / 50) * 50);
+  return elegidos.map(p=>({id:p.id, grams: Math.max(base, p.minGrams||50)}));
+}
+
+function openCumpleWizard(){ cumpleWizard = {kids:null, intensity:'normal', items:null}; nav('cumple'); }
+
+function selectCumpleIntensity(intensity){ cumpleWizard.intensity = intensity; render(); }
+
+function buildCumpleSuggestion(){
+  const input = document.getElementById('cumple-kids-input');
+  const kids = parseInt(input && input.value, 10);
+  if(!kids || kids<1){ toast('Ingresá cuántos chicos van a ser', 'err'); return; }
+  cumpleWizard.kids = kids;
+  const items = generateCumpleSuggestion(kids, cumpleWizard.intensity);
+  if(items.length===0){ toast('No hay golosinas a peso cargadas todavía', 'err'); return; }
+  cumpleWizard.items = items;
+  render();
+}
+
+function cumpleAdjustGrams(productId, delta){
+  const item = cumpleWizard.items.find(it=>it.id===productId);
+  if(!item) return;
+  const p = state.products.find(pr=>pr.id===productId);
+  const min = (p && p.minGrams) || 50;
+  item.grams = Math.max(min, item.grams + delta);
+  render();
+}
+
+function cumpleRemoveItem(productId){
+  cumpleWizard.items = cumpleWizard.items.filter(it=>it.id!==productId);
+  render();
+}
+
+function cumpleRestart(){ cumpleWizard = {kids:null, intensity:cumpleWizard.intensity, items:null}; render(); }
+
+function cumpleConfirmAddToCart(){
+  if(!cumpleWizard.items || cumpleWizard.items.length===0) return;
+  cumpleWizard.items.forEach(it=> addToCartByWeight(it.id, it.grams));
+  toast('Se agregó el mix de golosinas al carrito', 'ok');
+  cumpleWizard = {kids:null, intensity:'normal', items:null};
+  nav('cart');
+}
+
+function renderCumpleScreen(){
+  return cumpleWizard.items ? renderCumplePreview() : renderCumpleForm();
+}
+
+function renderCumpleForm(){
+  const intensidades = [
+    {key:'poca', label:'Poca', sub:'~70g / chico'},
+    {key:'normal', label:'Normal', sub:'~100g / chico'},
+    {key:'abundante', label:'Abundante', sub:'~150g / chico'},
+  ];
+  return `
+  <div class="screen">
+    <div class="topbar">
+      <button class="back" onclick="nav('home')">${ic('chevron')}</button>
+      <h2>Armá tu mix de cumple</h2>
+    </div>
+    <div style="padding:8px 16px 12px;">
+      <p style="font-size:13px; color:rgba(255,255,255,0.6); line-height:1.5;">Decinos cuántos chicos van a ser y te armamos una sugerencia de golosinas surtidas a peso. Después la podés ajustar antes de agregarla al carrito.</p>
+    </div>
+    <div style="padding:0 16px;">
+      <label style="display:block; font-size:11.5px; font-weight:700; color:rgba(255,255,255,0.45); letter-spacing:.8px; text-transform:uppercase; margin-bottom:8px;">¿Cuántos chicos van a ser?</label>
+      <input id="cumple-kids-input" type="number" inputmode="numeric" min="1" placeholder="Ej: 15" value="${cumpleWizard.kids||''}"
+        style="width:100%; padding:16px 18px; border-radius:18px; background:rgba(255,255,255,0.07); border:1.5px solid rgba(255,255,255,0.13); color:var(--cream); outline:none; font-size:16px; margin-bottom:20px;">
+      <label style="display:block; font-size:11.5px; font-weight:700; color:rgba(255,255,255,0.45); letter-spacing:.8px; text-transform:uppercase; margin-bottom:8px;">¿Cuánta cantidad?</label>
+      <div style="display:flex; gap:8px; margin-bottom:24px;">
+        ${intensidades.map(op=>`
+          <button onclick="selectCumpleIntensity('${op.key}')" style="flex:1; padding:12px 8px; border-radius:14px; text-align:center; cursor:pointer;
+            background:${cumpleWizard.intensity===op.key?'var(--gold)':'rgba(255,255,255,0.07)'};
+            border:1.5px solid ${cumpleWizard.intensity===op.key?'var(--gold)':'rgba(255,255,255,0.13)'};
+            color:${cumpleWizard.intensity===op.key?'var(--navy)':'var(--cream)'};">
+            <div style="font-weight:700; font-size:13.5px;">${op.label}</div>
+            <div style="font-size:11px; opacity:.8;">${op.sub}</div>
+          </button>`).join('')}
+      </div>
+      <button class="btn-primary" style="width:100%;" onclick="buildCumpleSuggestion()">Armar mi mix</button>
+    </div>
+  </div>`;
+}
+
+function renderCumplePreview(){
+  const items = cumpleWizard.items
+    .map(it=>({...it, product: state.products.find(pr=>pr.id===it.id)}))
+    .filter(it=>it.product);
+  const total = items.reduce((s,it)=> s + (effectivePriceForWeight(it.product)/1000)*it.grams, 0);
+  const totalGramos = items.reduce((s,it)=>s+it.grams, 0);
+  return `
+  <div class="screen">
+    <div class="topbar">
+      <button class="back" onclick="cumpleRestart()">${ic('chevron')}</button>
+      <h2>Tu mix para ${cumpleWizard.kids} chicos</h2>
+    </div>
+    <div style="padding:8px 16px 4px;">
+      <p style="font-size:13px; color:rgba(255,255,255,0.6);">Sugerencia de ${totalGramos}g en total. Ajustá cantidades o sacá lo que no quieras antes de agregarlo al carrito.</p>
+    </div>
+    <div style="padding:8px 16px;">
+      ${items.map(it=>`
+        <div style="display:flex; align-items:center; gap:12px; padding:12px 0; border-bottom:1px solid var(--glass-bd);">
+          <div style="flex:1; min-width:0;">
+            <div style="color:var(--white); font-size:14px; font-weight:600; overflow:hidden; text-overflow:ellipsis; white-space:nowrap;">${escapeHtml(it.product.name)}</div>
+            <div style="font-size:12px; color:rgba(255,255,255,0.5);">${money((effectivePriceForWeight(it.product)/1000)*it.grams)}</div>
+          </div>
+          <div style="display:flex; align-items:center; gap:8px; flex:none;">
+            <button onclick="cumpleAdjustGrams('${it.id}', -50)" style="width:28px; height:28px; border-radius:8px; background:rgba(255,255,255,0.08); color:var(--cream); border:1px solid rgba(255,255,255,0.13);">−</button>
+            <span style="min-width:52px; text-align:center; color:var(--cream); font-size:13px;">${it.grams}g</span>
+            <button onclick="cumpleAdjustGrams('${it.id}', 50)" style="width:28px; height:28px; border-radius:8px; background:rgba(255,255,255,0.08); color:var(--cream); border:1px solid rgba(255,255,255,0.13);">+</button>
+          </div>
+          <button onclick="cumpleRemoveItem('${it.id}')" style="flex:none; width:28px; height:28px; display:flex; align-items:center; justify-content:center; color:rgba(255,255,255,0.4); font-size:15px;">✕</button>
+        </div>
+      `).join('')}
+      ${items.length===0 ? `<div class="empty-state">${ic('box')}<p>Sacaste todo del mix. Volvé atrás para armar otro.</p></div>` : ''}
+    </div>
+    ${items.length>0 ? `
+    <div style="padding:16px; position:sticky; bottom:0; background:var(--navy); border-top:1px solid var(--glass-bd);">
+      <div style="display:flex; justify-content:space-between; margin-bottom:12px; color:var(--white); font-size:15px; font-weight:700;">
+        <span>Total</span><span>${money(total)}</span>
+      </div>
+      <button class="btn-primary" style="width:100%;" onclick="cumpleConfirmAddToCart()">Agregar todo al carrito</button>
+    </div>` : ''}
+  </div>`;
+}
+
 /* Prioridad: mayorista > promo > precio normal.
    Un cliente mayorista nunca ve el precio de oferta, tenga o no un
    wholesalePrice propio cargado para ese producto puntual. */
 function effectivePrice(product){
   if(!product) return 0;
   const client = state.currentClientPhone ? state.clients[state.currentClientPhone] : null;
-  const isWholesaleClient = !!(client && client.wholesale);
+  const isWholesaleClient = wholesaleModeActive(client);
   if(isWholesaleClient){
     return product.wholesalePrice || product.price;
   }
@@ -1990,6 +2146,12 @@ function buildOrderWAMessage(order, unsaved){
   let msg = unsaved
     ? `⚠️ ESTE PEDIDO NO QUEDÓ GUARDADO EN EL SISTEMA (falló la conexión) — cargalo a mano en el panel ⚠️\n\n¡Hola! Quiero confirmar mi pedido #${order.id}\n\n`
     : `¡Hola! Quiero confirmar mi pedido #${order.id}\n\n`;
+  if(order.belowWholesaleMin){
+    msg = `⚠️ PEDIDO MAYORISTA BAJO EL MÍNIMO (${money(MIN_WHOLESALE_ORDER)}) — confirmame si lo autorizás así o le pido que sume más productos ⚠️\n\n` + msg;
+  }
+  if(order.wholesaleSignupFailed){
+    msg = `⚠️ No pude cargarlo como cliente mayorista en el sistema (falló la conexión) — marcalo a mano en el panel de Clientes ⚠️\n\n` + msg;
+  }
   order.items.forEach(it=>{
     const label = it.grams ? `${it.grams}g de` : `${it.qty}x`;
     msg += `• ${label} ${it.name} — ${money(it.lineTotal!=null?it.lineTotal:it.price*it.qty)}\n`;
@@ -2036,11 +2198,13 @@ function render(){
   else if(r.screen==="price-list-view") html = renderPriceListView(r.productIds, r.priceMode);
   else if(r.screen==="celiaco") html = renderCeliaco();
   else if(r.screen==="ofertas") html = renderOfertasScreen();
+  else if(r.screen==="cumple") html = renderCumpleScreen();
   else if(r.screen==="search") html = renderGlobalSearch();
   else if(r.screen==="chat") html = needsLogin ? renderClientWelcome() : renderChat();
   else if(r.screen==="suggestions") html = renderSuggestions();
+  else if(r.screen==="mayorista") html = renderMayoristaSignup();
   else html = renderHome();
-  app.innerHTML = html + (["admin","voucher-view","price-list-view"].includes(r.screen) ? "" : renderBottomNav());
+  app.innerHTML = html + (["admin","voucher-view","price-list-view","mayorista"].includes(r.screen) ? "" : renderBottomNav());
   bindDynamic();
 }
 
@@ -2124,6 +2288,35 @@ function renderClientWelcome(){
   </div>`;
 }
 
+/* ---------- MAYORISTA (/mayorista) ----------
+   No pide ningún dato para navegar ni ver precios: "Ver precios
+   mayoristas" solo prende state.viewingWholesale (una preferencia de
+   este navegador, sin identificar a nadie). El alta real como cliente
+   mayorista (register_wholesale_client) recién pasa en submitOrder(),
+   al confirmar una compra — ver esa función. */
+function renderMayoristaSignup(){
+  const client = state.currentClientPhone ? state.clients[state.currentClientPhone] : null;
+  if(wholesaleModeActive(client)){
+    return `
+    <div class="screen" style="display:flex; flex-direction:column; align-items:center; justify-content:center; min-height:100vh; padding:36px 28px; text-align:center; background:radial-gradient(circle at 50% 5%, rgba(197,160,40,0.2), transparent 65%);">
+      <img src="${CROWN_DATA_URL}" style="width:64px; margin-bottom:18px;">
+      <h2 style="color:var(--white); font-size:22px; font-weight:800; margin-bottom:8px;">Ya estás viendo precios mayoristas</h2>
+      <p style="color:rgba(255,255,255,0.5); font-size:14px; margin-bottom:26px; max-width:320px;">Entrá al catálogo, los precios mayoristas ya están aplicados. Solo te vamos a pedir tus datos al confirmar una compra.</p>
+      <button class="btn-primary" style="padding:16px 28px; font-size:15px; border-radius:18px;" onclick="nav('catalog')">Ver catálogo</button>
+    </div>`;
+  }
+  return `
+  <div class="screen" style="display:flex; flex-direction:column; align-items:center; justify-content:center; min-height:100vh; padding:36px 28px; text-align:center; background:radial-gradient(circle at 50% 5%, rgba(197,160,40,0.2), transparent 65%);">
+    <img src="${LOGO_DATA_URL}" style="width:82px; border-radius:20px; margin-bottom:16px; box-shadow:0 6px 24px rgba(0,0,0,0.4);">
+    <h1 style="color:var(--white); font-size:24px; font-weight:800; margin-bottom:6px; letter-spacing:-.3px;">Soy Comercio / Mayorista</h1>
+    <p style="color:rgba(255,255,255,0.5); font-size:13.5px; margin-bottom:28px; max-width:320px; line-height:1.5;">Ningún dato por ahora — tocá el botón y navegá el catálogo con precios mayoristas. Te pedimos tus datos recién al confirmar una compra. Pedido mínimo ${money(MIN_WHOLESALE_ORDER)}.</p>
+    <div style="width:100%; max-width:320px; display:flex; flex-direction:column; gap:14px;">
+      <button class="btn-primary" style="padding:16px; font-size:15px; border-radius:18px;" onclick="state.viewingWholesale=true; saveState(); nav('catalog');">Ver precios mayoristas</button>
+      <button class="btn-secondary" style="font-size:13px; border-radius:18px;" onclick="nav('home')">Volver</button>
+    </div>
+  </div>`;
+}
+
 /* ---------- HOME ---------- */
 function renderSectionBannerHTML(b, fallbackGradient){
   if(!b || !b.active) return '';
@@ -2169,7 +2362,7 @@ function renderHome(){
       <img src="${LOGO_DATA_URL}" class="home-logo" alt="Sabores Royal">
       <h1>Sabores Royal</h1>
       <p>Maipú 734 · Rosario</p>
-      ${(()=>{ const cl = state.currentClientPhone ? state.clients[state.currentClientPhone] : null; return cl && cl.wholesale ? `<div class="wholesale-badge"><img src="${CROWN_DATA_URL}"> Cliente Mayorista</div>` : ''; })()}
+      ${(()=>{ const cl = state.currentClientPhone ? state.clients[state.currentClientPhone] : null; if(cl && cl.wholesale) return `<div class="wholesale-badge"><img src="${CROWN_DATA_URL}"> Cliente Mayorista</div>`; if(state.viewingWholesale) return `<div class="wholesale-badge"><img src="${CROWN_DATA_URL}"> Viendo precios mayoristas</div>`; return ''; })()}
     </div>
     ${homePromoBannerHtml()}
     ${state.banners && state.banners.length>0 ? `
@@ -2219,6 +2412,17 @@ function renderHome(){
     <div class="offers-banner">
       <div class="ob-icon"><img src="${CROWN_DATA_URL}" style="width:100%; height:100%; object-fit:contain;"></div>
       <div><b>Puntos Royal</b> — sumás 1 corona por cada $100 en compras, canjealos por premios</div>
+    </div>
+    ${(()=>{ const cl = state.currentClientPhone ? state.clients[state.currentClientPhone] : null; if(wholesaleModeActive(cl)) return ''; return `
+    <div class="offers-banner" style="cursor:pointer;" onclick="nav('mayorista')">
+      <div class="ob-icon">${ic('package')}</div>
+      <div style="flex:1;"><b>Soy Comercio / Mayorista</b> — accedé al toque a precios mayoristas, sin registrarte</div>
+      <div style="flex:none; opacity:.6;">${ic('chevron')}</div>
+    </div>`; })()}
+    <div class="offers-banner" style="cursor:pointer;" onclick="openCumpleWizard()">
+      <div class="ob-icon">${ic('candy')}</div>
+      <div style="flex:1;"><b>¿Organizás un cumple?</b> — armamos el mix de golosinas según la cantidad de chicos</div>
+      <div style="flex:none; opacity:.6;">${ic('chevron')}</div>
     </div>
     <div class="section-cards">
       ${(()=>{
@@ -2272,6 +2476,12 @@ function renderCatalog(section){
         <input id="search-input" placeholder="Buscar productos..." value="${state.route.q||''}" oninput="onSearchInput(this.value)">
       </div>
     </div>
+    ${section==='golosinas' ? `
+    <div class="offers-banner" style="cursor:pointer;" onclick="openCumpleWizard()">
+      <div class="ob-icon">${ic('candy')}</div>
+      <div style="flex:1;"><b>¿Es para un cumple?</b> — armamos el mix según la cantidad de chicos</div>
+      <div style="flex:none; opacity:.6;">${ic('chevron')}</div>
+    </div>` : ''}
     <div id="catalog-results">${renderCatalogResults(section)}</div>
   </div>`;
 }
@@ -2410,7 +2620,7 @@ function renderProductDetail(id){
     const pricePerKgEff = effectivePriceForWeight(p);
     const lineTotal = (pricePerKgEff/1000)*grams;
     const _clWt = state.currentClientPhone ? state.clients[state.currentClientPhone] : null;
-    const _pdPromoW = (_clWt && _clWt.wholesale) ? null : activePromo(p);
+    const _pdPromoW = wholesaleModeActive(_clWt) ? null : activePromo(p);
     const _pdPromoPctW = _pdPromoW!==null ? Math.round((1-_pdPromoW/p.pricePerKg)*100) : null;
     return `
     <div class="screen">
@@ -2447,8 +2657,8 @@ function renderProductDetail(id){
   const outOfStock = isOutOfStock(p);
   const _unitPr = effectivePrice(p);
   const _clW = state.currentClientPhone ? state.clients[state.currentClientPhone] : null;
-  const _isWholesale = !!(_clW && _clW.wholesale);
-  const _hasDisp = !_isWholesale && p.displayQty && p.displayDiscount && qty >= p.displayQty;
+  const _isWholesale = wholesaleModeActive(_clW);
+  const _hasDisp = p.displayQty && p.displayDiscount && qty >= p.displayQty;
   const _lineTotal = _hasDisp ? Math.round(_unitPr * (1 - p.displayDiscount/100)) * qty : _unitPr * qty;
   const _pdPromo = _isWholesale ? null : activePromo(p);
   const _pdPromoPct = _pdPromo!==null ? Math.round((1-_pdPromo/p.price)*100) : null;
@@ -2465,7 +2675,7 @@ function renderProductDetail(id){
     <div class="pd-body">
       <h2>${p.name}</h2>
       <div class="pd-price">${pdPriceHtml(p)}</div>
-      ${!_isWholesale && p.displayQty && p.displayDiscount ? `<div style="background:${_hasDisp?'rgba(39,174,96,0.15)':'rgba(52,152,219,0.12)'};border:1px solid ${_hasDisp?'rgba(39,174,96,0.4)':'rgba(52,152,219,0.3)'};border-radius:10px;padding:10px 12px;margin:8px 0;font-size:13px;">${_hasDisp?`<span style="color:#2ecc71;font-weight:700;">✓ Precio display aplicado</span>`:`<span style="color:#5dade2;font-weight:700;">📦 Comprá ${p.displayQty} unidades</span> →`} <b>${money(Math.round(applyClientDiscount(_unitPr*(1-p.displayDiscount/100))))}/u</b> <span style="background:#e67e22;color:#fff;font-size:9px;font-weight:800;border-radius:6px;padding:2px 6px;">-${p.displayDiscount}%</span></div>` : ''}
+      ${p.displayQty && p.displayDiscount ? `<div style="background:${_hasDisp?'rgba(39,174,96,0.15)':'rgba(52,152,219,0.12)'};border:1px solid ${_hasDisp?'rgba(39,174,96,0.4)':'rgba(52,152,219,0.3)'};border-radius:10px;padding:10px 12px;margin:8px 0;font-size:13px;">${_hasDisp?`<span style="color:#2ecc71;font-weight:700;">✓ Precio display aplicado</span>`:`<span style="color:#5dade2;font-weight:700;">📦 Comprá ${p.displayQty} unidades</span> →`} <b>${money(Math.round(applyClientDiscount(_unitPr*(1-p.displayDiscount/100))))}/u</b> <span style="background:#e67e22;color:#fff;font-size:9px;font-weight:800;border-radius:6px;padding:2px 6px;">-${p.displayDiscount}%</span></div>` : ''}
       ${p.sinAzucar ? `<span style="background:#b8860b;color:#fff;font-size:10px;font-weight:800;border-radius:8px;padding:3px 10px;display:inline-block;margin-bottom:6px;cursor:pointer;" onclick="nav('catalog',{section:'sinazucar'})">SIN AZÚCAR · SUGAR FREE</span>` : ''}
       <p class="pd-desc">${p.desc||''}</p>
       ${outOfStock ? `
@@ -2514,7 +2724,7 @@ function setDetailGrams(val){
 function effectivePriceForWeight(product){
   if(!product) return 0;
   const client = state.currentClientPhone ? state.clients[state.currentClientPhone] : null;
-  const isWholesaleClient = !!(client && client.wholesale);
+  const isWholesaleClient = wholesaleModeActive(client);
   if(isWholesaleClient){
     return product.wholesalePricePerKg || product.pricePerKg;
   }
@@ -2532,6 +2742,20 @@ function applyClientDiscount(price){
   const pct = clientDiscountPct();
   return pct > 0 ? Math.round(price * (1 - pct/100)) : price;
 }
+// "Suelto" (precio actual por unidad — minorista o mayorista, el que
+// corresponda) vs. "Caja/Display" (precio por unidad llevando el bulto
+// completo, con el descuento de p.displayDiscount cargado en el
+// producto). effectivePrice() ya devuelve el precio mayorista cuando
+// corresponde, así que el descuento de bulto se aplica sobre el precio
+// de cada cliente — mayorista incluido, no solo minorista.
+function displayBoxHintHtml(p){
+  const unitDisplay = Math.round(applyClientDiscount(effectivePrice(p)*(1-p.displayDiscount/100)));
+  const boxTotal = unitDisplay * p.displayQty;
+  return `<div style="margin-top:6px; background:rgba(198,34,34,0.09); border:1px solid rgba(198,34,34,0.28); border-radius:9px; padding:6px 9px;">
+    <div style="color:#c62222; font-weight:800; font-size:13.5px; line-height:1.25;">Mejor ${money(unitDisplay)} <span style="font-weight:600; font-size:10.5px;">/un.</span></div>
+    <div style="font-size:10.5px; color:rgba(44,15,82,0.75); font-weight:700; margin-top:1px;">📦 Caja x${p.displayQty} · ${money(boxTotal)}</div>
+  </div>`;
+}
 function discBadge(pct, sm=false){
   if(!pct) return '';
   return `<span style="background:#e74c3c;color:#fff;border-radius:5px;padding:${sm?'2px 6px':'2px 6px'};font-size:${sm?'10px':'10px'};font-weight:800;margin-left:4px;vertical-align:middle;">-${pct}%</span>`;
@@ -2544,7 +2768,7 @@ function promoBadge(pct, sm=false){
 }
 function pcPriceHtml(p){
   const client = state.currentClientPhone ? state.clients[state.currentClientPhone] : null;
-  const isWholesaleClient = !!(client && client.wholesale);
+  const isWholesaleClient = wholesaleModeActive(client);
   const isWholesale = isWholesaleClient && !!p.wholesalePrice;
   const promo = isWholesaleClient ? null : activePromo(p);
   const base = isWholesale ? p.wholesalePrice : (promo !== null ? promo : p.price);
@@ -2568,7 +2792,7 @@ function isOutOfStock(p){ return !p.sellByWeight && p.stock<=0; }
 function pcImgBadgeHtml(p){
   let html = '';
   const client = state.currentClientPhone ? state.clients[state.currentClientPhone] : null;
-  const isWholesaleClient = !!(client && client.wholesale);
+  const isWholesaleClient = wholesaleModeActive(client);
   const promo = isWholesaleClient ? null : activePromo(p);
   if(promo !== null){
     const basePrice = p.sellByWeight ? p.pricePerKg : p.price;
@@ -2591,7 +2815,7 @@ function pcCardBodyHtml(p){
       <button class="pc-add" onclick="event.stopPropagation(); openProduct('${p.id}')">Elegir cantidad</button>
     ` : `
       <div class="pc-price">${pcPriceHtml(p)}</div>
-      ${p.displayQty && p.displayDiscount && !outOfStock && !(state.currentClientPhone && state.clients[state.currentClientPhone] && state.clients[state.currentClientPhone].wholesale) ? `<div style="font-size:10px;color:#5dade2;margin-top:2px;">Caja x${p.displayQty}: <b>-${p.displayDiscount}%</b></div>` : ''}
+      ${p.displayQty && p.displayDiscount && !outOfStock ? displayBoxHintHtml(p) : ''}
       ${outOfStock
         ? `<button class="pc-add" disabled>Sin stock</button>`
         : `<button class="pc-add" onclick="event.stopPropagation(); addToCart('${p.id}',1)">Agregar</button>`}
@@ -2600,7 +2824,7 @@ function pcCardBodyHtml(p){
 }
 function pcWeightPriceHtml(p){
   const client = state.currentClientPhone ? state.clients[state.currentClientPhone] : null;
-  const isWholesaleClient = !!(client && client.wholesale);
+  const isWholesaleClient = wholesaleModeActive(client);
   const isWholesale = isWholesaleClient && !!p.wholesalePricePerKg;
   const promo = isWholesaleClient ? null : activePromo(p);
   const base = isWholesale ? p.wholesalePricePerKg : (promo !== null ? promo : p.pricePerKg);
@@ -2619,7 +2843,7 @@ function pcWeightPriceHtml(p){
 }
 function pdPriceHtml(p){
   const client = state.currentClientPhone ? state.clients[state.currentClientPhone] : null;
-  const isWholesaleClient = !!(client && client.wholesale);
+  const isWholesaleClient = wholesaleModeActive(client);
   const isWholesale = isWholesaleClient && !!p.wholesalePrice;
   const promo = isWholesaleClient ? null : activePromo(p);
   const base = isWholesale ? p.wholesalePrice : (promo !== null ? promo : p.price);
@@ -2638,7 +2862,7 @@ function pdPriceHtml(p){
 }
 function pdWeightPriceHtml(p){
   const client = state.currentClientPhone ? state.clients[state.currentClientPhone] : null;
-  const isWholesaleClient = !!(client && client.wholesale);
+  const isWholesaleClient = wholesaleModeActive(client);
   const isWholesale = isWholesaleClient && !!p.wholesalePricePerKg;
   const promo = isWholesaleClient ? null : activePromo(p);
   const base = isWholesale ? p.wholesalePricePerKg : (promo !== null ? promo : p.pricePerKg);
@@ -2737,7 +2961,7 @@ function renderCheckoutSummaryHtml(){
   const discPct = specialPct + redeemPct;
   const discAmount = discPct > 0 ? Math.round(base * discPct / 100) : 0;
   const finalTotal = base - discAmount;
-  const isWholesale = !!(client && client.wholesale);
+  const isWholesale = wholesaleModeActive(client);
   return `
     ${isWholesale ? `<div class="summary-row" style="color:#6db8e8;"><span>👑 Precio mayorista aplicado</span><span></span></div>` : ''}
     ${maxRedeemable >= POINTS_REDEEM_BLOCK ? `
@@ -2780,6 +3004,10 @@ function adjustCheckoutPoints(delta){
 function renderCheckout(){
   const saved = state.currentClientPhone ? state.clients[state.currentClientPhone] : null;
   const savedPhoneDigits = saved ? saved.phone.replace(/^\+?549?/,'') : '';
+  // Si está viendo precios mayoristas y todavía no es un cliente mayorista
+  // registrado de verdad, pedimos el rubro acá — es el único momento en
+  // que se identifica, al confirmar la compra (ver submitOrder).
+  const needsWholesaleSignup = state.viewingWholesale && !(saved && saved.wholesale);
   return `
   <div class="screen">
     <div class="topbar"><button class="back" onclick="nav('cart')">${ic('chevron')}</button><h2>Tus datos</h2></div>
@@ -2789,6 +3017,7 @@ function renderCheckout(){
       <input id="ck-phone" value="${savedPhoneDigits}" placeholder="11 1234 5678" style="flex:1;" oninput="onCheckoutPhoneInput()">
     </div></div>
     <div class="form-group"><label>Dirección de entrega (opcional)</label><input id="ck-address" value="${saved?saved.address:''}" placeholder="Calle, número, barrio"></div>
+    ${needsWholesaleSignup ? `<div class="form-group"><label>Rubro de tu comercio</label><select id="ck-rubro">${WHOLESALE_RUBROS.map(r=>`<option value="${r}">${r}</option>`).join('')}</select></div>` : ''}
     <div class="form-group"><label>Notas (opcional)</label><textarea id="ck-notes" placeholder="Aclaraciones sobre tu pedido"></textarea></div>
     <div class="cart-summary" id="ck-summary">${renderCheckoutSummaryHtml()}</div>
     <div style="padding:0 16px 90px;">
@@ -2804,12 +3033,8 @@ async function submitOrder(){
   if(!name || !rawPhone){ toast("Completá nombre y teléfono", "err"); return; }
   const phone = normalizePhone(rawPhone);
   state.currentClientPhone = phone;
-  const clientForDiscount = state.clients[phone];
-  const specialPct = clientForDiscount && clientForDiscount.discountPct ? Number(clientForDiscount.discountPct) : 0;
-  // Recorta contra el saldo real del cliente por si el estado quedó desactualizado
-  // (p.ej. el teléfono tipeado nunca disparó onCheckoutPhoneInput).
-  const redeemedPoints = Math.min(state.checkoutPointsRedeemed||0, maxRedeemablePoints(clientForDiscount?clientForDiscount.points:0));
-  const discPct = specialPct + pointsRedeemPct(redeemedPoints);
+  let clientForDiscount = state.clients[phone];
+  const belowWholesaleMin = !!(wholesaleModeActive(clientForDiscount) && cartTotal() < MIN_WHOLESALE_ORDER);
   // Reservamos la pestaña de WhatsApp ACÁ, antes de cualquier await: en
   // iOS/Safari (y varios navegadores mobile) un window.open() que se llama
   // después de una llamada de red ya no cuenta como "toque del usuario" y
@@ -2817,12 +3042,37 @@ async function submitOrder(){
   // guardaba bien pero WhatsApp nunca se abría. Guardando la referencia acá
   // y recién asignándole la URL más abajo evita el bloqueo.
   const waWin = window.open('', '_blank');
+  // Alta real como mayorista recién acá, al confirmar la compra — antes de
+  // esto (navegar/ver precios con state.viewingWholesale) no identifica a
+  // nadie ni toca el servidor. Best-effort: si falla, el pedido sigue de
+  // todas formas (ya se está cobrando el precio mayorista igual por el
+  // toggle), pero avisamos por WhatsApp para que quede prolijo a mano.
+  let wholesaleSignupFailed = false;
+  if(state.viewingWholesale && !(clientForDiscount && clientForDiscount.wholesale)){
+    const rubroEl = document.getElementById('ck-rubro');
+    const rubro = rubroEl ? rubroEl.value : '';
+    try{
+      await rpcFetch('register_wholesale_client', {p_phone: phone, p_name: name, p_rubro: rubro});
+      clientForDiscount = Object.assign(state.clients[phone]||{orders:[], points:0}, {phone, name, rubro, wholesale:true});
+      state.clients[phone] = clientForDiscount;
+    }catch(e){
+      console.warn('No se pudo registrar como mayorista, se sigue igual:', e);
+      wholesaleSignupFailed = true;
+    }
+  }
+  const specialPct = clientForDiscount && clientForDiscount.discountPct ? Number(clientForDiscount.discountPct) : 0;
+  // Recorta contra el saldo real del cliente por si el estado quedó desactualizado
+  // (p.ej. el teléfono tipeado nunca disparó onCheckoutPhoneInput).
+  const redeemedPoints = Math.min(state.checkoutPointsRedeemed||0, maxRedeemablePoints(clientForDiscount?clientForDiscount.points:0));
+  const discPct = specialPct + pointsRedeemPct(redeemedPoints);
   try{
     const order = await placeOrder({name, phone, address}, discPct);
     // notes no viaja al servidor (create_order no tiene ese parámetro) — se
     // manda igual por WhatsApp, que es donde realmente se coordina el
     // pedido, así no se pierde lo que el cliente aclaró.
     order.notes = notes;
+    order.belowWholesaleMin = belowWholesaleMin;
+    order.wholesaleSignupFailed = wholesaleSignupFailed;
     if(redeemedPoints > 0){ redeemClientPoints(phone, redeemedPoints); state.checkoutPointsRedeemed = 0; }
     saveState();
     const msg = buildOrderWAMessage(order);
@@ -2844,6 +3094,8 @@ async function submitOrder(){
     console.warn('No se pudo guardar el pedido en el servidor, se manda igual por WhatsApp:', e);
     const order = placeOrderLocalFallback({name, phone, address}, discPct);
     order.notes = notes;
+    order.belowWholesaleMin = belowWholesaleMin;
+    order.wholesaleSignupFailed = wholesaleSignupFailed;
     if(redeemedPoints > 0){ redeemClientPoints(phone, redeemedPoints); state.checkoutPointsRedeemed = 0; }
     await confirmOrderNotSaved(e);
     const msg = buildOrderWAMessage(order, true);
@@ -2895,6 +3147,7 @@ function renderSuccess(order){
       <div style="width:72px; height:72px; border-radius:50%; background:rgba(62,207,142,0.18); display:flex; align-items:center; justify-content:center; color:var(--ok); margin-bottom:18px;">${ic('check')}</div>
       <h2 style="color:var(--white); font-size:21px; margin-bottom:8px;">¡Pedido enviado!</h2>
       <p style="color:rgba(255,255,255,0.6); font-size:13.5px; margin-bottom:22px;">Tu pedido #${order.id} fue registrado. Te contactaremos por WhatsApp para coordinar.</p>
+      ${order.belowWholesaleMin ? `<p style="color:#ffcf7a; font-size:12.5px; margin:-10px 0 22px; max-width:300px;">Este pedido quedó por debajo del mínimo mayorista (${money(MIN_WHOLESALE_ORDER)}), así que lo confirmamos por WhatsApp antes de prepararlo.</p>` : ''}
       <button class="btn-primary" onclick="nav('home')" style="max-width:240px;">Volver al inicio</button>
     </div>
   </div>`;
@@ -6154,7 +6407,7 @@ function replaceOrderItemProduct(orderId, itemIndex, newProductId){
 
   const clientPhone = order.customer && order.customer.phone ? normalizePhone(order.customer.phone) : null;
   const client = clientPhone ? state.clients[clientPhone] : null;
-  const isWholesale = !!(client && client.wholesale);
+  const isWholesale = wholesaleModeActive(client);
   const promo = activePromo(newProduct);
 
   it.id = Number(newProduct.id);
@@ -6258,7 +6511,7 @@ function confirmAddOrderItem(orderId, productId){
 
   const clientPhone = order.customer && order.customer.phone ? normalizePhone(order.customer.phone) : null;
   const client = clientPhone ? state.clients[clientPhone] : null;
-  const isWholesale = !!(client && client.wholesale);
+  const isWholesale = wholesaleModeActive(client);
   const promo = activePromo(product);
 
   const newItem = { id: Number(product.id), name: product.name };
@@ -8306,7 +8559,7 @@ function toggleClientWholesale(phone){
   if(!c) return;
   c.wholesale = !c.wholesale;
   saveState();
-  apiSaveWholesaleClients();
+  adminFetch('/clients?phone=eq.'+encodeURIComponent(phone), 'PATCH', {wholesale:c.wholesale}).catch(e=>console.warn('Error guardando wholesale:',e));
   render();
   toast(c.wholesale ? `${c.name} ahora es mayorista` : `${c.name} ya no es mayorista`, "ok");
 }
@@ -8993,6 +9246,11 @@ function renderManualVoucherModal(){
     document.body.appendChild(overlay);
   }
   const d = manualVoucherDraft;
+  // overlay.innerHTML reconstruye el .modal-sheet entero en cada cambio
+  // (cantidad, descuento, etc.) — sin esto, el scroll volvía arriba de
+  // todo cada vez que tocabas +/- en un ítem con la lista larga.
+  const _prevSheet = overlay.querySelector('.modal-sheet');
+  const _prevScroll = _prevSheet ? _prevSheet.scrollTop : 0;
 
   overlay.innerHTML = `
     <div class="modal-sheet">
@@ -9049,7 +9307,7 @@ function renderManualVoucherModal(){
             <div style="display:flex; justify-content:space-between; align-items:center;">
               <div class="cart-qty">
                 <button onclick="updateManualItem(${idx},'qty',${it.qty-1})">−</button>
-                <span>${it.qty}</span>
+                <input type="number" min="1" value="${it.qty}" onchange="updateManualItem(${idx},'qty',this.value)" style="width:52px; text-align:center; background:var(--glass); border:1px solid var(--glass-bd); border-radius:7px; color:var(--cream); font-size:13px; padding:4px 2px;">
                 <button onclick="updateManualItem(${idx},'qty',${it.qty+1})">+</button>
               </div>
               <div style="font-size:13px; font-weight:700; color:var(--gold2);">${money(it.price*it.qty*(1-(it.discountPct||0)/100))}</div>
@@ -9090,6 +9348,7 @@ function renderManualVoucherModal(){
       </div>
     </div>
   `;
+  if(_prevScroll) overlay.querySelector('.modal-sheet').scrollTop = _prevScroll;
 }
 // Cliente detrás del teléfono cargado en el comprobante manual (si ya es
 // un cliente conocido) — de ahí sale el saldo de puntos disponible para canjear.
@@ -10550,11 +10809,16 @@ function sendPriceListWA(){
 loadState();
 loadAdminSession();
 const IS_ADMIN_APP = !!localStorage.getItem('_openAdmin') || new URLSearchParams(location.search).get('mode')==='admin';
+const IS_MAYORISTA_ENTRY = location.pathname==='/mayorista' || new URLSearchParams(location.search).get('mayorista')==='1';
 if(IS_ADMIN_APP){
   localStorage.removeItem('_openAdmin');
   state.route = {screen:'admin'};
   state.adminAuthed = false; state.adminIsSuperAdmin = false; state.adminLoggedName = ""; state.adminLoggedPerms = [];
   if(location.search) history.replaceState(null,'',location.pathname);
+}else if(IS_MAYORISTA_ENTRY){
+  state.route = {screen:'mayorista'};
+  state.adminAuthed = false; state.adminIsSuperAdmin = false; state.adminLoggedName = ""; state.adminLoggedPerms = [];
+  if(location.search) history.replaceState(null,'',location.pathname==='/mayorista' ? '/mayorista' : location.pathname);
 }else{
   state.route = {screen:'home'};
   state.adminAuthed = false; state.adminIsSuperAdmin = false; state.adminLoggedName = ""; state.adminLoggedPerms = [];
