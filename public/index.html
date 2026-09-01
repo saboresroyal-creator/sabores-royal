@@ -1093,6 +1093,7 @@ async function apiSyncProducts(){
       displayDiscount: p.display_discount||null,
       promoPrice: p.promo_price ? Number(p.promo_price) : null,
       promoUntil: p.promo_until||null,
+      superOffer: p.super_offer||false,
       barcode: p.barcode||"",
       hidden: p.hidden||false,
     };});
@@ -1414,6 +1415,7 @@ async function apiSaveProduct(product){
       display_discount: product.displayDiscount||null,
       promo_price: product.promoPrice||null,
       promo_until: product.promoUntil||null,
+      super_offer: product.superOffer||false,
       barcode: product.barcode||null,
       hidden: product.hidden||false,
     };
@@ -1750,7 +1752,11 @@ function formatOrderItemLabel(it){
   return it.grams ? `${it.grams}g de ${it.name}` : `${it.qty}x ${it.name}`;
 }
 function activePromo(product){
-  if(!product || !product.promoPrice || !product.promoUntil) return null;
+  if(!product || !product.promoPrice) return null;
+  // Súper Oferta: precio fijo cargado a mano, sin vencimiento y sin
+  // engancharse a la fecha de una campaña general (ver toggleSuperOfferField).
+  if(product.superOffer) return product.promoPrice;
+  if(!product.promoUntil) return null;
   const today = new Date().toISOString().slice(0,10);
   return product.promoUntil >= today ? product.promoPrice : null;
 }
@@ -1827,58 +1833,79 @@ function renderOfertasScreen(){
 
 /* =========================================================
    ARMADOR DE GOLOSINAS POR CANTIDAD DE CHICOS (CUMPLE)
-   Sugerencia por reglas simples (sin IA): gramos de golosinas sueltas
-   por chico según intensidad elegida, repartidos con variedad entre las
-   categorías de golosinas a peso que haya cargadas. El resultado es
-   editable antes de agregarlo al carrito — un punto de partida, no una
-   decisión final.
+   Sin IA: la mamá elige a mano qué golosinas quiere (de las que ya
+   tenés cargadas) y nosotros calculamos cuánto de cada una según la
+   cantidad de chicos — gramos/chico para las que se venden a peso,
+   unidades/chico para las que se venden por unidad. Todo editable
+   antes de agregarlo al carrito, es un punto de partida.
    ========================================================= */
 const CUMPLE_GRAMOS_POR_CHICO = {poca:70, normal:100, abundante:150};
-let cumpleWizard = {kids:null, intensity:'normal', items:null};
+const CUMPLE_UNIDADES_POR_CHICO = {poca:1, normal:1, abundante:2};
+// kids/intensity/selectedIds/items/search viven acá, fuera de state.route,
+// para que navegar entre pasos con el historial (atrás del navegador o el
+// botón de la app, son lo mismo) nunca los borre — solo cambia qué paso
+// se muestra. Recién se resetea al entrar de nuevo desde openCumpleWizard().
+let cumpleWizard = {kids:null, intensity:'normal', selectedIds:[], items:null, search:''};
 
-function generateCumpleSuggestion(kids, intensity){
-  const gramosPorChico = CUMPLE_GRAMOS_POR_CHICO[intensity] || CUMPLE_GRAMOS_POR_CHICO.normal;
-  const totalGramos = Math.max(0, kids) * gramosPorChico;
-  const candidatos = state.products.filter(p=>p.section==='golosinas' && p.sellByWeight && !p.hidden);
-  if(candidatos.length===0 || totalGramos<=0) return [];
-  // Variedad: agrupa por categoría y va turnando entre grupos, tope 6 productos.
-  const porCategoria = {};
-  candidatos.forEach(p=>{ const k=p.cat||'Otros'; (porCategoria[k]=porCategoria[k]||[]).push(p); });
-  const grupos = Object.values(porCategoria);
-  const elegidos = [];
-  const maxProductos = Math.min(6, candidatos.length);
-  let i = 0;
-  while(elegidos.length < maxProductos && grupos.length>0){
-    const gi = i % grupos.length;
-    const grupo = grupos[gi];
-    elegidos.push(grupo.shift());
-    if(grupo.length===0) grupos.splice(gi,1); else i++;
-  }
-  const base = Math.max(50, Math.round(totalGramos / elegidos.length / 50) * 50);
-  return elegidos.map(p=>({id:p.id, grams: Math.max(base, p.minGrams||50)}));
-}
-
-function openCumpleWizard(){ cumpleWizard = {kids:null, intensity:'normal', items:null}; nav('cumple'); }
+function openCumpleWizard(){ cumpleWizard = {kids:null, intensity:'normal', selectedIds:[], items:null, search:''}; nav('cumple', {step:'form'}); }
 
 function selectCumpleIntensity(intensity){ cumpleWizard.intensity = intensity; render(); }
 
-function buildCumpleSuggestion(){
+function cumpleGoToPicker(){
   const input = document.getElementById('cumple-kids-input');
   const kids = parseInt(input && input.value, 10);
   if(!kids || kids<1){ toast('Ingresá cuántos chicos van a ser', 'err'); return; }
   cumpleWizard.kids = kids;
-  const items = generateCumpleSuggestion(kids, cumpleWizard.intensity);
-  if(items.length===0){ toast('No hay golosinas a peso cargadas todavía', 'err'); return; }
-  cumpleWizard.items = items;
+  nav('cumple', {step:'pick'});
+}
+
+function cumpleToggleProduct(productId){
+  const idx = cumpleWizard.selectedIds.indexOf(productId);
+  if(idx>=0) cumpleWizard.selectedIds.splice(idx,1);
+  else cumpleWizard.selectedIds.push(productId);
   render();
 }
 
-function cumpleAdjustGrams(productId, delta){
+function onCumpleSearchInput(val){
+  cumpleWizard.search = val;
+  const el = document.getElementById('cumple-picker-results');
+  if(el) el.innerHTML = renderCumplePickerResults();
+}
+
+// Reparte el "presupuesto" de la intensidad elegida entre lo que ella
+// seleccionó: el total de gramos/chico se divide entre las golosinas a
+// peso elegidas, y cada golosina por unidad recibe unidades/chico aparte
+// (no compiten por el mismo cupo — son cosas distintas).
+function cumpleBuildFromSelection(){
+  if(cumpleWizard.selectedIds.length===0){ toast('Elegí al menos una golosina', 'err'); return; }
+  const elegidos = cumpleWizard.selectedIds.map(id=>state.products.find(p=>p.id===id)).filter(Boolean);
+  const pesables = elegidos.filter(p=>p.sellByWeight);
+  const unitarios = elegidos.filter(p=>!p.sellByWeight);
+  const items = [];
+  if(pesables.length>0){
+    const gramosPorChico = CUMPLE_GRAMOS_POR_CHICO[cumpleWizard.intensity] || CUMPLE_GRAMOS_POR_CHICO.normal;
+    const totalGramos = cumpleWizard.kids * gramosPorChico;
+    const base = Math.max(50, Math.round(totalGramos / pesables.length / 50) * 50);
+    pesables.forEach(p=> items.push({id:p.id, kind:'weight', amount: Math.max(base, p.minGrams||50)}));
+  }
+  if(unitarios.length>0){
+    const unidadesPorChico = CUMPLE_UNIDADES_POR_CHICO[cumpleWizard.intensity] || CUMPLE_UNIDADES_POR_CHICO.normal;
+    unitarios.forEach(p=> items.push({id:p.id, kind:'unit', amount: Math.max(1, cumpleWizard.kids * unidadesPorChico)}));
+  }
+  cumpleWizard.items = items;
+  nav('cumple', {step:'preview'});
+}
+
+function cumpleAdjustAmount(productId, delta){
   const item = cumpleWizard.items.find(it=>it.id===productId);
   if(!item) return;
-  const p = state.products.find(pr=>pr.id===productId);
-  const min = (p && p.minGrams) || 50;
-  item.grams = Math.max(min, item.grams + delta);
+  if(item.kind==='weight'){
+    const p = state.products.find(pr=>pr.id===productId);
+    const min = (p && p.minGrams) || 50;
+    item.amount = Math.max(min, item.amount + delta);
+  } else {
+    item.amount = Math.max(1, item.amount + delta);
+  }
   render();
 }
 
@@ -1887,40 +1914,44 @@ function cumpleRemoveItem(productId){
   render();
 }
 
-function cumpleRestart(){ cumpleWizard = {kids:null, intensity:cumpleWizard.intensity, items:null}; render(); }
-
 function cumpleConfirmAddToCart(){
   if(!cumpleWizard.items || cumpleWizard.items.length===0) return;
-  cumpleWizard.items.forEach(it=> addToCartByWeight(it.id, it.grams));
+  cumpleWizard.items.forEach(it=>{
+    if(it.kind==='weight') addToCartByWeight(it.id, it.amount);
+    else addToCart(it.id, it.amount);
+  });
   toast('Se agregó el mix de golosinas al carrito', 'ok');
-  cumpleWizard = {kids:null, intensity:'normal', items:null};
+  cumpleWizard = {kids:null, intensity:'normal', selectedIds:[], items:null, search:''};
   nav('cart');
 }
 
 function renderCumpleScreen(){
-  return cumpleWizard.items ? renderCumplePreview() : renderCumpleForm();
+  const step = state.route.step || 'form';
+  if(step==='pick') return renderCumplePicker();
+  if(step==='preview') return renderCumplePreview();
+  return renderCumpleForm();
 }
 
 function renderCumpleForm(){
   const intensidades = [
-    {key:'poca', label:'Poca', sub:'~70g / chico'},
-    {key:'normal', label:'Normal', sub:'~100g / chico'},
-    {key:'abundante', label:'Abundante', sub:'~150g / chico'},
+    {key:'poca', label:'Poca', sub:'lo justo'},
+    {key:'normal', label:'Normal', sub:'cantidad típica'},
+    {key:'abundante', label:'Abundante', sub:'que sobre'},
   ];
   return `
   <div class="screen">
     <div class="topbar">
-      <button class="back" onclick="nav('home')">${ic('chevron')}</button>
+      <button class="back" onclick="history.back()">${ic('chevron')}</button>
       <h2>Armá tu mix de cumple</h2>
     </div>
     <div style="padding:8px 16px 12px;">
-      <p style="font-size:13px; color:rgba(255,255,255,0.6); line-height:1.5;">Decinos cuántos chicos van a ser y te armamos una sugerencia de golosinas surtidas a peso. Después la podés ajustar antes de agregarla al carrito.</p>
+      <p style="font-size:13px; color:rgba(255,255,255,0.6); line-height:1.5;">Decinos cuántos chicos van a ser, elegí vos qué golosinas querés y nosotros calculamos cuánto pedir de cada una.</p>
     </div>
     <div style="padding:0 16px;">
       <label style="display:block; font-size:11.5px; font-weight:700; color:rgba(255,255,255,0.45); letter-spacing:.8px; text-transform:uppercase; margin-bottom:8px;">¿Cuántos chicos van a ser?</label>
       <input id="cumple-kids-input" type="number" inputmode="numeric" min="1" placeholder="Ej: 15" value="${cumpleWizard.kids||''}"
         style="width:100%; padding:16px 18px; border-radius:18px; background:rgba(255,255,255,0.07); border:1.5px solid rgba(255,255,255,0.13); color:var(--cream); outline:none; font-size:16px; margin-bottom:20px;">
-      <label style="display:block; font-size:11.5px; font-weight:700; color:rgba(255,255,255,0.45); letter-spacing:.8px; text-transform:uppercase; margin-bottom:8px;">¿Cuánta cantidad?</label>
+      <label style="display:block; font-size:11.5px; font-weight:700; color:rgba(255,255,255,0.45); letter-spacing:.8px; text-transform:uppercase; margin-bottom:8px;">¿Cuánta cantidad por chico?</label>
       <div style="display:flex; gap:8px; margin-bottom:24px;">
         ${intensidades.map(op=>`
           <button onclick="selectCumpleIntensity('${op.key}')" style="flex:1; padding:12px 8px; border-radius:14px; text-align:center; cursor:pointer;
@@ -1931,8 +1962,65 @@ function renderCumpleForm(){
             <div style="font-size:11px; opacity:.8;">${op.sub}</div>
           </button>`).join('')}
       </div>
-      <button class="btn-primary" style="width:100%;" onclick="buildCumpleSuggestion()">Armar mi mix</button>
+      <button class="btn-primary" style="width:100%;" onclick="cumpleGoToPicker()">Elegir golosinas</button>
     </div>
+  </div>`;
+}
+
+function renderCumplePicker(){
+  return `
+  <div class="screen">
+    <div class="topbar">
+      <button class="back" onclick="history.back()">${ic('chevron')}</button>
+      <h2>Elegí las golosinas</h2>
+    </div>
+    <div style="padding:8px 16px 12px;">
+      <p style="font-size:13px; color:rgba(255,255,255,0.6);">Para ${cumpleWizard.kids} chicos. Tocá las que quieras incluir — nosotros calculamos cuánto de cada una.</p>
+    </div>
+    <div class="search-wrap">
+      <div class="search-bar">
+        ${ic('search')}
+        <input id="cumple-search-input" placeholder="Buscar golosinas... (ej: masticable, caramelo)" value="${escapeHtml(cumpleWizard.search||'')}" oninput="onCumpleSearchInput(this.value)">
+      </div>
+    </div>
+    <div id="cumple-picker-results">${renderCumplePickerResults()}</div>
+    <div style="padding:16px; position:sticky; bottom:0; background:var(--navy); border-top:1px solid var(--glass-bd);">
+      <div style="font-size:12px; color:rgba(255,255,255,0.5); margin-bottom:10px;">${cumpleWizard.selectedIds.length} elegida${cumpleWizard.selectedIds.length===1?'':'s'}</div>
+      <button class="btn-primary" style="width:100%;" onclick="cumpleBuildFromSelection()">Calcular cantidades</button>
+    </div>
+  </div>`;
+}
+
+function renderCumplePickerResults(){
+  const qNorm = normText(cumpleWizard.search||'');
+  const productos = state.products
+    .filter(p=>p.section==='golosinas' && !p.hidden)
+    .filter(p=>!qNorm || normText(p.name).includes(qNorm) || normText(p.cat).includes(qNorm) || normText(p.sub).includes(qNorm))
+    .sort((a,b)=> (a.cat||'').localeCompare(b.cat||'','es') || a.name.localeCompare(b.name,'es'));
+  const porCategoria = {};
+  productos.forEach(p=>{ const k=p.cat||'Otras'; (porCategoria[k]=porCategoria[k]||[]).push(p); });
+  if(productos.length===0){
+    return `<div style="padding:0 16px 16px;"><div class="empty-state">${ic('box')}<p>${cumpleWizard.search ? 'No hay golosinas que coincidan con la búsqueda.' : 'No hay golosinas cargadas todavía.'}</p></div></div>`;
+  }
+  return `
+  <div style="padding:0 16px 16px;">
+    ${Object.entries(porCategoria).map(([cat, prods])=>`
+      <div style="margin-bottom:18px;">
+        <div style="font-size:11.5px; font-weight:700; color:rgba(255,255,255,0.45); letter-spacing:.8px; text-transform:uppercase; margin-bottom:8px;">${escapeHtml(cat)}</div>
+        ${prods.map(p=>{
+          const checked = cumpleWizard.selectedIds.includes(p.id);
+          return `
+          <button onclick="cumpleToggleProduct('${p.id}')" style="width:100%; display:flex; align-items:center; gap:12px; padding:12px; border-radius:14px; margin-bottom:6px; text-align:left; cursor:pointer;
+            background:${checked?'rgba(197,160,40,0.15)':'rgba(255,255,255,0.04)'};
+            border:1.5px solid ${checked?'var(--gold)':'rgba(255,255,255,0.1)'};">
+            <span style="flex:none; width:20px; height:20px; border-radius:6px; display:flex; align-items:center; justify-content:center; font-size:13px; font-weight:800;
+              background:${checked?'var(--gold)':'transparent'}; border:1.5px solid ${checked?'var(--gold)':'rgba(255,255,255,0.3)'}; color:var(--navy);">${checked?'✓':''}</span>
+            <span style="flex:1; color:var(--cream); font-size:13.5px;">${escapeHtml(p.name)}</span>
+            <span style="flex:none; font-size:10.5px; color:rgba(255,255,255,0.4);">${p.sellByWeight?'a peso':'unidad'}</span>
+          </button>`;
+        }).join('')}
+      </div>
+    `).join('')}
   </div>`;
 }
 
@@ -1940,33 +2028,33 @@ function renderCumplePreview(){
   const items = cumpleWizard.items
     .map(it=>({...it, product: state.products.find(pr=>pr.id===it.id)}))
     .filter(it=>it.product);
-  const total = items.reduce((s,it)=> s + (effectivePriceForWeight(it.product)/1000)*it.grams, 0);
-  const totalGramos = items.reduce((s,it)=>s+it.grams, 0);
+  const lineTotal = it => it.kind==='weight' ? (effectivePriceForWeight(it.product)/1000)*it.amount : effectivePrice(it.product)*it.amount;
+  const total = items.reduce((s,it)=> s + lineTotal(it), 0);
   return `
   <div class="screen">
     <div class="topbar">
-      <button class="back" onclick="cumpleRestart()">${ic('chevron')}</button>
+      <button class="back" onclick="history.back()">${ic('chevron')}</button>
       <h2>Tu mix para ${cumpleWizard.kids} chicos</h2>
     </div>
     <div style="padding:8px 16px 4px;">
-      <p style="font-size:13px; color:rgba(255,255,255,0.6);">Sugerencia de ${totalGramos}g en total. Ajustá cantidades o sacá lo que no quieras antes de agregarlo al carrito.</p>
+      <p style="font-size:13px; color:rgba(255,255,255,0.6);">Ajustá cantidades o sacá lo que no quieras antes de agregarlo al carrito.</p>
     </div>
     <div style="padding:8px 16px;">
       ${items.map(it=>`
         <div style="display:flex; align-items:center; gap:12px; padding:12px 0; border-bottom:1px solid var(--glass-bd);">
           <div style="flex:1; min-width:0;">
             <div style="color:var(--white); font-size:14px; font-weight:600; overflow:hidden; text-overflow:ellipsis; white-space:nowrap;">${escapeHtml(it.product.name)}</div>
-            <div style="font-size:12px; color:rgba(255,255,255,0.5);">${money((effectivePriceForWeight(it.product)/1000)*it.grams)}</div>
+            <div style="font-size:12px; color:rgba(255,255,255,0.5);">${money(lineTotal(it))}</div>
           </div>
           <div style="display:flex; align-items:center; gap:8px; flex:none;">
-            <button onclick="cumpleAdjustGrams('${it.id}', -50)" style="width:28px; height:28px; border-radius:8px; background:rgba(255,255,255,0.08); color:var(--cream); border:1px solid rgba(255,255,255,0.13);">−</button>
-            <span style="min-width:52px; text-align:center; color:var(--cream); font-size:13px;">${it.grams}g</span>
-            <button onclick="cumpleAdjustGrams('${it.id}', 50)" style="width:28px; height:28px; border-radius:8px; background:rgba(255,255,255,0.08); color:var(--cream); border:1px solid rgba(255,255,255,0.13);">+</button>
+            <button onclick="cumpleAdjustAmount('${it.id}', ${it.kind==='weight'?-50:-1})" style="width:28px; height:28px; border-radius:8px; background:rgba(255,255,255,0.08); color:var(--cream); border:1px solid rgba(255,255,255,0.13);">−</button>
+            <span style="min-width:52px; text-align:center; color:var(--cream); font-size:13px;">${it.kind==='weight' ? it.amount+'g' : it.amount+' un.'}</span>
+            <button onclick="cumpleAdjustAmount('${it.id}', ${it.kind==='weight'?50:1})" style="width:28px; height:28px; border-radius:8px; background:rgba(255,255,255,0.08); color:var(--cream); border:1px solid rgba(255,255,255,0.13);">+</button>
           </div>
           <button onclick="cumpleRemoveItem('${it.id}')" style="flex:none; width:28px; height:28px; display:flex; align-items:center; justify-content:center; color:rgba(255,255,255,0.4); font-size:15px;">✕</button>
         </div>
       `).join('')}
-      ${items.length===0 ? `<div class="empty-state">${ic('box')}<p>Sacaste todo del mix. Volvé atrás para armar otro.</p></div>` : ''}
+      ${items.length===0 ? `<div class="empty-state">${ic('box')}<p>Sacaste todo del mix. Volvé atrás para elegir otra vez.</p></div>` : ''}
     </div>
     ${items.length>0 ? `
     <div style="padding:16px; position:sticky; bottom:0; background:var(--navy); border-top:1px solid var(--glass-bd);">
@@ -2368,7 +2456,7 @@ function renderHome(){
     ${state.banners && state.banners.length>0 ? `
       <div style="display:flex; gap:12px; overflow-x:auto; padding:0 16px 16px; scroll-snap-type:x mandatory;">
         ${state.banners.map(b=>`
-          <div onclick="${b.section?`openSection('${b.section}')`:''}" style="flex:none; width:88%; scroll-snap-align:start; border-radius:16px; overflow:hidden; position:relative; background:${b.image?'#000':'linear-gradient(120deg, var(--gold2), var(--gold))'}; ${b.section?'cursor:pointer;':''}">
+          <div onclick="${b.section==='ofertas'?`nav('ofertas')`:b.section?`openSection('${b.section}')`:''}" style="flex:none; width:88%; scroll-snap-align:start; border-radius:16px; overflow:hidden; position:relative; background:${b.image?'#000':'linear-gradient(120deg, var(--gold2), var(--gold))'}; ${b.section?'cursor:pointer;':''}">
             ${b.image?`<img src="${b.image}" style="width:100%;display:block;">`:``}
             <div style="position:${b.image?'absolute':'relative'}; bottom:0; left:0; right:0; background:${b.image?'linear-gradient(transparent,rgba(0,0,0,0.6))':'none'}; padding:14px; ${b.image?'':'min-height:80px; display:flex; flex-direction:column; justify-content:flex-end;'}">
               <h3 style="color:${b.image?'#fff':'var(--navy)'}; font-size:16px; margin-bottom:2px;">${b.title||''}</h3>
@@ -6858,6 +6946,12 @@ function openProductModal(id){
         <button type="button" class="toggle ${p&&p.sellByWeight?'on':''}" id="pm-sellbyweight-toggle" onclick="toggleSellByWeightField()"></button>
       </div>
 
+      <div class="settings-row" style="margin:0 16px 14px; border-radius:12px; background:var(--glass); border:1px solid var(--glass-bd);">
+        <span>🔥 Súper Oferta (precio fijo, va directo al banner de Ofertas)</span>
+        <button type="button" class="toggle ${p&&p.superOffer?'on':''}" id="pm-superoffer-toggle" onclick="toggleSuperOfferField()"></button>
+      </div>
+      <p id="pm-superoffer-hint" style="display:${p&&p.superOffer?'block':'none'}; padding:0 16px 10px; font-size:11.5px; color:var(--gold2); margin-top:-6px;">No vence solo y no se pisa con las ofertas por categoría o de todo el catálogo — la sacás vos a mano cuando termine.</p>
+
       <div id="pm-normal-price-group" style="display:${p&&p.sellByWeight?'none':'block'};">
         <div class="form-group"><label>Precio</label><input id="pm-price" type="number" value="${p?p.price:''}" placeholder="0" oninput="applyWholesalePct('')"></div>
         <div style="display:flex; gap:10px; align-items:flex-end;">
@@ -6865,8 +6959,8 @@ function openProductModal(id){
           <div class="form-group" style="flex:1;"><label>Precio mayorista</label><input id="pm-wholesale-price" type="number" value="${p&&p.wholesalePrice?p.wholesalePrice:''}" placeholder="Dejá vacío si no aplica"></div>
         </div>
         <div style="display:flex;gap:10px;">
-          <div class="form-group" style="flex:1;"><label>🏷️ Precio en oferta</label><input id="pm-promo-price" type="number" value="${p&&p.promoPrice?p.promoPrice:''}" placeholder="Vacío = sin oferta"></div>
-          <div class="form-group" style="flex:1;"><label>Válido hasta</label><input id="pm-promo-until" type="date" value="${p&&p.promoUntil?p.promoUntil:''}"></div>
+          <div class="form-group" style="flex:1;"><label id="pm-promo-price-label">${p&&p.superOffer?'🔥 Precio Súper Oferta':'🏷️ Precio en oferta'}</label><input id="pm-promo-price" type="number" value="${p&&p.promoPrice?p.promoPrice:''}" placeholder="Vacío = sin oferta"></div>
+          <div class="form-group" id="pm-promo-until-wrap" style="flex:1; display:${p&&p.superOffer?'none':'block'};"><label>Válido hasta</label><input id="pm-promo-until" type="date" value="${p&&p.promoUntil?p.promoUntil:''}"></div>
         </div>
       </div>
       <div id="pm-weight-price-group" style="display:${p&&p.sellByWeight?'block':'none'};">
@@ -6876,8 +6970,8 @@ function openProductModal(id){
           <div class="form-group" style="flex:1;"><label>Precio mayorista por kilo</label><input id="pm-wholesale-price-per-kg" type="number" value="${p&&p.wholesalePricePerKg?p.wholesalePricePerKg:''}" placeholder="Dejá vacío si no aplica"></div>
         </div>
         <div style="display:flex;gap:10px;">
-          <div class="form-group" style="flex:1;"><label>🏷️ Precio en oferta (por kilo)</label><input id="pm-promo-price-per-kg" type="number" value="${p&&p.sellByWeight&&p.promoPrice?p.promoPrice:''}" placeholder="Vacío = sin oferta"></div>
-          <div class="form-group" style="flex:1;"><label>Válido hasta</label><input id="pm-promo-until-per-kg" type="date" value="${p&&p.sellByWeight&&p.promoUntil?p.promoUntil:''}"></div>
+          <div class="form-group" style="flex:1;"><label id="pm-promo-price-per-kg-label">${p&&p.superOffer?'🔥 Precio Súper Oferta (por kilo)':'🏷️ Precio en oferta (por kilo)'}</label><input id="pm-promo-price-per-kg" type="number" value="${p&&p.sellByWeight&&p.promoPrice?p.promoPrice:''}" placeholder="Vacío = sin oferta"></div>
+          <div class="form-group" id="pm-promo-until-per-kg-wrap" style="flex:1; display:${p&&p.superOffer?'none':'block'};"><label>Válido hasta</label><input id="pm-promo-until-per-kg" type="date" value="${p&&p.sellByWeight&&p.promoUntil?p.promoUntil:''}"></div>
         </div>
         <div class="form-group"><label>Cantidad mínima a vender (gramos)</label><input id="pm-min-grams" type="number" value="${p&&p.minGrams?p.minGrams:50}" placeholder="50"></div>
       </div>
@@ -6974,6 +7068,21 @@ function toggleSellByWeightField(){
   weightGroup.style.display = isOn ? "none" : "block";
   normalGroup.style.display = isOn ? "block" : "none";
 }
+function toggleSuperOfferField(){
+  const btn = document.getElementById("pm-superoffer-toggle");
+  btn.classList.toggle("on");
+  const on = btn.classList.contains("on");
+  const hint = document.getElementById("pm-superoffer-hint");
+  const untilWrap = document.getElementById("pm-promo-until-wrap");
+  const untilWrapKg = document.getElementById("pm-promo-until-per-kg-wrap");
+  const priceLabel = document.getElementById("pm-promo-price-label");
+  const priceLabelKg = document.getElementById("pm-promo-price-per-kg-label");
+  if(hint) hint.style.display = on ? "block" : "none";
+  if(untilWrap) untilWrap.style.display = on ? "none" : "block";
+  if(untilWrapKg) untilWrapKg.style.display = on ? "none" : "block";
+  if(priceLabel) priceLabel.textContent = on ? "🔥 Precio Súper Oferta" : "🏷️ Precio en oferta";
+  if(priceLabelKg) priceLabelKg.textContent = on ? "🔥 Precio Súper Oferta (por kilo)" : "🏷️ Precio en oferta (por kilo)";
+}
 function closeProductModal(){
   const el = document.getElementById("product-modal-overlay");
   if(el) el.remove();
@@ -7011,13 +7120,15 @@ function saveProductModal(id){
   const hidden = document.getElementById("pm-hidden-toggle").classList.contains("on");
   const displayQty = Number(document.getElementById("pm-display-qty").value)||null;
   const displayDiscount = Number(document.getElementById("pm-display-discount").value)||null;
+  const superOffer = document.getElementById("pm-superoffer-toggle").classList.contains("on");
   const promoPriceRaw = sellByWeight
     ? document.getElementById("pm-promo-price-per-kg").value.trim()
     : document.getElementById("pm-promo-price").value.trim();
   const promoPrice = promoPriceRaw ? Number(promoPriceRaw) : null;
-  const promoUntil = (sellByWeight
+  const promoUntil = superOffer ? null : ((sellByWeight
     ? document.getElementById("pm-promo-until-per-kg").value
-    : document.getElementById("pm-promo-until").value) || null;
+    : document.getElementById("pm-promo-until").value) || null);
+  if(superOffer && !promoPrice){ toast("Ingresá el precio de la Súper Oferta", "err"); return; }
   const pricePerKg = sellByWeight ? (Number(document.getElementById("pm-price-per-kg").value)||0) : null;
   const wholesalePerKgRaw = sellByWeight ? document.getElementById("pm-wholesale-price-per-kg").value.trim() : "";
   const wholesalePricePerKg = wholesalePerKgRaw ? Number(wholesalePerKgRaw) : null;
@@ -7037,12 +7148,12 @@ function saveProductModal(id){
   let savedProduct;
   if(id){
     const p = state.products.find(pr=>pr.id===id);
-    Object.assign(p, {name, section, cat, sub, price, wholesalePrice, stock, desc, barcode, sellByWeight, pricePerKg, wholesalePricePerKg, minGrams, sinTacc, sinAzucar, hidden, displayQty, displayDiscount, promoPrice, promoUntil, photo:adminPhotoDraft.current||p.photo, photoClean});
+    Object.assign(p, {name, section, cat, sub, price, wholesalePrice, stock, desc, barcode, sellByWeight, pricePerKg, wholesalePricePerKg, minGrams, sinTacc, sinAzucar, hidden, displayQty, displayDiscount, promoPrice, promoUntil, superOffer, photo:adminPhotoDraft.current||p.photo, photoClean});
     savedProduct = p;
   }else{
     savedProduct = {
       id: "p"+Date.now(), section, cat, sub, name, price, wholesalePrice, stock, desc, barcode,
-      sellByWeight, pricePerKg, wholesalePricePerKg, minGrams, sinTacc, sinAzucar, hidden, displayQty, displayDiscount, promoPrice, promoUntil,
+      sellByWeight, pricePerKg, wholesalePricePerKg, minGrams, sinTacc, sinAzucar, hidden, displayQty, displayDiscount, promoPrice, promoUntil, superOffer,
       photo: adminPhotoDraft.current||"", photoClean
     };
     state.products.push(savedProduct);
@@ -8020,8 +8131,10 @@ function deleteSubcat(section, cat, sub){
 // existe por producto individual) a todos los productos de una categoría
 // o, si se pasa sub, solo de esa subcategoría. Cada producto se guarda
 // como si se hubiera editado uno por uno (mismo apiSaveProduct de siempre).
+// Excluye productos en Súper Oferta: son precios fijos cargados a mano y
+// una campaña por categoría/catálogo no debe pisarlos ni sacárselos.
 function productsInCategoryGroup(section, cat, sub){
-  return state.products.filter(p=>p.section===section && p.cat===cat && (sub==null || p.sub===sub));
+  return state.products.filter(p=>p.section===section && p.cat===cat && (sub==null || p.sub===sub) && !p.superOffer);
 }
 function openCategoryPromoModal(section, cat, sub){
   const overlay = document.createElement("div");
@@ -8329,7 +8442,7 @@ function openGlobalPromoModal(){
   document.body.appendChild(overlay);
 }
 function renderGlobalPromoModal(){
-  const count = state.products.length;
+  const count = state.products.filter(p=>!p.superOffer).length;
   const today = new Date().toISOString().slice(0,10);
   return `
     <div class="modal-sheet">
@@ -8351,7 +8464,7 @@ function applyGlobalPromo(){
   const until = document.getElementById("globalpromo-until").value;
   if(!pct || pct<=0 || pct>=100){ toast("Ingresá un descuento válido (1-99%)", "err"); return; }
   if(!until){ toast("Elegí hasta cuándo dura la oferta", "err"); return; }
-  const products = state.products;
+  const products = state.products.filter(p=>!p.superOffer);
   products.forEach(p=>{
     const base = p.sellByWeight ? p.pricePerKg : p.price;
     p.promoPrice = Math.round(base * (1 - pct/100));
@@ -8364,7 +8477,7 @@ function applyGlobalPromo(){
   toast(`Oferta del ${pct}% aplicada a ${products.length} productos`, "ok");
 }
 function clearGlobalPromo(){
-  const products = state.products;
+  const products = state.products.filter(p=>!p.superOffer);
   if(!confirm(`¿Quitar la oferta de los ${products.length} productos del catálogo?`)) return;
   products.forEach(p=>{
     p.promoPrice = null;
@@ -10126,7 +10239,7 @@ function renderBannersList(){
       <img src="${b.image||''}" onerror="this.style.opacity=0" style="background:${b.image?'none':'var(--gold)'};">
       <div class="prod-row-body">
         <h4>${b.title||'(sin título)'}</h4>
-        <p>${b.subtitle||''}${b.section?` · Enlaza a ${SECTION_META[b.section]?.label||b.section}`:''}</p>
+        <p>${b.subtitle||''}${b.section?` · Enlaza a ${b.section==='ofertas'?'🔥 Ofertas':(SECTION_META[b.section]?.label||b.section)}`:''}</p>
       </div>
       <div class="prod-row-actions">
         <button class="icon-btn" onclick="openBannerModal(${idx})">${ic('edit')}</button>
@@ -10230,6 +10343,7 @@ function renderBannerModalContent(idx){
       <div class="form-group"><label>Al tocarlo, llevar a (opcional)</label>
         <select id="bn-section">
           <option value="">Sin enlace</option>
+          <option value="ofertas" ${bannerDraft.section==='ofertas'?'selected':''}>🔥 Ofertas (todos los productos con descuento)</option>
           ${Object.keys(SECTION_META).map(k=>`<option value="${k}" ${bannerDraft.section===k?'selected':''}>${SECTION_META[k].label}</option>`).join('')}
         </select>
       </div>
