@@ -5234,9 +5234,16 @@ function renderClientAccountSection(c){
   const phone = c.phone;
   const compras = state.orders.filter(o=>o.customer.phone===phone && o.status!=='Cancelado')
     .map(o=>({type:'compra', date:o.date, amount:o.total, label:`Pedido #${o.id}`}));
+  // Comprobantes manuales (Factura/Remito/Ticket) también son una venta real
+  // aunque no vengan de un pedido — el cliente a veces pide factura, a veces
+  // no, pero en los dos casos hay que cobrarlo. Si el comprobante sí viene de
+  // un pedido (voucher.orderId) no se suma de nuevo, porque el pedido ya está
+  // contado arriba. Presupuesto queda afuera: es una cotización, no una venta.
+  const comprobantes = state.vouchers.filter(v=>v.customer && v.customer.phone===phone && v.type!=='presupuesto' && !v.orderId)
+    .map(v=>({type:'compra', date:v.date, amount:v.total, label:`${VOUCHER_META[v.type].label} ${formatVoucherNumber(v.type, v.number)}`}));
   const pagos = (state.clientPayments.movements||[]).filter(m=>m.phone===phone)
     .map(m=>({type:'pago', id:m.id, date:m.date, amount:m.amount, label: m.note||'Pago a cuenta'}));
-  const movs = [...compras, ...pagos].sort((a,b)=> new Date(a.date) - new Date(b.date));
+  const movs = [...compras, ...comprobantes, ...pagos].sort((a,b)=> new Date(a.date) - new Date(b.date));
   let running = 0;
   const rows = movs.map(m=>{ running += (m.type==='pago' ? -m.amount : m.amount); return Object.assign({}, m, {running}); });
   const balance = running;
