@@ -6185,7 +6185,7 @@ function renderAdminPedidos(){
       <div class="oc-actions">
         ${o.status==="Cancelado" ? `<button class="btn-secondary" style="flex:1; padding:9px;" disabled>Anulado</button>`
           : `<div style="display:flex; gap:6px; flex:1;">
-               ${order.indexOf(o.status)>0 ? `<button class="btn-secondary" style="flex:0 0 auto; padding:9px 12px;" onclick="regressOrderStatus('${o.id}')" title="Volver a ${orderStatusLabel(order[order.indexOf(o.status)-1])}">‹ Volver</button>` : ''}
+               ${order.indexOf(o.status)>0 ? `<button class="btn-secondary" style="flex:0 0 auto; width:auto; padding:9px 12px;" onclick="regressOrderStatus('${o.id}')" title="Volver a ${orderStatusLabel(order[order.indexOf(o.status)-1])}">‹ Volver</button>` : ''}
                ${o.status!=="Entregado" ? `<button class="btn-advance" style="flex:1;" onclick="advanceOrderStatus('${o.id}')">Marcar ${orderStatusLabel(order[order.indexOf(o.status)+1])}</button>` : `<button class="btn-secondary" style="flex:1; padding:9px;" disabled>Completado</button>`}
              </div>`}
         <button class="btn-wa-notify" style="${readyForClient?'':'opacity:0.4; cursor:not-allowed;'}" ${clientActionDisabled} onclick="notifyOrderWA('${o.id}')">${ic('wa')} Notificar</button>
