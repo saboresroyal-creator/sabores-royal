@@ -9068,7 +9068,7 @@ async function requestAfipCae({total, neto, iva, ivaPct, docNumber}){
    Remito and Ticket never show IVA breakdown regardless of this flag.
    For type 'factura' this is async: pide el CAE a AFIP antes de guardar nada,
    y devuelve null (sin tocar contadores ni estado) si AFIP no la autoriza. */
-async function createVoucher(type, items, customer, orderId, includeIVA, generalDiscount, pointsRedeemed){
+async function createVoucher(type, items, customer, orderId, includeIVA, generalDiscount, pointsRedeemed, manualDate){
   const afterItemDiscounts = items.reduce((s,it)=>{
     const lineTotal = it.price*it.qty;
     const discPct = Number(it.discountPct)||0;
@@ -9097,7 +9097,7 @@ async function createVoucher(type, items, customer, orderId, includeIVA, general
   const voucher = {
     id: "v"+Date.now()+Math.floor(Math.random()*1000),
     type, number,
-    date: new Date().toISOString(),
+    date: (manualDate && type!=='factura') ? manualDate : new Date().toISOString(),
     items, customer: customer||{name:"Consumidor Final", phone:"", address:""},
     total,
     generalDiscount: (gd.value>0 || pointsPct>0) ? {...gd, pointsRedeemed: pointsRedeemed||0, pointsDiscountPct: pointsPct, pointsDiscountAmount} : null,
@@ -9195,7 +9195,7 @@ async function generateVoucherFromOrder(orderId, type, includeIVA){
 let manualVoucherDraft = { type:"factura", items:[], customerName:"", customerPhone:"", customerAddress:"", customerDoc:"", includeIVA:false, searchQuery:"", clientSearchQuery:"", generalDiscountType:"percent", generalDiscountValue:0, pointsRedeemed:0, editingVoucherId:null };
 
 function openManualVoucherModal(){
-  manualVoucherDraft = { type:"factura", items:[], customerName:"", customerPhone:"", customerAddress:"", customerDoc:"", includeIVA:false, searchQuery:"", clientSearchQuery:"", generalDiscountType:"percent", generalDiscountValue:0, pointsRedeemed:0, editingVoucherId:null };
+  manualVoucherDraft = { type:"factura", items:[], customerName:"", customerPhone:"", customerAddress:"", customerDoc:"", includeIVA:false, searchQuery:"", clientSearchQuery:"", generalDiscountType:"percent", generalDiscountValue:0, pointsRedeemed:0, editingVoucherId:null, date:"" };
   renderManualVoucherModal();
 }
 // Abre el comprobante manual precargado con el cliente de un pedido, para
@@ -9204,10 +9204,11 @@ function openManualVoucherModal(){
 function openManualVoucherModalForOrder(orderId){
   const order = state.orders.find(o=>o.id===orderId);
   if(!order) return;
+  const client = order.customer.phone ? state.clients[order.customer.phone] : null;
   manualVoucherDraft = {
     type: "factura", items: [],
     customerName: order.customer.name||"", customerPhone: order.customer.phone||"", customerAddress: order.customer.address||"", customerDoc: "",
-    includeIVA: false, searchQuery: "", clientSearchQuery: "", generalDiscountType: "percent", generalDiscountValue: 0, pointsRedeemed: 0, editingVoucherId: null,
+    includeIVA: false, searchQuery: "", clientSearchQuery: "", generalDiscountType: "percent", generalDiscountValue: (client&&client.discountPct)||0, pointsRedeemed: 0, editingVoucherId: null, date: "",
   };
   renderManualVoucherModal();
 }
@@ -9274,6 +9275,14 @@ function renderManualVoucherModal(){
       <div class="form-group"><label>Teléfono (opcional)</label><input id="mv-phone" value="${escapeHtml(d.customerPhone)}" placeholder="Teléfono" onchange="manualVoucherDraft.customerPhone=this.value"></div>
       <div class="form-group"><label>Dirección (opcional)</label><input id="mv-address" value="${escapeHtml(d.customerAddress)}" placeholder="Dirección del cliente" onchange="manualVoucherDraft.customerAddress=this.value"></div>
       <div class="form-group"><label>CUIT / DNI (opcional)</label><input id="mv-doc" value="${escapeHtml(d.customerDoc)}" placeholder="Documento del cliente" onchange="manualVoucherDraft.customerDoc=this.value"></div>
+
+      ${!d.editingVoucherId ? `
+      <div class="form-group">
+        <label>Fecha (opcional, por defecto hoy)</label>
+        <input type="date" id="mv-date" value="${escapeHtml(d.date||'')}" ${d.type==='factura'?'disabled':''} onchange="manualVoucherDraft.date=this.value">
+        ${d.type==='factura' ? `<p style="font-size:11px; color:rgba(255,255,255,0.4); margin-top:4px;">La factura toma la fecha que le asigna AFIP al autorizarla — no se puede cargar a mano.</p>` : ''}
+      </div>
+      ` : ''}
 
       <label style="display:block; font-size:12px; color:rgba(255,255,255,0.55); margin:4px 16px 8px; font-weight:600;">Productos</label>
       <div class="search-bar" style="margin:0 16px 8px;">
@@ -9468,6 +9477,10 @@ function selectManualClient(phone){
   manualVoucherDraft.customerAddress = c.address||"";
   manualVoucherDraft.customerDoc = c.doc||"";
   manualVoucherDraft.clientSearchQuery = "";
+  if(c.discountPct){
+    manualVoucherDraft.generalDiscountType = "percent";
+    manualVoucherDraft.generalDiscountValue = Number(c.discountPct);
+  }
   renderManualVoucherModal();
 }
 function renderManualSearchResults(){
@@ -9539,7 +9552,8 @@ async function confirmManualVoucher(){
   const btn = document.getElementById("btn-confirm-voucher");
   const originalLabel = btn ? btn.innerHTML : null;
   if(d.type==="factura" && btn){ btn.innerHTML = `<span class="spin">${ic('sparkle')}</span> Solicitando CAE a AFIP…`; btn.disabled = true; }
-  const voucher = await createVoucher(d.type, items, customer, null, d.includeIVA, generalDiscount, d.pointsRedeemed||0);
+  const manualDate = d.date ? new Date(d.date+'T12:00:00').toISOString() : null;
+  const voucher = await createVoucher(d.type, items, customer, null, d.includeIVA, generalDiscount, d.pointsRedeemed||0, manualDate);
   if(!voucher){ if(btn){ btn.innerHTML = originalLabel; btn.disabled = false; } return; }
   closeManualVoucherModal();
   if(isNewClient){
