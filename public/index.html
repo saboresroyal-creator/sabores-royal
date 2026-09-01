@@ -9513,7 +9513,11 @@ function addManualItemFromSearch(productId){
   if(!product) return;
   const existing = manualVoucherDraft.items.find(it=>it.productId===productId);
   if(existing){ existing.qty += 1; }
-  else{ manualVoucherDraft.items.push({productId, name:product.name, price:product.price, qty:1, discountPct:0}); }
+  else{
+    const client = manualVoucherDraft.customerPhone ? state.clients[manualVoucherDraft.customerPhone] : null;
+    const price = (client && client.wholesale && product.wholesalePrice) ? product.wholesalePrice : product.price;
+    manualVoucherDraft.items.push({productId, name:product.name, price, qty:1, discountPct:0});
+  }
   manualVoucherDraft.searchQuery = "";
   renderManualVoucherModal();
 }
