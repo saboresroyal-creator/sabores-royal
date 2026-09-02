@@ -1751,6 +1751,11 @@ function money(n){
 // o para un cliente ya registrado como mayorista (client.wholesale). El
 // login/registro real recién pasa en submitOrder(), al comprar.
 function wholesaleModeActive(client){
+  // El admin comparte el mismo localStorage que la app de clientes en este
+  // navegador: si alguna vez se tocó "Ver precios mayoristas" acá, esa
+  // bandera quedaba colándose en las vistas previas del panel (ej. Súper
+  // Oferta aparecía vacía). El admin nunca es "un cliente mayorista".
+  if(IS_ADMIN_APP) return false;
   return !!(client && client.wholesale) || !!state.viewingWholesale;
 }
 // Escapa texto que viene de clientes (nombre, dirección, mensajes de chat)
