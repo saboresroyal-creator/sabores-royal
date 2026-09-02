@@ -150,6 +150,31 @@ img{display:block; max-width:100%;}
 .home-stripes .section-card.fiambreria{background:linear-gradient(135deg,rgba(15,28,69,0.96),rgba(143,122,48,0.8));}
 .home-stripes .section-card.navidad  {background:linear-gradient(135deg,rgba(155,20,30,0.97),rgba(20,90,45,0.88));}
 
+.home-promo-banner{
+  margin:0 16px 16px; padding:18px; border-radius:18px; cursor:pointer;
+  background:linear-gradient(120deg,#ff4d3d,#ff1f1f 55%,#c60000);
+  box-shadow:0 10px 28px rgba(255,20,20,0.5);
+  border:2px solid #ffd400;
+  display:flex; align-items:center; gap:14px;
+  animation:homePromoGlow 1.8s ease-in-out infinite;
+}
+.home-promo-banner .hpb-pct{
+  flex:none; display:flex; flex-direction:column; align-items:center; justify-content:center;
+  background:linear-gradient(160deg,#ffe066,#ffd400); color:#c60000; border-radius:14px;
+  padding:8px 10px; min-width:66px; line-height:1; box-shadow:0 3px 10px rgba(0,0,0,0.25);
+}
+.home-promo-banner .hpb-pct-num{font-size:28px; font-weight:900; letter-spacing:-0.02em;}
+.home-promo-banner .hpb-pct-off{font-size:11px; font-weight:800; letter-spacing:.06em; margin-top:1px;}
+.home-promo-banner .hpb-body{flex:1; min-width:0;}
+.home-promo-banner .hpb-title{color:#fff; font-size:17px; font-weight:800; text-wrap:balance; text-shadow:0 1px 4px rgba(0,0,0,0.25);}
+.home-promo-banner .hpb-sub{color:#ffe4e4; opacity:.95; font-size:12.5px; margin-top:3px;}
+.home-promo-banner .hpb-arrow{color:#fff; font-size:24px; font-weight:700; flex:none;}
+@keyframes homePromoGlow{
+  0%,100%{box-shadow:0 10px 28px rgba(255,20,20,0.5); transform:scale(1);}
+  50%{box-shadow:0 16px 42px rgba(255,20,20,0.9); transform:scale(1.015);}
+}
+@media (prefers-reduced-motion: reduce){ .home-promo-banner{animation:none;} }
+
 /* ---------- BOTTOM NAV ---------- */
 .bottomnav{
   display:flex; justify-content:space-around; align-items:center;
@@ -1747,6 +1772,78 @@ function productsOnPromo(){
     return activePromo(p) !== null;
   });
 }
+// Solo la campaña de % (por categoría o todo el catálogo) — separado de
+// Súper Oferta, que son precios fijos puntuales elegidos a mano y tienen
+// su propia pantalla/banner (ver productsOnSuperOffer).
+function productsOnCampaignPromo(){
+  return productsOnPromo().filter(p=>!p.superOffer);
+}
+// Banner rojo que se muestra arriba de todo en el Home cuando hay una
+// campaña de % activa (por categoría o todo el catálogo). Excluye Súper
+// Oferta a propósito: ese ya tiene su propio banner entre los 4 de abajo.
+function homePromoBannerHtml(){
+  if(IS_ADMIN_APP) return '';
+  const promoProducts = productsOnCampaignPromo();
+  if(promoProducts.length===0) return '';
+  const pctCounts = {};
+  promoProducts.forEach(p=>{
+    const basePrice = p.sellByWeight ? p.pricePerKg : p.price;
+    const pct = Math.round((1-activePromo(p)/basePrice)*100);
+    pctCounts[pct] = (pctCounts[pct]||0) + 1;
+  });
+  const commonPct = Object.keys(pctCounts).reduce((best,pct)=>pctCounts[pct]>pctCounts[best]?pct:best);
+  return `
+    <div class="home-promo-banner" onclick="nav('ofertas')">
+      <div class="hpb-pct">
+        <span class="hpb-pct-num">${commonPct}%</span>
+        <span class="hpb-pct-off">OFF</span>
+      </div>
+      <div class="hpb-body">
+        <div class="hpb-title">🔥 ${commonPct}% OFF en toda la tienda</div>
+        <div class="hpb-sub">${promoProducts.length} producto${promoProducts.length===1?'':'s'} con descuento — tocá para ver</div>
+      </div>
+      <span class="hpb-arrow">→</span>
+    </div>
+  `;
+}
+// Productos marcados Súper Oferta con su precio fijo todavía activo —
+// separados de la campaña general de % (ver productsOnCampaignPromo).
+function productsOnSuperOffer(){
+  const client = state.currentClientPhone ? state.clients[state.currentClientPhone] : null;
+  return state.products.filter(p=>{
+    if(!p.superOffer || p.hidden) return false;
+    if(wholesaleModeActive(client)) return false;
+    return activePromo(p) !== null;
+  });
+}
+function renderSuperOfertaScreen(){
+  const products = productsOnSuperOffer();
+  return `
+  <div class="screen candy-catalog">
+    <div class="topbar">
+      <button class="back" onclick="nav('home')">${ic('chevron')}</button>
+      <h2>Súper Oferta</h2>
+    </div>
+    <div style="padding:8px 16px 12px; display:flex; align-items:center; gap:10px;">
+      <span style="font-size:28px;">🔥</span>
+      <p style="font-size:13px; color:rgba(255,255,255,0.6); line-height:1.4;">Precios fijos con mucho descuento, elegidos a mano — no vencen solos.</p>
+    </div>
+    ${products.length===0 ? `
+      <div class="empty-state">${ic('box')}<p>No hay productos en Súper Oferta en este momento.</p></div>
+    ` : `
+      <div class="product-grid">
+        ${products.map(p=>`
+          <div class="product-card" onclick="openProduct('${p.id}')">
+            <div class="pc-img">
+              ${pcImgBadgeHtml(p)}
+              ${p.photo ? `<img src="${p.photoThumb||p.photo}" alt="" loading="lazy">` : ic('box')}
+            </div>
+            <div class="pc-body">${pcCardBodyHtml(p)}</div>
+          </div>`).join('')}
+      </div>
+    `}
+  </div>`;
+}
 function renderOfertasScreen(){
   const products = productsOnPromo();
   return `
@@ -2232,6 +2329,7 @@ function render(){
   else if(r.screen==="price-list-view") html = renderPriceListView(r.productIds, r.priceMode);
   else if(r.screen==="celiaco") html = renderCeliaco();
   else if(r.screen==="ofertas") html = renderOfertasScreen();
+  else if(r.screen==="superoferta") html = renderSuperOfertaScreen();
   else if(r.screen==="cumple") html = renderCumpleScreen();
   else if(r.screen==="search") html = renderGlobalSearch();
   else if(r.screen==="chat") html = needsLogin ? renderClientWelcome() : renderChat();
@@ -2368,15 +2466,15 @@ function renderSectionBannerHTML(b, fallbackGradient, navTarget){
   const isGrid = b.layout==='grid4' && Array.isArray(b.images) && b.images.some(x=>x);
   if(isGrid){
     return `
-      <div style="margin:0 16px 14px; position:relative; ${clickCursor}"${clickAttr}>
+      <div style="margin:0 16px 14px; ${clickCursor}"${clickAttr}>
+        ${(b.title||b.subtitle) ? `
+        <div style="padding:0 2px 8px;">
+          ${b.title?`<h3 style="color:#fff; font-size:17px; font-weight:700; margin-bottom:3px;">${b.title}</h3>`:''}
+          ${b.subtitle?`<p style="color:rgba(255,255,255,0.65); font-size:12.5px;">${b.subtitle}</p>`:''}
+        </div>` : ''}
         <div style="display:grid; grid-template-columns:1fr 1fr; gap:10px;">
           ${[0,1,2,3].map(i=>`<div style="aspect-ratio:1; overflow:hidden; border-radius:14px; background:${b.images[i]?'#000':fallbackGradient};">${b.images[i]?`<img src="${b.images[i]}" style="width:100%; height:100%; object-fit:cover; display:block;">`:''}</div>`).join('')}
         </div>
-        ${(b.title||b.subtitle) ? `
-        <div style="position:absolute; bottom:10px; left:10px; right:10px; background:linear-gradient(transparent,rgba(0,0,0,0.65)); padding:16px; border-radius:0 0 14px 14px; pointer-events:none;">
-          ${b.title?`<h3 style="color:#fff; font-size:17px; font-weight:700; margin-bottom:3px;">${b.title}</h3>`:''}
-          ${b.subtitle?`<p style="color:rgba(255,255,255,0.85); font-size:12.5px;">${b.subtitle}</p>`:''}
-        </div>` : ''}
       </div>
     `;
   }
@@ -2409,10 +2507,11 @@ function renderHome(){
       <p>Maipú 734 · Rosario</p>
       ${(()=>{ const cl = state.currentClientPhone ? state.clients[state.currentClientPhone] : null; if(cl && cl.wholesale) return `<div class="wholesale-badge"><img src="${CROWN_DATA_URL}"> Cliente Mayorista</div>`; if(state.viewingWholesale) return `<div class="wholesale-badge" style="cursor:pointer; padding:9px 20px;" onclick="exitWholesaleViewing()" title="Tocá para volver a precios de cliente"><img src="${CROWN_DATA_URL}"> Viendo precios mayoristas ✕</div>`; return ''; })()}
     </div>
+    ${homePromoBannerHtml()}
     ${state.banners && state.banners.length>0 ? `
       <div style="display:flex; gap:12px; overflow-x:auto; padding:0 16px 16px; scroll-snap-type:x mandatory;">
         ${state.banners.map(b=>`
-          <div onclick="${b.section==='ofertas'?`nav('ofertas')`:b.section?`openSection('${b.section}')`:''}" style="flex:none; width:88%; scroll-snap-align:start; border-radius:16px; overflow:hidden; position:relative; background:${b.image?'#000':'linear-gradient(120deg, var(--gold2), var(--gold))'}; ${b.section?'cursor:pointer;':''}">
+          <div onclick="${b.section==='ofertas'?`nav('ofertas')`:b.section==='superoferta'?`nav('superoferta')`:b.section?`openSection('${b.section}')`:''}" style="flex:none; width:88%; scroll-snap-align:start; border-radius:16px; overflow:hidden; position:relative; background:${b.image?'#000':'linear-gradient(120deg, var(--gold2), var(--gold))'}; ${b.section?'cursor:pointer;':''}">
             ${b.image?`<img src="${b.image}" style="width:100%;display:block;">`:``}
             <div style="position:${b.image?'absolute':'relative'}; bottom:0; left:0; right:0; background:${b.image?'linear-gradient(transparent,rgba(0,0,0,0.6))':'none'}; padding:14px; ${b.image?'':'min-height:80px; display:flex; flex-direction:column; justify-content:flex-end;'}">
               <h3 style="color:${b.image?'#fff':'var(--navy)'}; font-size:16px; margin-bottom:2px;">${b.title||''}</h3>
@@ -10250,7 +10349,7 @@ function renderBannersList(){
       <img src="${b.image||''}" onerror="this.style.opacity=0" style="background:${b.image?'none':'var(--gold)'};">
       <div class="prod-row-body">
         <h4>${b.title||'(sin título)'}</h4>
-        <p>${b.subtitle||''}${b.section?` · Enlaza a ${b.section==='ofertas'?'🔥 Ofertas':(SECTION_META[b.section]?.label||b.section)}`:''}</p>
+        <p>${b.subtitle||''}${b.section?` · Enlaza a ${b.section==='ofertas'?'🔥 Ofertas':b.section==='superoferta'?'🔥 Súper Oferta':(SECTION_META[b.section]?.label||b.section)}`:''}</p>
       </div>
       <div class="prod-row-actions">
         <button class="icon-btn" onclick="openBannerModal(${idx})">${ic('edit')}</button>
@@ -10355,6 +10454,7 @@ function renderBannerModalContent(idx){
         <select id="bn-section">
           <option value="">Sin enlace</option>
           <option value="ofertas" ${bannerDraft.section==='ofertas'?'selected':''}>🔥 Ofertas (todos los productos con descuento)</option>
+          <option value="superoferta" ${bannerDraft.section==='superoferta'?'selected':''}>🔥 Súper Oferta (precios fijos elegidos a mano)</option>
           ${Object.keys(SECTION_META).map(k=>`<option value="${k}" ${bannerDraft.section===k?'selected':''}>${SECTION_META[k].label}</option>`).join('')}
         </select>
       </div>
