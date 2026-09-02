@@ -3325,26 +3325,54 @@ async function loginAccount(){
   const rawPhone = (document.getElementById("acc-phone")||{}).value||"";
   if(!rawPhone.trim()){ toast("Ingresá un teléfono", "err"); return; }
   const phone = normalizePhone(rawPhone.trim());
+  // Siempre revalida contra el servidor, aunque ya esté guardado en este
+  // dispositivo: si el admin le cambió el mayorista, los puntos, etc. desde
+  // que se guardó acá, este dispositivo nunca se enteraba solo (quedaba
+  // pegado con el dato viejo para siempre). Ver refreshCurrentClient().
+  try{
+    const found = await rpcFetch('get_client_by_phone', {p_phone: phone});
+    if(found && found.length>0){
+      const c = found[0];
+      const existing = state.clients[phone] || {orders:[]};
+      state.clients[phone] = Object.assign({}, existing, {
+        phone, name:c.full_name||existing.name||"", address:c.address||existing.address||"",
+        email:c.email||existing.email||"", points:c.points||0, wholesale:!!c.wholesale, rubro:c.rubro||existing.rubro||""
+      });
+      state.currentClientPhone = phone;
+      saveState(); render();
+      toast("¡Bienvenido de vuelta, "+(c.full_name||existing.name)+"!", "ok");
+      return;
+    }
+  }catch(e){ console.warn("lookup cliente:", e); }
   if(state.clients[phone]){
     state.currentClientPhone = phone;
     saveState(); render();
     return;
   }
-  // Buscar en Supabase (vía RPC — la tabla clients ya no es legible directo)
-  try{
-    const found = await rpcFetch('get_client_by_phone', {p_phone: phone});
-    if(found && found.length>0){
-      const c = found[0];
-      state.clients[phone] = { phone, name:c.full_name, address:c.address||"", email:c.email||"", doc:"", city:"", province:"", points:0, orders:[] };
-      state.currentClientPhone = phone;
-      saveState(); render();
-      toast("¡Bienvenido de vuelta, "+c.full_name+"!", "ok");
-      return;
-    }
-  }catch(e){ console.warn("lookup cliente:", e); }
   state.route.accMode = "register";
   state.route.accPhone = phone;
   render();
+}
+// Igual que apiSyncClients (admin) pero para un solo cliente: mantiene al
+// cliente ya logueado en este dispositivo al día con lo que haya cambiado
+// del lado del servidor (mayorista, puntos, etc.) sin que tenga que
+// cerrar sesión y volver a entrar. Solo corre en la app de clientes.
+async function refreshCurrentClient(){
+  if(IS_ADMIN_APP || !state.currentClientPhone) return;
+  try{
+    const found = await rpcFetch('get_client_by_phone', {p_phone: state.currentClientPhone});
+    if(!found || found.length===0) return;
+    const c = found[0];
+    const existing = state.clients[state.currentClientPhone] || {orders:[]};
+    const merged = Object.assign({}, existing, {
+      phone: state.currentClientPhone, name:c.full_name||existing.name||"", address:c.address||existing.address||"",
+      email:c.email||existing.email||"", points:c.points||0, wholesale:!!c.wholesale, rubro:c.rubro||existing.rubro||""
+    });
+    if(JSON.stringify(merged) !== JSON.stringify(existing)){
+      state.clients[state.currentClientPhone] = merged;
+      saveState(); render();
+    }
+  }catch(e){ console.warn("Refresh cliente:", e); }
 }
 // Los celulares argentinos necesitan el "9" después del 54 en formato
 // internacional (+549341... en vez de +54341...) para que WhatsApp los
@@ -10926,14 +10954,14 @@ if(IS_ADMIN_APP){
   tryRestoreAdminSession().then(()=>{
     if(state.adminAuthed){ apiSyncClients(); apiSyncOrders(); apiSyncPosSales(); apiSyncSuggestions(); apiSyncVouchers(); syncAdminChats(); }
   });
-}else if(state.currentClientPhone){ syncClientChat(); }
+}else if(state.currentClientPhone){ syncClientChat(); refreshCurrentClient(); }
 startChatPoll();
 
 document.addEventListener('visibilitychange', ()=>{
-  if(document.visibilityState === 'visible'){ apiSyncProducts(); apiSyncContent(); if(IS_ADMIN_APP){ apiSyncClients(); apiSyncOrders(); apiSyncPosSales(); apiSyncSuggestions(); apiSyncVouchers(); } }
+  if(document.visibilityState === 'visible'){ apiSyncProducts(); apiSyncContent(); if(IS_ADMIN_APP){ apiSyncClients(); apiSyncOrders(); apiSyncPosSales(); apiSyncSuggestions(); apiSyncVouchers(); } else{ refreshCurrentClient(); } }
 });
-window.addEventListener('focus', ()=>{ apiSyncProducts(); apiSyncContent(); if(IS_ADMIN_APP){ apiSyncClients(); apiSyncOrders(); apiSyncPosSales(); apiSyncSuggestions(); apiSyncVouchers(); } });
-setInterval(()=>{ apiSyncProducts(); apiSyncContent(); if(IS_ADMIN_APP){ apiSyncClients(); apiSyncOrders(); apiSyncPosSales(); apiSyncSuggestions(); apiSyncVouchers(); } }, 30000);
+window.addEventListener('focus', ()=>{ apiSyncProducts(); apiSyncContent(); if(IS_ADMIN_APP){ apiSyncClients(); apiSyncOrders(); apiSyncPosSales(); apiSyncSuggestions(); apiSyncVouchers(); } else{ refreshCurrentClient(); } });
+setInterval(()=>{ apiSyncProducts(); apiSyncContent(); if(IS_ADMIN_APP){ apiSyncClients(); apiSyncOrders(); apiSyncPosSales(); apiSyncSuggestions(); apiSyncVouchers(); } else{ refreshCurrentClient(); } }, 30000);
 
 if('serviceWorker' in navigator){
   navigator.serviceWorker.register('sw.js');
