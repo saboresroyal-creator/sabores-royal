@@ -1114,6 +1114,20 @@ async function apiSyncProducts(){
   }catch(e){ console.warn("Sync Supabase:", e); }
 }
 
+// Convierte un data: URI a Blob sin pasar por fetch(): la CSP del sitio
+// (connect-src) no tiene "data:" habilitado, así que fetch(dataUrl) queda
+// bloqueado por el navegador SIEMPRE (no es un problema de red ni de
+// conexión — pasa en cualquier dispositivo, cualquier red, cualquier
+// intento). atob()/Uint8Array es conversión pura en memoria, no dispara
+// la CSP para nada.
+function dataUrlToBlob(dataUrl){
+  const [header, b64] = dataUrl.split(',');
+  const mime = (header.match(/data:([^;]+)/)||[])[1] || 'image/jpeg';
+  const binary = atob(b64);
+  const bytes = new Uint8Array(binary.length);
+  for(let i=0; i<binary.length; i++) bytes[i] = binary.charCodeAt(i);
+  return new Blob([bytes], {type: mime});
+}
 // Reintenta la subida (a diferencia de adminFetch con POST/PATCH, acá es
 // seguro: el nombre del archivo se fija una sola vez arriba y se sube con
 // x-upsert, así que repetir el mismo intento nunca duplica nada). Esto es
@@ -1121,7 +1135,7 @@ async function apiSyncProducts(){
 // editar el producto a mano para resubir la foto.
 async function uploadPhoto(base64, prefix){
   if(!adminSession || !adminSession.access_token) throw new Error('No hay sesión de admin');
-  const blob = await fetch(base64).then(r=>r.blob());
+  const blob = dataUrlToBlob(base64);
   const ext = (blob.type||'image/jpeg').split('/')[1]||'jpg';
   const filename = prefix + '_' + Date.now() + '.' + ext;
   await uploadPhotoBlob(blob, filename);
@@ -8250,7 +8264,7 @@ async function removePhotoBackgroundAI(){
   if(btn){ btn.innerHTML = `<span class="spin">${ic('sparkle')}</span> Procesando...`; btn.disabled = true; }
   try{
     const { removeBackground } = await import("https://esm.sh/@imgly/background-removal@1.5.7");
-    const blob = await fetch(adminPhotoDraft.original).then(r=>r.blob());
+    const blob = dataUrlToBlob(adminPhotoDraft.original);
     const resultBlob = await removeBackground(blob);
     const reader = new FileReader();
     reader.onload = (e)=>{
