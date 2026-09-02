@@ -1107,18 +1107,38 @@ async function apiSyncProducts(){
   }catch(e){ console.warn("Sync Supabase:", e); }
 }
 
+// Reintenta la subida (a diferencia de adminFetch con POST/PATCH, acá es
+// seguro: el nombre del archivo se fija una sola vez arriba y se sube con
+// x-upsert, así que repetir el mismo intento nunca duplica nada). Esto es
+// lo que evita que un corte de conexión momentáneo obligue a volver a
+// editar el producto a mano para resubir la foto.
 async function uploadPhoto(base64, prefix){
   if(!adminSession || !adminSession.access_token) throw new Error('No hay sesión de admin');
   const blob = await fetch(base64).then(r=>r.blob());
   const ext = (blob.type||'image/jpeg').split('/')[1]||'jpg';
   const filename = prefix + '_' + Date.now() + '.' + ext;
-  const res = await fetch(SUPABASE_URL+'/storage/v1/object/product-photos/'+filename, {
-    method:'POST',
-    headers:{'apikey':SUPABASE_KEY,'Authorization':'Bearer '+adminSession.access_token,'Content-Type':blob.type,'x-upsert':'true','cache-control':'31536000'},
-    body: blob,
-  });
-  if(!res.ok){ const t=await res.text(); throw new Error(t); }
+  await uploadPhotoBlob(blob, filename);
   return SUPABASE_URL+'/storage/v1/object/public/product-photos/'+filename;
+}
+async function uploadPhotoBlob(blob, filename, _retried){
+  let res;
+  try{
+    res = await fetchWithTimeout(SUPABASE_URL+'/storage/v1/object/product-photos/'+filename, {
+      method:'POST',
+      headers:{'apikey':SUPABASE_KEY,'Authorization':'Bearer '+adminSession.access_token,'Content-Type':blob.type,'x-upsert':'true','cache-control':'31536000'},
+      body: blob,
+    });
+  }catch(e){
+    if(!_retried){ await new Promise(r=>setTimeout(r,1200)); return uploadPhotoBlob(blob, filename, true); }
+    throw e;
+  }
+  if(res.status === 401 && !_retried && await adminTryRefresh()){
+    return uploadPhotoBlob(blob, filename, true);
+  }
+  if(!res.ok){
+    if(!_retried){ await new Promise(r=>setTimeout(r,1200)); return uploadPhotoBlob(blob, filename, true); }
+    const t=await res.text(); throw new Error(t);
+  }
 }
 async function uploadProductPhoto(base64, productId){
   return uploadPhoto(base64, 'product_'+productId);
