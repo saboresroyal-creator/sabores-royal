@@ -1644,6 +1644,21 @@ window.addEventListener('popstate', e=>{
   }
 });
 function openSection(key){ nav("catalog", {section:key}); }
+// Adónde lleva un banner del carrusel (state.banners) al tocarlo — usado
+// tanto para armar el onclick real como para el texto "Enlaza a X" en Admin.
+function bannerNavJs(b){
+  if(!b.section) return '';
+  if(b.section==='ofertas') return "nav('ofertas')";
+  if(b.section==='superoferta') return "nav('superoferta')";
+  return b.cat ? `nav('catalog',{section:'${b.section}',cat:'${b.cat}'})` : `openSection('${b.section}')`;
+}
+function bannerTargetLabel(b){
+  if(!b.section) return '';
+  if(b.section==='ofertas') return '🔥 Ofertas';
+  if(b.section==='superoferta') return '🔥 Súper Oferta';
+  const base = SECTION_META[b.section]?.label||b.section;
+  return b.cat ? `${base} → ${b.cat}` : base;
+}
 function openProduct(id){ nav("product", {id}); }
 
 /* =========================================================
@@ -1815,6 +1830,32 @@ function productsOnSuperOffer(){
     if(wholesaleModeActive(client)) return false;
     return activePromo(p) !== null;
   });
+}
+// Tarjeta generada sola (sin que el admin tenga que subir ninguna foto ni
+// escribir texto) para el carrusel de banners del Home: toma el % más alto
+// entre los productos en Súper Oferta activos ahora y lleva a esa pantalla.
+// Se actualiza sola a medida que se marcan/desmarcan productos.
+// Contenido auto-generado para una celda de la grilla de 4 fotos cuando el
+// admin la deja SIN foto pero le pone el enlace "🔥 Súper Oferta": así no
+// hace falta subir ni diseñar nada — el % más alto se calcula solo.
+function superOfertaCellHtml(){
+  const products = productsOnSuperOffer();
+  if(products.length===0) return null;
+  let maxPct = 0;
+  products.forEach(p=>{
+    const basePrice = p.sellByWeight ? p.pricePerKg : p.price;
+    const pct = Math.round((1-activePromo(p)/basePrice)*100);
+    if(pct>maxPct) maxPct = pct;
+  });
+  return `
+    <div style="width:100%; height:100%; display:flex; flex-direction:column; align-items:center; justify-content:center; text-align:center; padding:10px; background:radial-gradient(circle at 30% 20%, #ff4d3d, #b8001f 60%, #3a0000 100%);">
+      <div style="font-size:26px; line-height:1; margin-bottom:3px; text-shadow:0 3px 8px rgba(0,0,0,0.35);">🔥</div>
+      <h3 style="color:#fff; font-size:15px; font-weight:900; letter-spacing:-.2px; line-height:1.15; text-shadow:0 2px 6px rgba(0,0,0,0.4); margin-bottom:7px;">SÚPER<br>OFERTA</h3>
+      <div style="display:inline-flex; align-items:baseline; gap:3px; background:linear-gradient(160deg,#ffe680,#ffb800); color:#3a0000; padding:3px 11px; border-radius:14px; font-weight:900; box-shadow:0 3px 8px rgba(0,0,0,0.3);">
+        <span style="font-size:13px;">${maxPct}%</span><span style="font-size:9px;">OFF</span>
+      </div>
+    </div>
+  `;
 }
 function renderSuperOfertaScreen(){
   const products = productsOnSuperOffer();
@@ -2465,15 +2506,22 @@ function renderSectionBannerHTML(b, fallbackGradient, navTarget){
   const clickCursor = navTarget ? 'cursor:pointer;' : '';
   const isGrid = b.layout==='grid4' && Array.isArray(b.images) && b.images.some(x=>x);
   if(isGrid){
+    const links = Array.isArray(b.links) ? b.links : ["","","",""];
     return `
-      <div style="margin:0 16px 14px; ${clickCursor}"${clickAttr}>
+      <div style="margin:0 16px 14px;">
         ${(b.title||b.subtitle) ? `
         <div style="padding:0 2px 8px;">
           ${b.title?`<h3 style="color:#fff; font-size:17px; font-weight:700; margin-bottom:3px;">${b.title}</h3>`:''}
           ${b.subtitle?`<p style="color:rgba(255,255,255,0.65); font-size:12.5px;">${b.subtitle}</p>`:''}
         </div>` : ''}
         <div style="display:grid; grid-template-columns:1fr 1fr; gap:10px;">
-          ${[0,1,2,3].map(i=>`<div style="aspect-ratio:1; overflow:hidden; border-radius:14px; background:${b.images[i]?'#000':fallbackGradient};">${b.images[i]?`<img src="${b.images[i]}" style="width:100%; height:100%; object-fit:cover; display:block;">`:''}</div>`).join('')}
+          ${[0,1,2,3].map(i=>{
+            const cellNav = gridLinkNavJs(links[i]);
+            const autoCell = (!b.images[i] && links[i]==='superoferta') ? superOfertaCellHtml() : null;
+            const cellBg = b.images[i] ? '#000' : (autoCell ? 'transparent' : fallbackGradient);
+            const inner = b.images[i] ? `<img src="${b.images[i]}" style="width:100%; height:100%; object-fit:cover; display:block;">` : (autoCell || '');
+            return `<div ${cellNav?`onclick="${cellNav}"`:''} style="${cellNav?'cursor:pointer; ':''}aspect-ratio:1; overflow:hidden; border-radius:14px; background:${cellBg};">${inner}</div>`;
+          }).join('')}
         </div>
       </div>
     `;
@@ -2511,7 +2559,7 @@ function renderHome(){
     ${state.banners && state.banners.length>0 ? `
       <div style="display:flex; gap:12px; overflow-x:auto; padding:0 16px 16px; scroll-snap-type:x mandatory;">
         ${state.banners.map(b=>`
-          <div onclick="${b.section==='ofertas'?`nav('ofertas')`:b.section==='superoferta'?`nav('superoferta')`:b.section?`openSection('${b.section}')`:''}" style="flex:none; width:88%; scroll-snap-align:start; border-radius:16px; overflow:hidden; position:relative; background:${b.image?'#000':'linear-gradient(120deg, var(--gold2), var(--gold))'}; ${b.section?'cursor:pointer;':''}">
+          <div onclick="${bannerNavJs(b)}" style="flex:none; width:88%; scroll-snap-align:start; border-radius:16px; overflow:hidden; position:relative; background:${b.image?'#000':'linear-gradient(120deg, var(--gold2), var(--gold))'}; ${b.section?'cursor:pointer;':''}">
             ${b.image?`<img src="${b.image}" style="width:100%;display:block;">`:``}
             <div style="position:${b.image?'absolute':'relative'}; bottom:0; left:0; right:0; background:${b.image?'linear-gradient(transparent,rgba(0,0,0,0.6))':'none'}; padding:14px; ${b.image?'':'min-height:80px; display:flex; flex-direction:column; justify-content:flex-end;'}">
               <h3 style="color:${b.image?'#fff':'var(--navy)'}; font-size:16px; margin-bottom:2px;">${b.title||''}</h3>
@@ -2605,7 +2653,7 @@ function renderCatalog(section){
   <div class="screen candy-catalog">
     <div class="topbar">
       <button class="back" onclick="nav('home')">${ic('chevron')}</button>
-      <h2>${meta.label}</h2>
+      <h2>${state.route.cat || meta.label}</h2>
       <img src="${LOGO_DATA_URL}" class="logo-mini" alt="">
     </div>
     <div class="search-wrap">
@@ -10349,7 +10397,7 @@ function renderBannersList(){
       <img src="${b.image||''}" onerror="this.style.opacity=0" style="background:${b.image?'none':'var(--gold)'};">
       <div class="prod-row-body">
         <h4>${b.title||'(sin título)'}</h4>
-        <p>${b.subtitle||''}${b.section?` · Enlaza a ${b.section==='ofertas'?'🔥 Ofertas':b.section==='superoferta'?'🔥 Súper Oferta':(SECTION_META[b.section]?.label||b.section)}`:''}</p>
+        <p>${b.subtitle||''}${b.section?` · Enlaza a ${bannerTargetLabel(b)}`:''}</p>
       </div>
       <div class="prod-row-actions">
         <button class="icon-btn" onclick="openBannerModal(${idx})">${ic('edit')}</button>
@@ -10420,10 +10468,10 @@ function renderOfertasList(){
     </div>
   `).join('');
 }
-let bannerDraft = { image:"", title:"", subtitle:"", section:"" };
+let bannerDraft = { image:"", title:"", subtitle:"", section:"", cat:"" };
 function openBannerModal(idx){
   const b = idx!==null ? state.banners[idx] : null;
-  bannerDraft = b ? Object.assign({}, b) : { image:"", title:"", subtitle:"", section:"" };
+  bannerDraft = b ? Object.assign({cat:""}, b) : { image:"", title:"", subtitle:"", section:"", cat:"" };
   const overlay = document.createElement("div");
   overlay.className = "modal-overlay";
   overlay.id = "banner-modal-overlay";
@@ -10451,12 +10499,15 @@ function renderBannerModalContent(idx){
       <div class="form-group"><label>Título</label><input id="bn-title" value="${bannerDraft.title}" placeholder="Ej: 2x1 en chocolates"></div>
       <div class="form-group"><label>Subtítulo (opcional)</label><input id="bn-subtitle" value="${bannerDraft.subtitle}" placeholder="Ej: Solo este finde"></div>
       <div class="form-group"><label>Al tocarlo, llevar a (opcional)</label>
-        <select id="bn-section">
+        <select id="bn-section" onchange="onBannerSectionChange()">
           <option value="">Sin enlace</option>
           <option value="ofertas" ${bannerDraft.section==='ofertas'?'selected':''}>🔥 Ofertas (todos los productos con descuento)</option>
           <option value="superoferta" ${bannerDraft.section==='superoferta'?'selected':''}>🔥 Súper Oferta (precios fijos elegidos a mano)</option>
           ${Object.keys(SECTION_META).map(k=>`<option value="${k}" ${bannerDraft.section===k?'selected':''}>${SECTION_META[k].label}</option>`).join('')}
         </select>
+      </div>
+      <div class="form-group" id="bn-cat-group" style="display:${SECTION_META[bannerDraft.section]?'block':'none'};"><label>Categoría dentro de esa sección (opcional)</label>
+        <select id="bn-cat">${renderBannerCatOptions(bannerDraft.section, bannerDraft.cat)}</select>
       </div>
       <div style="display:flex; gap:10px;">
         <button class="btn-secondary" style="flex:1;" onclick="closeBannerModal()">Cancelar</button>
@@ -10464,6 +10515,22 @@ function renderBannerModalContent(idx){
       </div>
     </div>
   `;
+}
+function renderBannerCatOptions(section, selectedCat){
+  const cats = Object.keys(state.categories[section]||{}).sort((a,b)=>a.localeCompare(b,'es'));
+  return `<option value="">Toda la sección</option>${cats.map(c=>`<option value="${c}" ${selectedCat===c?'selected':''}>${c}</option>`).join('')}`;
+}
+function onBannerSectionChange(){
+  const section = document.getElementById("bn-section").value;
+  const group = document.getElementById("bn-cat-group");
+  const catSelect = document.getElementById("bn-cat");
+  if(SECTION_META[section]){
+    group.style.display = 'block';
+    catSelect.innerHTML = renderBannerCatOptions(section, '');
+  }else{
+    group.style.display = 'none';
+    catSelect.innerHTML = '';
+  }
 }
 function onBannerPhotoSelected(event){
   const file = event.target.files[0];
@@ -10484,6 +10551,7 @@ function saveBannerModal(idx){
   bannerDraft.title = document.getElementById("bn-title").value.trim();
   bannerDraft.subtitle = document.getElementById("bn-subtitle").value.trim();
   bannerDraft.section = document.getElementById("bn-section").value;
+  bannerDraft.cat = SECTION_META[bannerDraft.section] ? (document.getElementById("bn-cat").value||'') : '';
   if(!bannerDraft.title && !bannerDraft.image){ toast("Agregá al menos un título o una imagen", "err"); return; }
   if(idx!==null && idx!==undefined && state.banners[idx]){
     state.banners[idx] = Object.assign({}, bannerDraft);
@@ -10598,7 +10666,32 @@ let sectionBannerType = 'novedad';
 function normalizeSectionBannerDraft(existing){
   const imgs = (existing && Array.isArray(existing.images)) ? existing.images.slice(0,4) : [];
   while(imgs.length<4) imgs.push("");
-  return Object.assign({ image:"", video:"", title:"", subtitle:"", active:true, layout:'single' }, existing||{}, { images: imgs });
+  const links = (existing && Array.isArray(existing.links)) ? existing.links.slice(0,4) : [];
+  while(links.length<4) links.push("");
+  return Object.assign({ image:"", video:"", title:"", subtitle:"", active:true, layout:'single' }, existing||{}, { images: imgs, links });
+}
+// Enlace de una foto individual dentro de una grilla de 4 (o de un banner
+// del carrusel): "" = sin enlace, "ofertas"/"superoferta" = pantallas fijas,
+// "seccion" = toda la sección, "seccion:categoria" = solo esa categoría.
+function renderGridLinkOptions(selected){
+  let opts = `<option value="">Sin enlace</option>`;
+  opts += `<option value="ofertas" ${selected==='ofertas'?'selected':''}>🔥 Ofertas</option>`;
+  opts += `<option value="superoferta" ${selected==='superoferta'?'selected':''}>🔥 Súper Oferta</option>`;
+  Object.keys(SECTION_META).forEach(sec=>{
+    opts += `<option value="${sec}" ${selected===sec?'selected':''}>${SECTION_META[sec].label} (toda la sección)</option>`;
+    Object.keys(state.categories[sec]||{}).sort((a,b)=>a.localeCompare(b,'es')).forEach(cat=>{
+      const val = `${sec}:${cat}`;
+      opts += `<option value="${val}" ${selected===val?'selected':''}>${SECTION_META[sec].label} → ${cat}</option>`;
+    });
+  });
+  return opts;
+}
+function gridLinkNavJs(target){
+  if(!target) return '';
+  if(target==='ofertas') return "nav('ofertas')";
+  if(target==='superoferta') return "nav('superoferta')";
+  const parts = target.split(':');
+  return parts[1] ? `nav('catalog',{section:'${parts[0]}',cat:'${parts[1]}'})` : `openSection('${parts[0]}')`;
 }
 function openSectionBannerModal(type){
   sectionBannerType = type;
@@ -10628,12 +10721,16 @@ function renderSectionBannerModalHTML(type){
         <button type="button" class="btn-secondary" style="flex:1; font-size:12.5px; ${isGrid?'background:var(--gold); color:var(--navy); font-weight:700; border-color:transparent;':''}" onclick="setSectionBannerLayout('grid4')">Grilla de 4 fotos</button>
       </div>
       ${isGrid ? `
-      <div style="display:grid; grid-template-columns:1fr 1fr; gap:8px; margin-bottom:10px;">
+      <div style="display:grid; grid-template-columns:1fr 1fr; gap:8px 8px; margin-bottom:10px;">
         ${[0,1,2,3].map(i=>`
-          <div class="photo-upload-box" style="aspect-ratio:1;">
-            ${d.images[i] ? `<img src="${d.images[i]}" style="position:absolute; inset:0; width:100%; height:100%; object-fit:cover;">` : `${ic('upload')}<span>Foto ${i+1}</span>`}
-            <input type="file" accept="image/*" onchange="onSectionBannerGridPhotoSelected(event, ${i})">
-            ${d.images[i] ? `<button type="button" onclick="removeSectionBannerGridPhoto(${i})" style="position:absolute; top:4px; right:4px; width:20px; height:20px; border-radius:50%; background:rgba(0,0,0,0.65); color:#fff; border:none; font-size:11px; z-index:2;">✕</button>` : ''}
+          <div>
+            <div class="photo-upload-box" style="aspect-ratio:1;">
+              ${d.images[i] ? `<img src="${d.images[i]}" style="position:absolute; inset:0; width:100%; height:100%; object-fit:cover;">` : `${ic('upload')}<span>Foto ${i+1}</span>`}
+              <input type="file" accept="image/*" onchange="onSectionBannerGridPhotoSelected(event, ${i})">
+              ${d.images[i] ? `<button type="button" onclick="removeSectionBannerGridPhoto(${i})" style="position:absolute; top:4px; right:4px; width:20px; height:20px; border-radius:50%; background:rgba(0,0,0,0.65); color:#fff; border:none; font-size:11px; z-index:2;">✕</button>` : ''}
+            </div>
+            <select onchange="sectionBannerDraft.links[${i}]=this.value; document.getElementById('sb-superhint-${i}').style.display=(this.value==='superoferta'&&!sectionBannerDraft.images[${i}])?'block':'none';" style="width:100%; margin-top:4px; padding:6px 8px; border-radius:8px; background:var(--glass); border:1px solid var(--glass-bd); color:var(--cream); font-size:11px;">${renderGridLinkOptions(d.links[i])}</select>
+            <p id="sb-superhint-${i}" style="display:${(d.links[i]==='superoferta'&&!d.images[i])?'block':'none'}; font-size:10px; color:var(--gold2); margin-top:3px; line-height:1.3;">Sin foto = se arma solo un diseño de Súper Oferta</p>
           </div>
         `).join('')}
       </div>
@@ -10687,7 +10784,7 @@ function previewSectionBanner(type){
   const subtitle = (document.getElementById("sb-subtitle")||{}).value || "";
   const draftBanner = {
     image: d.image||"", images: d.images||["","","",""], video: d.video||"",
-    layout: d.layout==='grid4'?'grid4':'single', title, subtitle, active: true,
+    layout: d.layout==='grid4'?'grid4':'single', title, subtitle, active: true, links: d.links||["","","",""],
   };
   const fallbackGradient = type==='novedad' ? 'linear-gradient(120deg,#1a3a6e,#0f1c45)' : 'linear-gradient(120deg,var(--gold2),var(--gold))';
   const overlay = document.createElement("div");
@@ -10790,7 +10887,8 @@ async function saveSectionBannerModal(type){
       catch(pe){ toast('Video no se pudo subir: '+pe.message,'err'); }
     }
   }
-  const banner = { image, images, video, layout, title, subtitle, active };
+  const links = layout==='grid4' ? sectionBannerDraft.links.slice(0,4) : ["","","",""];
+  const banner = { image, images, video, layout, title, subtitle, active, links };
   if(type==='novedad'){ state.bannerNovedades = banner; }
   else{ state.bannerOfertas = banner; }
   saveState();
