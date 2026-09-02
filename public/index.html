@@ -10500,10 +10500,10 @@ function renderBannerModalContent(idx){
       <div class="form-group"><label>Subtítulo (opcional)</label><input id="bn-subtitle" value="${bannerDraft.subtitle}" placeholder="Ej: Solo este finde"></div>
       <div class="form-group"><label>Al tocarlo, llevar a (opcional)</label>
         <select id="bn-section" onchange="onBannerSectionChange()">
-          <option value="">Sin enlace</option>
-          <option value="ofertas" ${bannerDraft.section==='ofertas'?'selected':''}>🔥 Ofertas (todos los productos con descuento)</option>
-          <option value="superoferta" ${bannerDraft.section==='superoferta'?'selected':''}>🔥 Súper Oferta (precios fijos elegidos a mano)</option>
-          ${Object.keys(SECTION_META).map(k=>`<option value="${k}" ${bannerDraft.section===k?'selected':''}>${SECTION_META[k].label}</option>`).join('')}
+          <option value="" style="background:var(--navy2); color:var(--white);">Sin enlace</option>
+          <option value="ofertas" style="background:var(--navy2); color:var(--white);" ${bannerDraft.section==='ofertas'?'selected':''}>🔥 Ofertas (todos los productos con descuento)</option>
+          <option value="superoferta" style="background:var(--navy2); color:var(--white);" ${bannerDraft.section==='superoferta'?'selected':''}>🔥 Súper Oferta (precios fijos elegidos a mano)</option>
+          ${Object.keys(SECTION_META).map(k=>`<option value="${k}" style="background:var(--navy2); color:var(--white);" ${bannerDraft.section===k?'selected':''}>${SECTION_META[k].label}</option>`).join('')}
         </select>
       </div>
       <div class="form-group" id="bn-cat-group" style="display:${SECTION_META[bannerDraft.section]?'block':'none'};"><label>Categoría dentro de esa sección (opcional)</label>
@@ -10518,7 +10518,8 @@ function renderBannerModalContent(idx){
 }
 function renderBannerCatOptions(section, selectedCat){
   const cats = Object.keys(state.categories[section]||{}).sort((a,b)=>a.localeCompare(b,'es'));
-  return `<option value="">Toda la sección</option>${cats.map(c=>`<option value="${c}" ${selectedCat===c?'selected':''}>${c}</option>`).join('')}`;
+  const os = 'background:var(--navy2); color:var(--white);';
+  return `<option value="" style="${os}">Toda la sección</option>${cats.map(c=>`<option value="${c}" style="${os}" ${selectedCat===c?'selected':''}>${c}</option>`).join('')}`;
 }
 function onBannerSectionChange(){
   const section = document.getElementById("bn-section").value;
@@ -10674,14 +10675,15 @@ function normalizeSectionBannerDraft(existing){
 // del carrusel): "" = sin enlace, "ofertas"/"superoferta" = pantallas fijas,
 // "seccion" = toda la sección, "seccion:categoria" = solo esa categoría.
 function renderGridLinkOptions(selected){
-  let opts = `<option value="">Sin enlace</option>`;
-  opts += `<option value="ofertas" ${selected==='ofertas'?'selected':''}>🔥 Ofertas</option>`;
-  opts += `<option value="superoferta" ${selected==='superoferta'?'selected':''}>🔥 Súper Oferta</option>`;
+  const os = 'background:var(--navy2); color:var(--white);';
+  let opts = `<option value="" style="${os}">Sin enlace</option>`;
+  opts += `<option value="ofertas" style="${os}" ${selected==='ofertas'?'selected':''}>🔥 Ofertas</option>`;
+  opts += `<option value="superoferta" style="${os}" ${selected==='superoferta'?'selected':''}>🔥 Súper Oferta</option>`;
   Object.keys(SECTION_META).forEach(sec=>{
-    opts += `<option value="${sec}" ${selected===sec?'selected':''}>${SECTION_META[sec].label} (toda la sección)</option>`;
+    opts += `<option value="${sec}" style="${os}" ${selected===sec?'selected':''}>${SECTION_META[sec].label} (toda la sección)</option>`;
     Object.keys(state.categories[sec]||{}).sort((a,b)=>a.localeCompare(b,'es')).forEach(cat=>{
       const val = `${sec}:${cat}`;
-      opts += `<option value="${val}" ${selected===val?'selected':''}>${SECTION_META[sec].label} → ${cat}</option>`;
+      opts += `<option value="${val}" style="${os}" ${selected===val?'selected':''}>${SECTION_META[sec].label} → ${cat}</option>`;
     });
   });
   return opts;
