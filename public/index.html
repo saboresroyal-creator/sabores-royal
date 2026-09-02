@@ -6990,8 +6990,12 @@ function shareOrder(orderId){
 /* ---------- ADMIN: PRODUCTOS ---------- */
 function renderAdminProductos(){
   const q = (state.adminProductQ||'').toLowerCase().trim();
-  let productos = q
-    ? state.products.filter(p=>p.name.toLowerCase().includes(q))
+  const qWords = normText(q).split(/\s+/).filter(Boolean);
+  let productos = qWords.length
+    ? state.products.filter(p=>{
+        const hay = normText(`${p.name} ${p.cat||''} ${p.sub||''}`);
+        return qWords.every(w=>hay.includes(w));
+      })
     : state.products;
   if(state.adminProductLowStockOnly) productos = productos.filter(isLowStock);
   if(state.adminProductHiddenOnly) productos = productos.filter(p=>p.hidden);
