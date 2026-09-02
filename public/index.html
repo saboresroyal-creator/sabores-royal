@@ -698,6 +698,12 @@ function renderCeliaco(){
 /* ---------- SECTION META ---------- */
 const LOW_STOCK_THRESHOLD = 5;
 function isLowStock(p){ return !p.sellByWeight && p.stock<=LOW_STOCK_THRESHOLD; }
+// p.photo queda como data: (el blob local) cuando apiSaveProduct no logró
+// subirla al servidor — se ve bien en ESTE navegador (es la foto tal cual
+// se sacó) pero nunca llegó a Supabase, así que en la app de clientes no
+// aparece. Sirve para detectar esos casos sin tener que abrir cada
+// producto a mano a revisar.
+function photoPendingUpload(p){ return !!(p.photo && p.photo.startsWith('data:')); }
 function productCategoriesInUse(){
   return [...new Set(state.products.map(p=>p.cat).filter(Boolean))].sort((a,b)=>a.localeCompare(b,'es'));
 }
@@ -775,6 +781,7 @@ let state = {
   adminProductLowStockOnly: false,
   adminProductHiddenOnly: false,
   adminProductSuperOfferOnly: false,
+  adminProductPhotoPendingOnly: false,
   adminProductCatFilter: null,
   adminProductSubFilter: null,
   config:{storeName:"Sabores Royal", address:"Maipú 734, Rosario", waNumber:WA_NUMBER},
@@ -1389,7 +1396,7 @@ async function apiSaveProduct(product){
         photoUrl = await uploadProductPhoto(originalDataUrl, product._apiId||product.id);
         product.photo = photoUrl;
         saveState();
-      }catch(pe){ console.warn('No se pudo subir foto:', pe); toast('La foto no se pudo subir: '+pe.message, 'err'); }
+      }catch(pe){ console.warn('No se pudo subir foto:', pe); toast('El producto se guardó SIN la foto (no se pudo subir) — los clientes no la ven todavía. Volvé a intentarlo desde Productos.', 'err'); }
       // Miniatura aparte (300px) para tarjetas de catálogo/carrito/listas —
       // la foto completa (900px) solo hace falta en el detalle del producto.
       if(photoUrl){
@@ -3742,6 +3749,7 @@ function renderAdmin(){
   const noBarcodeCount = state.products.filter(p=>!p.barcode).length;
   const hiddenCount = state.products.filter(p=>p.hidden).length;
   const superOfferCount = state.products.filter(p=>p.superOffer).length;
+  const photoPendingCount = state.products.filter(p=>photoPendingUpload(p)).length;
   const pendingOrdersCount = state.orders.filter(o=>o.status==="Pendiente"||o.status==="Revision").length;
   const bankLoansDueSoon = bankLoansDueSoonCount(7);
   const newClientsCount = Object.values(state.clients).filter(c=>!c.seen).length;
@@ -3821,6 +3829,11 @@ function renderAdmin(){
             <button class="chip ${state.adminProductSuperOfferOnly?'active':''}" style="${state.adminProductSuperOfferOnly?'':'color:var(--gold2); border-color:var(--gold2);'}"
               onclick="state.adminProductSuperOfferOnly=!state.adminProductSuperOfferOnly; render()">
               🔥 Súper Oferta (${superOfferCount})
+            </button>` : ''}
+            ${photoPendingCount>0 ? `
+            <button class="chip ${state.adminProductPhotoPendingOnly?'active':''}" style="${state.adminProductPhotoPendingOnly?'':'color:var(--danger); border-color:var(--danger);'}"
+              onclick="state.adminProductPhotoPendingOnly=!state.adminProductPhotoPendingOnly; render()">
+              📷 Foto sin subir (${photoPendingCount})
             </button>` : ''}
           </div>
         </div>
@@ -6956,17 +6969,18 @@ function renderAdminProductos(){
   if(state.adminProductLowStockOnly) productos = productos.filter(isLowStock);
   if(state.adminProductHiddenOnly) productos = productos.filter(p=>p.hidden);
   if(state.adminProductSuperOfferOnly) productos = productos.filter(p=>p.superOffer);
+  if(state.adminProductPhotoPendingOnly) productos = productos.filter(photoPendingUpload);
   if(state.adminProductCatFilter) productos = productos.filter(p=>p.cat===state.adminProductCatFilter);
   if(state.adminProductSubFilter) productos = productos.filter(p=>p.sub===state.adminProductSubFilter);
   if(productos.length===0){
-    return `<div class="empty-state">${ic('box')}<p>${state.adminProductLowStockOnly?'Ningún producto con stock bajo.':state.adminProductHiddenOnly?'Ningún producto oculto.':state.adminProductSuperOfferOnly?'Ningún producto en Súper Oferta.':(q?`Sin resultados para "${q}"`:'No hay productos que coincidan con el filtro.')}</p></div>`;
+    return `<div class="empty-state">${ic('box')}<p>${state.adminProductLowStockOnly?'Ningún producto con stock bajo.':state.adminProductHiddenOnly?'Ningún producto oculto.':state.adminProductSuperOfferOnly?'Ningún producto en Súper Oferta.':state.adminProductPhotoPendingOnly?'Ninguna foto pendiente de subir.':(q?`Sin resultados para "${q}"`:'No hay productos que coincidan con el filtro.')}</p></div>`;
   }
   return productos.map(p=>`
     <div class="prod-row-v2 ${p.hidden?'is-hidden':''}">
       <div class="prod-row-v2-top">
         <img src="${p.photoThumb||p.photo||''}" loading="lazy" onerror="this.style.opacity=0">
         <div class="prod-row-v2-info">
-          <h4>${p.name}${p.sellByWeight?' <span style="font-size:9px; color:#6db8e8;">(x kg)</span>':''}${p.hidden?' <span class="badge-oculto">OCULTO</span>':''}${p.superOffer?' <span style="font-size:9px; font-weight:800; color:#c62222; background:linear-gradient(135deg,#ffe066,#ffd400); border-radius:5px; padding:2px 6px; vertical-align:middle;">🔥 SÚPER OFERTA</span>':''}</h4>
+          <h4>${p.name}${p.sellByWeight?' <span style="font-size:9px; color:#6db8e8;">(x kg)</span>':''}${p.hidden?' <span class="badge-oculto">OCULTO</span>':''}${p.superOffer?' <span style="font-size:9px; font-weight:800; color:#c62222; background:linear-gradient(135deg,#ffe066,#ffd400); border-radius:5px; padding:2px 6px; vertical-align:middle;">🔥 SÚPER OFERTA</span>':''}${photoPendingUpload(p)?' <span style="font-size:9px; font-weight:800; color:#fff; background:var(--danger); border-radius:5px; padding:2px 6px; vertical-align:middle;">📷 FOTO SIN SUBIR</span>':''}</h4>
           <p>Stock: ${p.stock} · ${SECTION_META[p.section]?.label||p.section}${p.sub?` · ${p.sub}`:''} ${isLowStock(p)?`<span style="color:${p.stock===0?'var(--danger)':'var(--warn)'}; font-weight:700;">· ${p.stock===0?'Sin stock':'Stock bajo'}</span>`:''}</p>
         </div>
       </div>
@@ -6988,6 +7002,7 @@ function renderAdminProductos(){
           `}
         </div>
         <div class="prod-row-actions">
+          ${photoPendingUpload(p) ? `<button class="icon-btn" style="color:var(--danger); border-color:var(--danger);" title="Reintentar subir la foto" onclick="retryProductPhotoUpload('${p.id}')">📷↻</button>` : ''}
           <button class="icon-btn" style="font-size:14px; ${p.hidden?'color:var(--danger); border-color:var(--danger);':''}" title="${p.hidden?'Oculto — tocá para mostrarlo a los clientes':'Visible — tocá para ocultarlo de los clientes'}" onclick="toggleProductHidden('${p.id}')">${p.hidden?'🙈':'👁️'}</button>
           <button class="icon-btn" style="${p.barcode?'':'color:var(--warn); border-color:var(--warn);'}" title="${p.barcode?'Código: '+p.barcode:'Sin código de barras'}" onclick="openBarcodeScannerModal(code=>updateProductBarcode('${p.id}', code))">${ic('camera')}</button>
           <button class="icon-btn" onclick="openProductModal('${p.id}')">${ic('edit')}</button>
@@ -7005,6 +7020,17 @@ function toggleProductHidden(id){
   apiSaveProduct(p);
   renderAdminProductosInPlace();
   toast(p.hidden ? "Producto oculto para los clientes" : "Producto visible para los clientes", "ok");
+}
+// p.photo ya tiene el blob local (ver photoPendingUpload) — no hace falta
+// volver a elegir la foto, alcanza con reintentar el guardado para que
+// apiSaveProduct la suba de nuevo.
+async function retryProductPhotoUpload(id){
+  const p = state.products.find(pr=>pr.id===id);
+  if(!p) return;
+  toast("Reintentando subir la foto…", "ok");
+  await apiSaveProduct(p);
+  renderAdminProductosInPlace();
+  if(!photoPendingUpload(p)) toast("Foto subida correctamente", "ok");
 }
 function renderAdminProductosInPlace(){
   const el = document.getElementById('admin-productos-list');
