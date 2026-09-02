@@ -749,6 +749,7 @@ let state = {
   adminTab: "pedidos",
   adminProductLowStockOnly: false,
   adminProductHiddenOnly: false,
+  adminProductSuperOfferOnly: false,
   adminProductCatFilter: null,
   adminProductSubFilter: null,
   config:{storeName:"Sabores Royal", address:"Maipú 734, Rosario", waNumber:WA_NUMBER},
@@ -2335,7 +2336,10 @@ function renderMayoristaSignup(){
       <img src="${CROWN_DATA_URL}" style="width:64px; margin-bottom:18px;">
       <h2 style="color:var(--white); font-size:22px; font-weight:800; margin-bottom:8px;">Ya estás viendo precios mayoristas</h2>
       <p style="color:rgba(255,255,255,0.5); font-size:14px; margin-bottom:26px; max-width:320px;">Entrá al catálogo, los precios mayoristas ya están aplicados. Solo te vamos a pedir tus datos al confirmar una compra.</p>
-      <button class="btn-primary" style="padding:16px 28px; font-size:15px; border-radius:18px;" onclick="nav('catalog')">Ver catálogo</button>
+      <div style="width:100%; max-width:320px; display:flex; flex-direction:column; gap:14px;">
+        <button class="btn-primary" style="padding:16px; font-size:15px; border-radius:18px;" onclick="nav('catalog')">Ver catálogo</button>
+        ${client && client.wholesale ? '' : `<button class="btn-secondary" style="font-size:13px; border-radius:18px;" onclick="exitWholesaleViewing()">Volver a precios de cliente</button>`}
+      </div>
     </div>`;
   }
   return `
@@ -2348,6 +2352,12 @@ function renderMayoristaSignup(){
       <button class="btn-secondary" style="font-size:13px; border-radius:18px;" onclick="nav('home')">Volver</button>
     </div>
   </div>`;
+}
+function exitWholesaleViewing(){
+  state.viewingWholesale = false;
+  saveState();
+  toast('Volviste a precios de cliente', 'ok');
+  nav('home');
 }
 
 /* ---------- HOME ---------- */
@@ -2395,7 +2405,7 @@ function renderHome(){
       <img src="${LOGO_DATA_URL}" class="home-logo" alt="Sabores Royal">
       <h1>Sabores Royal</h1>
       <p>Maipú 734 · Rosario</p>
-      ${(()=>{ const cl = state.currentClientPhone ? state.clients[state.currentClientPhone] : null; if(cl && cl.wholesale) return `<div class="wholesale-badge"><img src="${CROWN_DATA_URL}"> Cliente Mayorista</div>`; if(state.viewingWholesale) return `<div class="wholesale-badge"><img src="${CROWN_DATA_URL}"> Viendo precios mayoristas</div>`; return ''; })()}
+      ${(()=>{ const cl = state.currentClientPhone ? state.clients[state.currentClientPhone] : null; if(cl && cl.wholesale) return `<div class="wholesale-badge"><img src="${CROWN_DATA_URL}"> Cliente Mayorista</div>`; if(state.viewingWholesale) return `<div class="wholesale-badge" style="cursor:pointer; padding:9px 20px;" onclick="exitWholesaleViewing()" title="Tocá para volver a precios de cliente"><img src="${CROWN_DATA_URL}"> Viendo precios mayoristas ✕</div>`; return ''; })()}
     </div>
     ${state.banners && state.banners.length>0 ? `
       <div style="display:flex; gap:12px; overflow-x:auto; padding:0 16px 16px; scroll-snap-type:x mandatory;">
@@ -3521,6 +3531,7 @@ function renderAdmin(){
   const lowStockCount = state.products.filter(isLowStock).length;
   const noBarcodeCount = state.products.filter(p=>!p.barcode).length;
   const hiddenCount = state.products.filter(p=>p.hidden).length;
+  const superOfferCount = state.products.filter(p=>p.superOffer).length;
   const pendingOrdersCount = state.orders.filter(o=>o.status==="Pendiente"||o.status==="Revision").length;
   const bankLoansDueSoon = bankLoansDueSoonCount(7);
   const newClientsCount = Object.values(state.clients).filter(c=>!c.seen).length;
@@ -3595,6 +3606,11 @@ function renderAdmin(){
             <button class="chip ${state.adminProductHiddenOnly?'active':''}" style="${state.adminProductHiddenOnly?'':'color:var(--danger); border-color:var(--danger);'}"
               onclick="state.adminProductHiddenOnly=!state.adminProductHiddenOnly; render()">
               🙈 Ocultos (${hiddenCount})
+            </button>` : ''}
+            ${superOfferCount>0 ? `
+            <button class="chip ${state.adminProductSuperOfferOnly?'active':''}" style="${state.adminProductSuperOfferOnly?'':'color:var(--gold2); border-color:var(--gold2);'}"
+              onclick="state.adminProductSuperOfferOnly=!state.adminProductSuperOfferOnly; render()">
+              🔥 Súper Oferta (${superOfferCount})
             </button>` : ''}
           </div>
         </div>
@@ -6729,17 +6745,18 @@ function renderAdminProductos(){
     : state.products;
   if(state.adminProductLowStockOnly) productos = productos.filter(isLowStock);
   if(state.adminProductHiddenOnly) productos = productos.filter(p=>p.hidden);
+  if(state.adminProductSuperOfferOnly) productos = productos.filter(p=>p.superOffer);
   if(state.adminProductCatFilter) productos = productos.filter(p=>p.cat===state.adminProductCatFilter);
   if(state.adminProductSubFilter) productos = productos.filter(p=>p.sub===state.adminProductSubFilter);
   if(productos.length===0){
-    return `<div class="empty-state">${ic('box')}<p>${state.adminProductLowStockOnly?'Ningún producto con stock bajo.':state.adminProductHiddenOnly?'Ningún producto oculto.':(q?`Sin resultados para "${q}"`:'No hay productos que coincidan con el filtro.')}</p></div>`;
+    return `<div class="empty-state">${ic('box')}<p>${state.adminProductLowStockOnly?'Ningún producto con stock bajo.':state.adminProductHiddenOnly?'Ningún producto oculto.':state.adminProductSuperOfferOnly?'Ningún producto en Súper Oferta.':(q?`Sin resultados para "${q}"`:'No hay productos que coincidan con el filtro.')}</p></div>`;
   }
   return productos.map(p=>`
     <div class="prod-row-v2 ${p.hidden?'is-hidden':''}">
       <div class="prod-row-v2-top">
         <img src="${p.photoThumb||p.photo||''}" loading="lazy" onerror="this.style.opacity=0">
         <div class="prod-row-v2-info">
-          <h4>${p.name}${p.sellByWeight?' <span style="font-size:9px; color:#6db8e8;">(x kg)</span>':''}${p.hidden?' <span class="badge-oculto">OCULTO</span>':''}</h4>
+          <h4>${p.name}${p.sellByWeight?' <span style="font-size:9px; color:#6db8e8;">(x kg)</span>':''}${p.hidden?' <span class="badge-oculto">OCULTO</span>':''}${p.superOffer?' <span style="font-size:9px; font-weight:800; color:#c62222; background:linear-gradient(135deg,#ffe066,#ffd400); border-radius:5px; padding:2px 6px; vertical-align:middle;">🔥 SÚPER OFERTA</span>':''}</h4>
           <p>Stock: ${p.stock} · ${SECTION_META[p.section]?.label||p.section}${p.sub?` · ${p.sub}`:''} ${isLowStock(p)?`<span style="color:${p.stock===0?'var(--danger)':'var(--warn)'}; font-weight:700;">· ${p.stock===0?'Sin stock':'Stock bajo'}</span>`:''}</p>
         </div>
       </div>
