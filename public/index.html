@@ -2361,17 +2361,19 @@ function exitWholesaleViewing(){
 }
 
 /* ---------- HOME ---------- */
-function renderSectionBannerHTML(b, fallbackGradient){
+function renderSectionBannerHTML(b, fallbackGradient, navTarget){
   if(!b || !b.active) return '';
+  const clickAttr = navTarget ? ` onclick="${navTarget}"` : '';
+  const clickCursor = navTarget ? 'cursor:pointer;' : '';
   const isGrid = b.layout==='grid4' && Array.isArray(b.images) && b.images.some(x=>x);
   if(isGrid){
     return `
-      <div style="margin:0 16px 14px; border-radius:16px; overflow:hidden; position:relative; background:#000;">
-        <div style="display:grid; grid-template-columns:1fr 1fr; gap:2px;">
-          ${[0,1,2,3].map(i=>`<div style="aspect-ratio:1; overflow:hidden; background:${b.images[i]?'#000':fallbackGradient};">${b.images[i]?`<img src="${b.images[i]}" style="width:100%; height:100%; object-fit:cover; display:block;">`:''}</div>`).join('')}
+      <div style="margin:0 16px 14px; position:relative; ${clickCursor}"${clickAttr}>
+        <div style="display:grid; grid-template-columns:1fr 1fr; gap:10px;">
+          ${[0,1,2,3].map(i=>`<div style="aspect-ratio:1; overflow:hidden; border-radius:14px; background:${b.images[i]?'#000':fallbackGradient};">${b.images[i]?`<img src="${b.images[i]}" style="width:100%; height:100%; object-fit:cover; display:block;">`:''}</div>`).join('')}
         </div>
         ${(b.title||b.subtitle) ? `
-        <div style="position:absolute; bottom:0; left:0; right:0; background:linear-gradient(transparent,rgba(0,0,0,0.65)); padding:16px;">
+        <div style="position:absolute; bottom:10px; left:10px; right:10px; background:linear-gradient(transparent,rgba(0,0,0,0.65)); padding:16px; border-radius:0 0 14px 14px; pointer-events:none;">
           ${b.title?`<h3 style="color:#fff; font-size:17px; font-weight:700; margin-bottom:3px;">${b.title}</h3>`:''}
           ${b.subtitle?`<p style="color:rgba(255,255,255,0.85); font-size:12.5px;">${b.subtitle}</p>`:''}
         </div>` : ''}
@@ -2380,7 +2382,7 @@ function renderSectionBannerHTML(b, fallbackGradient){
   }
   const hasMedia = !!(b.video || b.image);
   return `
-    <div style="margin:0 16px 14px; border-radius:16px; overflow:hidden; position:relative; background:${hasMedia?'#000':fallbackGradient};">
+    <div style="margin:0 16px 14px; border-radius:16px; overflow:hidden; position:relative; background:${hasMedia?'#000':fallbackGradient}; ${clickCursor}"${clickAttr}>
       ${b.video?`<video src="${b.video}" style="width:100%;display:block;" autoplay muted loop playsinline ${b.image?`poster="${b.image}"`:''}></video>`:(b.image?`<img src="${b.image}" style="width:100%;display:block;">`:'')}
       <div style="position:${hasMedia?'absolute':'relative'}; bottom:0; left:0; right:0; background:${hasMedia?'linear-gradient(transparent,rgba(0,0,0,0.65))':'none'}; padding:16px; ${hasMedia?'':'min-height:80px;display:flex;flex-direction:column;justify-content:flex-end;'}">
         ${b.title?`<h3 style="color:#fff; font-size:17px; font-weight:700; margin-bottom:3px;">${b.title}</h3>`:''}
@@ -2435,7 +2437,7 @@ function renderHome(){
         `).join('')}
       </div>
     ` : ''}
-    ${renderSectionBannerHTML(state.bannerOfertas, 'linear-gradient(120deg,var(--gold2),var(--gold))')}
+    ${renderSectionBannerHTML(state.bannerOfertas, 'linear-gradient(120deg,var(--gold2),var(--gold))', "nav('ofertas')")}
     ${state.ofertas && state.ofertas.length>0 ? `
       <div class="home-sec-header"><span class="home-sec-label">Ofertas especiales</span></div>
       <div class="content-strip">
@@ -8052,8 +8054,33 @@ async function removePhotoBackgroundAI(){
 }
 
 /* ---------- ADMIN: CATEGORIAS ---------- */
+// Resumen de las ofertas por %/fecha (categoría o todo el catálogo) que
+// están activas ahora mismo — antes esto solo se veía un instante en el
+// toast al aplicarla y después no había forma de saber si seguía activa
+// sin entrar producto por producto. Excluye Súper Oferta (que ya tiene su
+// propio filtro en la lista de Productos) porque es un precio fijo aparte,
+// no una campaña por %.
+function renderActivePromoSummaryHtml(){
+  const promoted = state.products.filter(p=>!p.superOffer && activePromo(p)!==null);
+  if(promoted.length===0) return '';
+  const pctCounts = {};
+  let minUntil = null, maxUntil = null;
+  promoted.forEach(p=>{
+    const basePrice = p.sellByWeight ? p.pricePerKg : p.price;
+    const pct = Math.round((1-activePromo(p)/basePrice)*100);
+    pctCounts[pct] = (pctCounts[pct]||0)+1;
+    if(p.promoUntil){
+      if(!minUntil || p.promoUntil<minUntil) minUntil = p.promoUntil;
+      if(!maxUntil || p.promoUntil>maxUntil) maxUntil = p.promoUntil;
+    }
+  });
+  const commonPct = Object.keys(pctCounts).reduce((best,pct)=>pctCounts[pct]>pctCounts[best]?pct:best);
+  const untilLabel = minUntil ? (minUntil===maxUntil ? `hasta ${fmtDateAR(minUntil)}` : `hasta ${fmtDateAR(minUntil)}–${fmtDateAR(maxUntil)}`) : '';
+  return `<div style="margin:0 16px 10px; padding:10px 14px; border-radius:12px; background:rgba(255,212,0,0.12); border:1px solid rgba(255,212,0,0.35); font-size:12.5px; color:var(--gold2); font-weight:600;">🔥 Oferta activa ahora: ~${commonPct}% OFF en ${promoted.length} producto${promoted.length===1?'':'s'}${untilLabel?` · ${untilLabel}`:''}</div>`;
+}
 function renderAdminCategorias(){
   return `
+    ${renderActivePromoSummaryHtml()}
     <div style="padding:12px 16px 0; display:flex; flex-direction:column; gap:8px;">
       <button class="btn-primary" style="width:100%;" onclick="openGlobalPromoModal()">🏷️ Oferta para todo el catálogo</button>
       <button class="btn-secondary" style="width:100%;" onclick="openGlobalWholesaleModal()">💲 Ajustar % mayorista de todo el catálogo</button>
