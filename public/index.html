@@ -1849,15 +1849,18 @@ function superOfertaCellHtml(){
     if(pct>maxPct) maxPct = pct;
   });
   return `
-    <div style="width:100%; height:100%; position:relative; overflow:hidden; display:flex; flex-direction:column; align-items:center; justify-content:center; text-align:center; padding:10px; background:linear-gradient(150deg,#0f1c45 0%,#2a0a4a 50%,#7a0f42 100%);">
-      <div style="position:absolute; width:100px; height:100px; border-radius:50%; top:-30px; right:-30px; background:radial-gradient(circle,rgba(255,214,10,0.4),transparent 70%);"></div>
-      <div style="position:absolute; width:70px; height:70px; border-radius:50%; bottom:-20px; left:-20px; background:radial-gradient(circle,rgba(255,45,110,0.35),transparent 70%);"></div>
+    <div style="width:100%; height:100%; position:relative; overflow:hidden; display:flex; flex-direction:column; align-items:center; justify-content:center; text-align:center; padding:8px; background:radial-gradient(circle at 50% 32%, #7a2fd9 0%, #4a1494 45%, #1f0640 85%);">
+      <span style="position:absolute; top:9px; left:11px; color:#ffd60a; font-size:9px; transform:rotate(-20deg);">◆</span>
+      <span style="position:absolute; top:13px; right:13px; color:#ffd60a; font-size:7px;">◆</span>
+      <span style="position:absolute; bottom:9px; left:16px; color:#ffd60a; font-size:7px;">◆</span>
+      <span style="position:absolute; bottom:13px; right:11px; color:#ffd60a; font-size:9px; transform:rotate(15deg);">◆</span>
       <div style="position:relative; z-index:1; display:flex; flex-direction:column; align-items:center;">
-        <div style="width:22px; height:2px; background:var(--gold); margin-bottom:6px; border-radius:2px;"></div>
-        <h3 style="color:#fff; font-size:14.5px; font-weight:800; letter-spacing:.5px; line-height:1.2; text-shadow:0 2px 8px rgba(0,0,0,0.4); margin-bottom:8px;">SÚPER<br>OFERTA</h3>
-        <div style="display:inline-flex; align-items:baseline; gap:3px; background:rgba(255,255,255,0.14); backdrop-filter:blur(6px); -webkit-backdrop-filter:blur(6px); border:1px solid rgba(255,255,255,0.3); padding:4px 12px; border-radius:20px;">
-          <span style="font-size:14px; font-weight:900; color:var(--gold);">${maxPct}%</span><span style="font-size:9px; font-weight:700; color:#fff; letter-spacing:.5px;">OFF</span>
+        <div style="background:linear-gradient(160deg,#ffe680,#ffb800); color:#3d1166; font-weight:900; font-size:10px; letter-spacing:.5px; padding:2px 10px; border-radius:7px; margin-bottom:4px; box-shadow:0 2px 5px rgba(0,0,0,0.35);">SÚPER</div>
+        <h3 style="color:#fff; font-size:19px; font-weight:900; letter-spacing:-.5px; line-height:1; margin-bottom:7px; text-shadow:0 1px 0 #d9b8ff, 0 3px 7px rgba(0,0,0,0.5);">OFERTA</h3>
+        <div style="display:inline-flex; align-items:baseline; gap:3px; background:linear-gradient(160deg,#5b1fa8,#37105c); border:1.5px solid var(--gold); padding:3px 12px; border-radius:12px; box-shadow:0 3px 8px rgba(0,0,0,0.35);">
+          <span style="font-size:16px; font-weight:900; color:var(--gold);">${maxPct}%</span><span style="font-size:10px; font-weight:800; color:#fff;">OFF</span>
         </div>
+        <div style="color:rgba(255,255,255,0.7); font-size:7px; font-weight:700; letter-spacing:.5px; margin-top:5px;">— POR TIEMPO LIMITADO —</div>
       </div>
     </div>
   `;
