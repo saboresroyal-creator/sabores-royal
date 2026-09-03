@@ -4338,7 +4338,7 @@ function cmpHtmlImportar(){
         <div style="font-size:30px;">&#128194;</div>
         <p style="font-weight:700;margin-top:6px;">Tocar para seleccionar</p>
         <p style="font-size:11px;color:rgba(255,255,255,0.4);margin-top:4px;">Excel (.xlsx, .xls), CSV o PDF — una IA lo lee y arma la lista sola</p>
-        <input type="file" id="cmp-fi" accept=".csv,.txt,.xlsx,.xls,.pdf" style="display:none" onchange="cmpOnFile(this)">
+        <input type="file" id="cmp-fi" style="display:none" onchange="cmpOnFile(this)">
       </div>
       <div style="font-size:12px;color:rgba(255,255,255,0.4);margin-bottom:8px;text-align:center;">O bien peg&aacute; el texto (aunque sea desprolijo):</div>
       <textarea class="cmp-inp" id="cmp-paste" style="min-height:80px;font-size:12px;font-family:monospace;resize:vertical;" placeholder="Peg&aacute; ac&aacute; la lista tal cual la tengas — la IA la entiende igual..."></textarea>
@@ -4350,7 +4350,7 @@ function cmpHtmlImportar(){
       <div class="cmp-upload-zone" onclick="document.getElementById('cmp-fi-csv').click()">
         <div style="font-size:24px;">&#128196;</div>
         <p style="font-weight:700;margin-top:4px;font-size:13px;">Tocar para seleccionar CSV</p>
-        <input type="file" id="cmp-fi-csv" accept=".csv" style="display:none" onchange="cmpOnSimpleCsv(this)">
+        <input type="file" id="cmp-fi-csv" style="display:none" onchange="cmpOnSimpleCsv(this)">
       </div>
     </div>
     <div id="cmp-imp-preview"></div>
@@ -4364,10 +4364,10 @@ function cmpOnFile(input){
     if(!window.XLSX){
       const s=document.createElement('script');
       s.src='xlsx.min.js';
-      s.onload=()=>cmpReadXlsxToText(f);
+      s.onload=()=>cmpReadXlsxToText(f,csv=>cmpAiParse(csv,f.name));
       s.onerror=()=>toast('xlsx.min.js no disponible — exportá como CSV','err');
       document.head.appendChild(s);
-    } else { cmpReadXlsxToText(f); }
+    } else { cmpReadXlsxToText(f,csv=>cmpAiParse(csv,f.name)); }
   } else if(ext==='pdf'){
     cmpReadPdf(f);
   } else {
@@ -4434,7 +4434,7 @@ async function cmpReadPdf(f){
   }catch(e){ toast('Error al leer PDF: '+e.message,'err'); }
 }
 
-function cmpReadXlsxToText(f){
+function cmpReadXlsxToText(f,cb){
   const r=new FileReader();
   r.onload=e=>{
     try{
@@ -4442,7 +4442,7 @@ function cmpReadXlsxToText(f){
       const ws=wb.Sheets[wb.SheetNames[0]];
       const csv=XLSX.utils.sheet_to_csv(ws);
       if(!csv.trim()){ toast('Archivo vacío','err'); return; }
-      cmpAiParse(csv,f.name);
+      cb(csv);
     }catch(err){ toast('Error al leer Excel: '+err.message,'err'); }
   };
   r.readAsArrayBuffer(f);
@@ -4464,19 +4464,46 @@ function cmpOnSimpleCsv(input){
   const f=input.files[0]; if(!f) return;
   const provId=(document.getElementById('cmp-prov')||{}).value||'';
   if(!provId){ toast('Seleccioná un proveedor primero','err'); return; }
-  cmpReadTextSmart(f, text=>{
+  const handleText=text=>{
     const items=cmpParseSimpleCsv(text);
-    if(!items){ toast('No reconozco las columnas de este CSV — necesita al menos "Producto" y "Precio"','err'); return; }
+    if(!items){ toast('No reconozco las columnas de este archivo — necesita al menos "Producto" y "Precio"','err'); return; }
     if(!items.length){ toast('El archivo no tiene productos','err'); return; }
     _cmpAiFilename=f.name;
     _cmpAiItems=items;
     _cmpImportSkipAdjust=true;
     cmpRenderAiPreview();
-  });
+  };
+  // Este botón es "sin IA": si el archivo elegido es en realidad un Excel
+  // (muy fácil de confundir con el CSV correcto ahora que el selector
+  // muestra todos los archivos), leerlo como texto plano daría bytes
+  // binarios ilegibles y el error de "no reconozco las columnas" no
+  // tendría sentido para quien lo ve — primero se convierte a CSV con la
+  // misma librería que usa el camino con IA.
+  const ext=f.name.split('.').pop().toLowerCase();
+  if(ext==='xlsx'||ext==='xls'){
+    if(!window.XLSX){
+      const s=document.createElement('script');
+      s.src='xlsx.min.js';
+      s.onload=()=>cmpReadXlsxToText(f,handleText);
+      s.onerror=()=>toast('xlsx.min.js no disponible — exportá como CSV','err');
+      document.head.appendChild(s);
+    } else { cmpReadXlsxToText(f,handleText); }
+  } else {
+    cmpReadTextSmart(f, handleText);
+  }
 }
 function cmpParseSimpleCsv(text){
-  const lines=String(text||'').split(/\r\n|\n/).filter(l=>l.trim()!=='');
+  const lines=String(text||'').replace(/^﻿/,'').split(/\r\n|\n/).filter(l=>l.trim()!=='');
   if(!lines.length) return null;
+  // Excel en español guarda "CSV" separado por ";" (la "," la usa como
+  // separador decimal) — contar cuál aparece más en el encabezado, fuera
+  // de comillas, para no asumir siempre coma y terminar con todo el
+  // encabezado pegado en una sola columna (que nunca matchea "producto"
+  // ni "precio" por separado).
+  const countDelim=(line,d)=>{ let n=0,inQ=false; for(let i=0;i<line.length;i++){ const c=line[i]; if(c==='"') inQ=!inQ; else if(c===d&&!inQ) n++; } return n; };
+  const delims=[',',';','\t'];
+  let delim=',',best=-1;
+  delims.forEach(d=>{ const n=countDelim(lines[0],d); if(n>best){ best=n; delim=d; } });
   const parseLine=(line)=>{
     const out=[]; let cur=''; let inQ=false;
     for(let i=0;i<line.length;i++){
@@ -4486,7 +4513,7 @@ function cmpParseSimpleCsv(text){
         else cur+=c;
       } else {
         if(c==='"') inQ=true;
-        else if(c===','){ out.push(cur); cur=''; }
+        else if(c===delim){ out.push(cur); cur=''; }
         else cur+=c;
       }
     }
@@ -4494,8 +4521,8 @@ function cmpParseSimpleCsv(text){
     return out.map(s=>s.trim());
   };
   const header=parseLine(lines[0]).map(h=>h.toLowerCase());
-  const idxName=header.findIndex(h=>/producto|nombre|descrip/.test(h));
-  const idxPrice=header.findIndex(h=>/precio/.test(h));
+  const idxName=header.findIndex(h=>/producto|nombre|descrip|art[ií]culo|detalle/.test(h));
+  const idxPrice=header.findIndex(h=>/precio|costo|importe|valor|monto/.test(h));
   const idxQty=header.findIndex(h=>/cant.*bulto|unitqty|cantidad/.test(h));
   const idxCode=header.findIndex(h=>/codigo|código|sku/.test(h));
   if(idxName<0||idxPrice<0) return null;
@@ -4503,7 +4530,15 @@ function cmpParseSimpleCsv(text){
   for(let i=1;i<lines.length;i++){
     const cols=parseLine(lines[i]);
     const name=(cols[idxName]||'').trim();
-    const price=parseFloat(cols[idxPrice]);
+    // Precio argentino: punto de miles, coma decimal ("1.250,50"). Si no
+    // hay coma decimal, el punto puede ser de miles o decimal según el
+    // caso ("1.250" entero vs "12.50" con centavos) — se asume de miles
+    // solo cuando quedan exactamente 3 dígitos después del último punto,
+    // que es el patrón real de un separador de miles.
+    let priceStr=(cols[idxPrice]||'').replace(/[^0-9.,-]/g,'');
+    if(priceStr.includes(',')){ priceStr=priceStr.replace(/\./g,'').replace(',','.'); }
+    else { const m=priceStr.match(/^-?\d{1,3}(\.\d{3})+$/); if(m) priceStr=priceStr.replace(/\./g,''); }
+    const price=parseFloat(priceStr);
     if(!name||!(price>0)) continue;
     const qty=idxQty>=0?(parseInt(cols[idxQty])||1):1;
     const code=idxCode>=0?(cols[idxCode]||'').trim():'';
@@ -4664,7 +4699,7 @@ function cmpHtmlComparar(){
   <div id="cmp-results"></div>`;
 }
 
-let _cmpSt;
+let _cmpSt, _cmpSearchGen=0;
 function cmpSearch(){ clearTimeout(_cmpSt); _cmpSt=setTimeout(cmpDoSearch,220); }
 function cmpDoSearch(){
   const el=document.getElementById('cmp-results'); if(!el) return;
@@ -4738,50 +4773,75 @@ function cmpDoSearch(){
 
   // Pasada 2: matching automático por similitud, para todo lo que no
   // quedó resuelto por un vínculo manual (used[key] ya filtra esas filas).
-  capped.forEach(h=>{
-    const key=h.prov.id+'|'+h.row.norm;
-    if(used[key]) return;
-    const g={name:h.row.name,byProv:{}}; g.byProv[h.prov.id]={row:h.row,prov:h.prov}; used[key]=1;
-    const seedUPrice=cmpRowUPrice(h.row,h.prov);
-    // Por cada proveedor nos quedamos con el candidato de MAYOR similitud
-    // de TODA su lista, no con el primero que supere el umbral — antes, si
-    // dos productos del mismo proveedor pasaban el 0.7 (ej: "Shot Tableta
-    // 90g" y "Shot Tableta Chocolate 170g"), se quedaba con el que
-    // apareciera primero en la lista aunque el otro fuera una coincidencia
-    // mucho mejor, mezclando presentaciones distintas en la misma fila.
-    provs.forEach(pl2=>{
-      if(pl2.prov.id===h.prov.id) return;
-      let best=null;
-      pl2.lista.rows.forEach(row2=>{
-        const k2=pl2.prov.id+'|'+row2.norm;
-        if(used[k2]) return;
-        // 0.55 emparejaba variantes de un mismo producto que en realidad son
-        // presentaciones distintas (ej: "Cofler Block 24x300g" con "Cofler
-        // Block 40grs 36u Simple") porque comparten marca+línea y las
-        // palabras de cantidad se ignoran a propósito. Más exigente para que
-        // haga falta coincidencia real más allá del nombre de la línea.
-        const sim=cmpProdSimRows(h.row,row2);
-        if(sim<0.7) return;
-        // Algunos proveedores cuentan "la unidad" distinto para el mismo tipo
-        // de producto (ej: Tyna calcula el precio "por unidad" de una bolsa
-        // de 700g de caramelos como precio por BOLSA, mientras que Emporio
-        // calcula precio por CARAMELO SUELTO dividiendo por los 210 que
-        // trae) — el nombre matchea pero no es la misma unidad, y termina
-        // mostrando diferencias de precio sin sentido (+2000%). Si el precio
-        // por unidad resultante es 4 veces o más distinto, mejor no
-        // emparejarlos que mostrar una comparación falsa.
-        const candUPrice=cmpRowUPrice(row2,pl2.prov);
-        if(seedUPrice>0&&candUPrice>0){
-          const ratio=Math.max(seedUPrice,candUPrice)/Math.min(seedUPrice,candUPrice);
-          if(ratio>4) return;
-        }
-        if(!best||sim>best.sim) best={row:row2,prov:pl2.prov,sim,key:k2};
+  // Con listas de varios miles de filas por proveedor, comparar cada seed
+  // contra la lista COMPLETA de cada proveedor puede tardar bastante — si
+  // se hiciera de un tirón (un solo forEach sincrónico) el navegador se
+  // queda sin poder procesar teclas mientras tanto, y escribir en el
+  // buscador se siente trabado. Por eso se procesa en tandas chicas,
+  // cediendo el hilo entre tanda y tanda (setTimeout 0) para que el input
+  // siga respondiendo mientras se arma el resultado. Si mientras tanto se
+  // dispara una búsqueda más nueva (otro cmpDoSearch), esta tanda se
+  // aborta sin pintar nada — solo importa el resultado de la búsqueda más
+  // reciente.
+  const myGen=++_cmpSearchGen;
+  const CHUNK=12;
+  let idx=0;
+  function runChunk(){
+    if(myGen!==_cmpSearchGen) return; // hay una búsqueda más nueva en curso
+    const end=Math.min(idx+CHUNK,capped.length);
+    for(;idx<end;idx++){
+      const h=capped[idx];
+      const key=h.prov.id+'|'+h.row.norm;
+      if(used[key]) continue;
+      const g={name:h.row.name,byProv:{}}; g.byProv[h.prov.id]={row:h.row,prov:h.prov}; used[key]=1;
+      const seedUPrice=cmpRowUPrice(h.row,h.prov);
+      // Por cada proveedor nos quedamos con el candidato de MAYOR similitud
+      // de TODA su lista, no con el primero que supere el umbral — antes, si
+      // dos productos del mismo proveedor pasaban el 0.7 (ej: "Shot Tableta
+      // 90g" y "Shot Tableta Chocolate 170g"), se quedaba con el que
+      // apareciera primero en la lista aunque el otro fuera una coincidencia
+      // mucho mejor, mezclando presentaciones distintas en la misma fila.
+      provs.forEach(pl2=>{
+        if(pl2.prov.id===h.prov.id) return;
+        let best=null;
+        pl2.lista.rows.forEach(row2=>{
+          const k2=pl2.prov.id+'|'+row2.norm;
+          if(used[k2]) return;
+          // 0.55 emparejaba variantes de un mismo producto que en realidad son
+          // presentaciones distintas (ej: "Cofler Block 24x300g" con "Cofler
+          // Block 40grs 36u Simple") porque comparten marca+línea y las
+          // palabras de cantidad se ignoran a propósito. Más exigente para que
+          // haga falta coincidencia real más allá del nombre de la línea.
+          const sim=cmpProdSimRows(h.row,row2);
+          if(sim<0.7) return;
+          // Algunos proveedores cuentan "la unidad" distinto para el mismo tipo
+          // de producto (ej: Tyna calcula el precio "por unidad" de una bolsa
+          // de 700g de caramelos como precio por BOLSA, mientras que Emporio
+          // calcula precio por CARAMELO SUELTO dividiendo por los 210 que
+          // trae) — el nombre matchea pero no es la misma unidad, y termina
+          // mostrando diferencias de precio sin sentido (+2000%). Si el precio
+          // por unidad resultante es 4 veces o más distinto, mejor no
+          // emparejarlos que mostrar una comparación falsa.
+          const candUPrice=cmpRowUPrice(row2,pl2.prov);
+          if(seedUPrice>0&&candUPrice>0){
+            const ratio=Math.max(seedUPrice,candUPrice)/Math.min(seedUPrice,candUPrice);
+            if(ratio>4) return;
+          }
+          if(!best||sim>best.sim) best={row:row2,prov:pl2.prov,sim,key:k2};
+        });
+        if(best){ g.byProv[best.prov.id]={row:best.row,prov:best.prov}; used[best.key]=1; }
       });
-      if(best){ g.byProv[best.prov.id]={row:best.row,prov:best.prov}; used[best.key]=1; }
-    });
-    groups.push(g);
-  });
-  html=`<div style="padding:0 16px 8px;font-size:12px;color:rgba(255,255,255,0.35);">${groups.length} producto(s)${groups.length>SHOW_MAX?' — mostrando los primeros '+SHOW_MAX+', afiná la búsqueda para ver el resto':''}</div>`;
+      groups.push(g);
+    }
+    if(idx<capped.length){ setTimeout(runChunk,0); return; }
+    if(myGen!==_cmpSearchGen) return;
+    cmpRenderResults(el,groups,provs,SHOW_MAX);
+  }
+  if(capped.length>CHUNK) el.innerHTML='<div style="padding:40px;text-align:center;color:rgba(255,255,255,0.35);">Buscando...</div>';
+  runChunk();
+}
+function cmpRenderResults(el,groups,provs,SHOW_MAX){
+  let html=`<div style="padding:0 16px 8px;font-size:12px;color:rgba(255,255,255,0.35);">${groups.length} producto(s)${groups.length>SHOW_MAX?' — mostrando los primeros '+SHOW_MAX+', afiná la búsqueda para ver el resto':''}</div>`;
   html+=`<div class="cmp-wrap"><table class="cmp-table"><thead><tr><th>Producto</th>`;
   provs.forEach(pl=>{ html+=`<th><div class="cmp-prov-th-av" style="background:${cmpColor(pl.prov.id)}">${cmpInitial(pl.prov.name)}</div><br>${cmpEsc(pl.prov.name)}</th>`; });
   html+=`</tr></thead><tbody>`;
