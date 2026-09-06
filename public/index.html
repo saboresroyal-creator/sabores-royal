@@ -831,6 +831,12 @@ let _cmpLinkPickHits = null;
 let cmpLoaded = false;
 let _cmpAiItems = null;
 let _cmpAiFilename = '';
+// Descuentos/IVA para la importación en curso, editable a mano en la
+// pantalla de importar (se precarga con lo guardado en el proveedor, pero
+// el usuario puede ajustarlo lista por lista sin tener que ir a Editar
+// Proveedor cada vez).
+let _cmpImportAdjustStr = '';
+function cmpImportAdjustPcts(){ return cmpParseAdjustInput(_cmpImportAdjustStr); }
 let rentLoaded = false;
 let bankLoansLoaded = false;
 let clientPaymentsLoaded = false;
@@ -3962,8 +3968,8 @@ function cmpItemPack(it){
   if(it.pricePerUnit && it.unitQty>1) return it.unitQty;
   return 1;
 }
-function cmpApplyAdjust(price,prov){
-  const final=cmpProvAdjustPcts(prov).reduce((p,pct)=>p*(1+pct/100),price);
+function cmpApplyAdjustPcts(price,pcts){
+  const final=(pcts||[]).reduce((p,pct)=>p*(1+pct/100),price);
   return Math.round(final*100)/100;
 }
 // Precio por unidad de una fila ya importada, para comparar entre
@@ -4463,6 +4469,8 @@ function cmpOnSimpleCsv(input){
   const f=input.files[0]; if(!f) return;
   const provId=(document.getElementById('cmp-prov')||{}).value||'';
   if(!provId){ toast('Seleccioná un proveedor primero','err'); return; }
+  const prov=cmpDB.proveedores.find(p=>p.id===provId);
+  _cmpImportAdjustStr=cmpProvAdjustPcts(prov).join(', ');
   const handleText=text=>{
     const items=cmpParseSimpleCsv(text);
     if(!items){ toast('No reconozco las columnas de este archivo — necesita al menos "Producto" y "Precio"','err'); return; }
@@ -4589,12 +4597,13 @@ async function cmpAiParse(text,filename){
   if(!provId){ toast('Seleccioná un proveedor primero','err'); return; }
   if(!text||!text.trim()){ toast('El archivo parece vacío','err'); return; }
   _cmpAiFilename=filename;
+  const prov=cmpDB.proveedores.find(p=>p.id===provId);
+  _cmpImportAdjustStr=cmpProvAdjustPcts(prov).join(', ');
   const el=document.getElementById('cmp-imp-preview');
   if(el) el.innerHTML=`<div style="background:var(--glass);border:1px solid var(--glass-bd);border-radius:14px;padding:28px 14px;text-align:center;">
     <span class="spin" style="display:inline-block;font-size:22px;">${ic('sparkle')}</span>
     <p style="margin-top:10px;font-size:13px;color:rgba(255,255,255,0.6);">Analizando &ldquo;${cmpEsc(filename)}&rdquo; con IA&hellip;</p>
   </div>`;
-  const prov=cmpDB.proveedores.find(p=>p.id===provId);
   const notes=(prov&&prov.mapping&&prov.mapping.aiNotes)||'';
   try{
     const res=await fetch('/api/comparador-parse',{
@@ -4631,7 +4640,7 @@ function cmpDiffAgainstPrevList(items, prov, provId){
   const perItem=items.map(it=>{
     const norm=cmpNorm(it.name);
     newNorms[norm]=1;
-    const finalPrice=cmpApplyAdjust(it.price,prov);
+    const finalPrice=cmpApplyAdjustPcts(it.price,cmpImportAdjustPcts());
     const qty=it.unitQty||1;
     const newUnit=pricePerUnit?finalPrice:finalPrice/(qty||1);
     const old=oldByNorm[norm];
@@ -4651,14 +4660,15 @@ function cmpRenderAiPreview(){
   const provId=(document.getElementById('cmp-prov')||{}).value||'';
   const prov=cmpDB.proveedores.find(p=>p.id===provId);
   const pricePerUnit=!!(prov&&prov.mapping&&prov.mapping.pricePerUnit);
-  const hasAdj=cmpProvAdjustPcts(prov).length>0;
+  const adjPcts=cmpImportAdjustPcts();
+  const hasAdj=adjPcts.length>0;
   const items=_cmpAiItems||[];
   const diff=cmpDiffAgainstPrevList(items, prov, provId);
   const upCount=diff?diff.perItem.filter(d=>d.status==='up').length:0;
   const downCount=diff?diff.perItem.filter(d=>d.status==='down').length:0;
   const newCount=diff?diff.perItem.filter(d=>d.status==='new').length:0;
   const rowsHtml=items.map((it,i)=>{
-    const finalPrice=cmpApplyAdjust(it.price,prov);
+    const finalPrice=cmpApplyAdjustPcts(it.price,adjPcts);
     const d=diff?diff.perItem[i]:null;
     let diffBadge='';
     if(d&&d.status==='up') diffBadge=`<div style="font-size:10px;color:var(--warn);margin-top:2px;">▲ +${d.pct}% (antes ${cmpMoney(d.oldUnit)}/u)</div>`;
@@ -4678,7 +4688,12 @@ function cmpRenderAiPreview(){
     </tr>`;}).join('');
   el.innerHTML=`<div style="background:var(--glass);border:1px solid var(--glass-bd);border-radius:14px;padding:14px;">
     <div style="font-size:11px;font-weight:700;color:var(--gold2);text-transform:uppercase;letter-spacing:.5px;margin-bottom:4px;">Archivo: ${cmpEsc(_cmpAiFilename)}</div>
-    <div style="font-size:12px;color:rgba(255,255,255,0.4);margin-bottom:12px;">${items.length} producto(s) detectados &middot; revisá antes de importar${hasAdj?' &middot; el precio final ya incluye los descuentos/IVA cargados en el proveedor':''}${pricePerUnit?' &middot; el precio ya es por unidad, "Uds/bulto" es solo informativo para pedir por bulto':''}</div>
+    <div style="font-size:12px;color:rgba(255,255,255,0.4);margin-bottom:12px;">${items.length} producto(s) detectados &middot; revisá antes de importar${pricePerUnit?' &middot; el precio ya es por unidad, "Uds/bulto" es solo informativo para pedir por bulto':''}</div>
+    <div class="cmp-field" style="margin-bottom:12px;">
+      <label style="font-size:11px;font-weight:700;color:rgba(255,255,255,0.5);text-transform:uppercase;letter-spacing:.5px;">Descuentos/IVA a aplicar (opcional)</label>
+      <input class="cmp-inp" id="cmp-import-adj" value="${cmpEsc(_cmpImportAdjustStr)}" placeholder="Ej: -2, -3, 21" oninput="cmpImportAdjustChanged(this.value)">
+      <div style="font-size:11px;color:rgba(255,255,255,0.4);margin-top:4px;">% en cascada sobre el precio de la columna, descuentos primero (negativos) e IVA al final. Se guarda para la próxima importación de este proveedor.${hasAdj?` Ejemplo: ${cmpEsc(cmpAdjustPreviewText(adjPcts,items[0]?items[0].price:1000))}`:''}</div>
+    </div>
     ${diff?`<div class="cmp-note" style="margin-bottom:12px;">Comparado con la lista anterior de este proveedor: <b style="color:var(--warn)">${upCount} subieron</b>, <b style="color:var(--ok)">${downCount} bajaron</b>, <b style="color:var(--gold2)">${newCount} nuevos</b>${diff.discontinued.length?`, y <b style="color:var(--danger)">${diff.discontinued.length} ya no están en este archivo</b> y van a dejar de listarse para este proveedor al importar`:''}.</div>`:''}
     <div style="display:flex;gap:10px;margin-bottom:12px;">
       <button class="btn-primary" style="flex:1;" onclick="cmpDoAiImport()">Importar ${items.length} producto(s)</button>
@@ -4693,6 +4708,15 @@ function cmpRenderAiPreview(){
   </div>`;
 }
 
+function cmpImportAdjustChanged(v){
+  _cmpImportAdjustStr=v;
+  const inp=document.getElementById('cmp-import-adj');
+  const pos=inp?inp.selectionStart:null;
+  cmpRenderAiPreview();
+  const inp2=document.getElementById('cmp-import-adj');
+  if(inp2){ inp2.focus(); if(pos!=null) inp2.setSelectionRange(pos,pos); }
+}
+
 function cmpAiRemoveItem(i){
   _cmpAiItems.splice(i,1);
   cmpRenderAiPreview();
@@ -4702,17 +4726,22 @@ async function cmpDoAiImport(){
   const provId=(document.getElementById('cmp-prov')||{}).value||'';
   if(!provId){ toast('Seleccioná un proveedor','err'); return; }
   const prov=cmpDB.proveedores.find(p=>p.id===provId);
+  const adjPcts=cmpImportAdjustPcts();
   const items=_cmpAiItems||[];
   const rows=items.filter(it=>it.name&&it.price>0).map(it=>({
-    name:it.name, price:cmpApplyAdjust(it.price,prov), priceRaw:it.price, unit:it.unit||'', unitQty:it.unitQty||1, code:it.code||'', norm:cmpNorm(it.name)
+    name:it.name, price:cmpApplyAdjustPcts(it.price,adjPcts), priceRaw:it.price, unit:it.unit||'', unitQty:it.unitQty||1, code:it.code||'', norm:cmpNorm(it.name)
   }));
   if(!rows.length){ toast('No hay productos para importar','err'); return; }
   const now=new Date().toISOString();
   const lista={provId,rows,at:now};
   const idx=cmpDB.listas.findIndex(l=>l.provId===provId);
   if(idx>=0) cmpDB.listas[idx]=lista; else cmpDB.listas.push(lista);
-  if(prov) prov.lastImport=now;
+  if(prov){
+    prov.lastImport=now;
+    prov.mapping=Object.assign({},prov.mapping,{priceAdjustPct:adjPcts});
+  }
   _cmpAiItems=null;
+  _cmpImportAdjustStr='';
   try{
     await Promise.all([cmpSaveListaSupa(lista),prov?cmpSaveProvSupa(prov):Promise.resolve()]);
     toast(rows.length+' productos importados');
