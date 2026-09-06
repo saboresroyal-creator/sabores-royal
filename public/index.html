@@ -4520,31 +4520,66 @@ function cmpParseSimpleCsv(text){
     out.push(cur);
     return out.map(s=>s.trim());
   };
+  // Separador decimal ambiguo: si vienen coma Y punto, gana el que aparezca
+  // más a la derecha (es el decimal real) — "20,918.11" (Excel en inglés,
+  // lo que devuelve sheet_to_csv) y "20.918,11" (formato argentino) tienen
+  // que dar el mismo número. Si solo hay coma, es decimal directo. Si solo
+  // hay punto y quedan justo 3 dígitos después del último, es separador de
+  // miles.
+  function parsePriceStr(raw){
+    let s=(raw||'').replace(/[^0-9.,-]/g,'');
+    if(!s) return NaN;
+    if(s.includes(',')&&s.includes('.')){
+      s = s.lastIndexOf(',')>s.lastIndexOf('.') ? s.replace(/\./g,'').replace(',','.') : s.replace(/,/g,'');
+    } else if(s.includes(',')){ s=s.replace(',','.'); }
+    else { const m=s.match(/^-?\d{1,3}(\.\d{3})+$/); if(m) s=s.replace(/\./g,''); }
+    return parseFloat(s);
+  }
+
   const header=parseLine(lines[0]).map(h=>h.toLowerCase());
   const idxName=header.findIndex(h=>/producto|nombre|descrip|art[ií]culo|detalle/.test(h));
   const idxPrice=header.findIndex(h=>/precio|costo|importe|valor|monto/.test(h));
   const idxQty=header.findIndex(h=>/cant.*bulto|unitqty|cantidad/.test(h));
   const idxCode=header.findIndex(h=>/codigo|código|sku/.test(h));
-  if(idxName<0||idxPrice<0) return null;
-  const items=[];
-  for(let i=1;i<lines.length;i++){
-    const cols=parseLine(lines[i]);
-    const name=(cols[idxName]||'').trim();
-    // Precio argentino: punto de miles, coma decimal ("1.250,50"). Si no
-    // hay coma decimal, el punto puede ser de miles o decimal según el
-    // caso ("1.250" entero vs "12.50" con centavos) — se asume de miles
-    // solo cuando quedan exactamente 3 dígitos después del último punto,
-    // que es el patrón real de un separador de miles.
-    let priceStr=(cols[idxPrice]||'').replace(/[^0-9.,-]/g,'');
-    if(priceStr.includes(',')){ priceStr=priceStr.replace(/\./g,'').replace(',','.'); }
-    else { const m=priceStr.match(/^-?\d{1,3}(\.\d{3})+$/); if(m) priceStr=priceStr.replace(/\./g,''); }
-    const price=parseFloat(priceStr);
-    if(!name||!(price>0)) continue;
-    const qty=idxQty>=0?(parseInt(cols[idxQty])||1):1;
-    const code=idxCode>=0?(cols[idxCode]||'').trim():'';
-    items.push({name,price,unit:'',unitQty:qty,code});
+  if(idxName>=0&&idxPrice>=0){
+    const items=[];
+    for(let i=1;i<lines.length;i++){
+      const cols=parseLine(lines[i]);
+      const name=(cols[idxName]||'').trim();
+      const price=parsePriceStr(cols[idxPrice]);
+      if(!name||!(price>0)) continue;
+      const qty=idxQty>=0?(parseInt(cols[idxQty])||1):1;
+      const code=idxCode>=0?(cols[idxCode]||'').trim():'';
+      items.push({name,price,unit:'',unitQty:qty,code});
+    }
+    return items;
   }
-  return items;
+
+  // Sin encabezado reconocible: algunas listas mayoristas (ej. AKAPOOL) no
+  // traen fila de títulos, solo filas "Producto,$,Precio" repetidas, con
+  // renglones sueltos de marca/proveedor y un pie de página mezclados en
+  // medio. Se detecta la columna donde la mayoría de las filas tienen
+  // literalmente "$" y se usan las columnas vecinas como nombre/precio;
+  // las filas sin ese "$" (títulos, marcas, pie de página) quedan afuera
+  // solas al filtrar.
+  const allRows=lines.map(parseLine);
+  const maxCols=Math.max(...allRows.map(r=>r.length));
+  let markerCol=-1,markerCount=0;
+  for(let c=1;c<maxCols;c++){
+    const n=allRows.filter(r=>String(r[c]||'').trim()==='$').length;
+    if(n>markerCount){ markerCount=n; markerCol=c; }
+  }
+  if(markerCol<1||markerCount<allRows.length*0.3) return null;
+  const nameCol=markerCol-1, priceCol=markerCol+1;
+  const items=[];
+  allRows.forEach(cols=>{
+    if(String(cols[markerCol]||'').trim()!=='$') return;
+    const name=(cols[nameCol]||'').trim();
+    const price=parsePriceStr(cols[priceCol]);
+    if(!name||!(price>0)) return;
+    items.push({name,price,unit:'',unitQty:1,code:''});
+  });
+  return items.length?items:null;
 }
 
 // Le mandamos el texto crudo (CSV, texto de PDF, o pegado a mano) a una IA
