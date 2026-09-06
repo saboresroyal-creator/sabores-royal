@@ -4708,13 +4708,21 @@ function cmpRenderAiPreview(){
   </div>`;
 }
 
+// Re-renderizar toda la vista previa (que puede tener miles de filas, ej.
+// AKAPOOL) en cada tecla tildaba el tipeo. Se debounce: mientras se escribe
+// solo se guarda el valor, y recién 400ms después de la última tecla se
+// recalcula la tabla.
+let _cmpImportAdjustTimer=null;
 function cmpImportAdjustChanged(v){
   _cmpImportAdjustStr=v;
-  const inp=document.getElementById('cmp-import-adj');
-  const pos=inp?inp.selectionStart:null;
-  cmpRenderAiPreview();
-  const inp2=document.getElementById('cmp-import-adj');
-  if(inp2){ inp2.focus(); if(pos!=null) inp2.setSelectionRange(pos,pos); }
+  clearTimeout(_cmpImportAdjustTimer);
+  _cmpImportAdjustTimer=setTimeout(()=>{
+    const inp=document.getElementById('cmp-import-adj');
+    const pos=inp?inp.selectionStart:null;
+    cmpRenderAiPreview();
+    const inp2=document.getElementById('cmp-import-adj');
+    if(inp2){ inp2.focus(); if(pos!=null) inp2.setSelectionRange(pos,pos); }
+  },400);
 }
 
 function cmpAiRemoveItem(i){
