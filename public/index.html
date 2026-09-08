@@ -6012,7 +6012,6 @@ function renderAdminBancos(){
     </div>
     <button class="btn-primary" style="width:100%; margin-bottom:16px;" onclick="openBankLoanModal()">+ Nuevo préstamo</button>
     ${latestBbvaBatchMissing().length>0 ? `<button class="btn-secondary" style="width:100%; margin-bottom:16px;" onclick="importLatestBbvaBatch()">+ Agregar los ${latestBbvaBatchMissing().length} préstamos BBVA que pasaste último</button>` : ''}
-    ${bbvaPresetMissingCount()>0 ? `<button class="btn-secondary" style="width:100%; margin-bottom:16px;" onclick="importBbvaPresetMissing()">+ Agregar los ${bbvaPresetMissingCount()} préstamos BBVA nuevos que pasaste</button>` : ''}
     <button class="btn-secondary" style="width:100%; margin-bottom:16px; color:var(--danger);" onclick="importBbvaPreset()">${loans.length===0?'Importar':'Reemplazar todo con'} los ${BBVA_IMPORT_PRESET.length} préstamos BBVA que pasaste</button>
     ${loans.length>0 ? `<button class="btn-secondary" style="width:100%; margin-bottom:16px;" onclick="openMarkPaidBeforeModal()">Marcar cuotas vencidas como pagadas</button>` : ''}
     ${loans.length>0 ? `<button class="btn-secondary" style="width:100%; margin-bottom:16px; color:var(--danger);" onclick="resetAllLoansToPendiente()">Revertir todo a pendiente</button>` : ''}
