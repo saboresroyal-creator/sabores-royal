@@ -5853,6 +5853,26 @@ const BBVA_IMPORT_PRESET = [
   {concepto:"Cuadro de marcha (2)", rows:[["2025-11-21",578789.35],["2025-12-21",498826.95],["2026-01-21",497055.01],["2026-02-21",495179.87],["2026-03-21",493195.51],["2026-04-21",491095.55],["2026-05-21",488873.27],["2026-06-21",486521.54],["2026-07-21",484032.82],["2026-08-21",481399.13],["2026-09-21",478612.03],["2026-10-21",475662.56]]},
   {concepto:"Cuadro de marcha (1)", rows:[["2025-09-12",3177066.52],["2025-10-12",2375978.71],["2025-11-12",2369299.84],["2025-12-12",2362381.64],["2026-01-12",2355215.55],["2026-02-12",2347792.67],["2026-03-12",2340103.8],["2026-04-12",2332139.42],["2026-05-12",2323889.64],["2026-06-12",2315344.25],["2026-07-12",2306492.65],["2026-08-12",2297323.85]]},
 ];
+// Última tanda de cuadros de marcha pasada (los 3 últimos que se agregaron
+// al preset) — permite sumar SOLO estos sin tocar los que ya figuran como
+// "faltantes" por diferencias de nombre con cargas anteriores.
+const LATEST_BBVA_BATCH = ["Cuadro de marcha (58)", "Cuadro de marcha (59)", "Cuadro de marcha (60)"];
+function latestBbvaBatchMissing(){
+  const existing = new Set((state.bankLoans.items||[]).map(l=>l.concepto));
+  return BBVA_IMPORT_PRESET.filter(p=>LATEST_BBVA_BATCH.includes(p.concepto) && !existing.has(p.concepto));
+}
+async function importLatestBbvaBatch(){
+  const missing = latestBbvaBatchMissing();
+  if(!missing.length){ toast('Ya están cargados', 'err'); return; }
+  missing.forEach(preset=>{
+    const cuotas = preset.rows.map((r,i)=>({id:paymentsId('bl'), nro:i+1, monto:r[1], vencimiento:r[0], estado:'pendiente'}));
+    const montoTotal = cuotas.reduce((s,c)=>s+c.monto,0);
+    state.bankLoans.items.push({id:paymentsId('bank'), banco:'BBVA', concepto:preset.concepto, montoTotal, createdAt:new Date().toISOString().slice(0,10), cuotas});
+  });
+  saveState(); render();
+  try{ await apiSaveSetting('bank_loans', state.bankLoans); toast(missing.length+' préstamo(s) agregado(s)', 'ok'); }
+  catch(e){ toast('Error al guardar: '+e.message, 'err'); }
+}
 // Cuenta cuántos préstamos del preset todavía no están cargados en Bancos
 // (comparando por "concepto"), para el botón aditivo de abajo.
 function bbvaPresetMissingCount(){
@@ -5991,6 +6011,7 @@ function renderAdminBancos(){
       </div>
     </div>
     <button class="btn-primary" style="width:100%; margin-bottom:16px;" onclick="openBankLoanModal()">+ Nuevo préstamo</button>
+    ${latestBbvaBatchMissing().length>0 ? `<button class="btn-secondary" style="width:100%; margin-bottom:16px;" onclick="importLatestBbvaBatch()">+ Agregar los ${latestBbvaBatchMissing().length} préstamos BBVA que pasaste último</button>` : ''}
     ${bbvaPresetMissingCount()>0 ? `<button class="btn-secondary" style="width:100%; margin-bottom:16px;" onclick="importBbvaPresetMissing()">+ Agregar los ${bbvaPresetMissingCount()} préstamos BBVA nuevos que pasaste</button>` : ''}
     <button class="btn-secondary" style="width:100%; margin-bottom:16px; color:var(--danger);" onclick="importBbvaPreset()">${loans.length===0?'Importar':'Reemplazar todo con'} los ${BBVA_IMPORT_PRESET.length} préstamos BBVA que pasaste</button>
     ${loans.length>0 ? `<button class="btn-secondary" style="width:100%; margin-bottom:16px;" onclick="openMarkPaidBeforeModal()">Marcar cuotas vencidas como pagadas</button>` : ''}
