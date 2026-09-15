@@ -1343,10 +1343,11 @@ function renderStatsTodas(container, range) {
         <div class="stat"><div class="stat-label">Prom./ticket</div><div class="stat-value gold">${pesos(ticketProm)}</div></div>
         <div class="stat"><div class="stat-label">Resultado neto</div><div class="stat-value ${(sumTotal-sumGst)>=0?'green':'red'}">${pesos(sumTotal-sumGst)}</div></div>
       </div>
-      ${!esDia ? `<div class="grid3 mt16">
+      ${!esDia ? `<div class="grid4 mt16">
         <div class="stat"><div class="stat-label">Máx. día</div><div class="stat-value gold">${pesos(maxV)}</div></div>
         <div class="stat"><div class="stat-label">Prom. diario</div><div class="stat-value">${pesos(avgV)}</div></div>
         <div class="stat"><div class="stat-label">Mín. día</div><div class="stat-value">${pesos(minV)}</div></div>
+        <div class="stat"><div class="stat-label">Días laborables</div><div class="stat-value">${ventasConDatos.length}</div><div style="font-size:11px;color:var(--muted);margin-top:4px">de ${range.length} días</div></div>
       </div>` : ''}
     </div>
     ${!esDia && range.length<=62 ? `
@@ -1476,10 +1477,11 @@ function renderStatsCajaIndividual(container, range, cajaIdx) {
         <div class="stat"><div class="stat-label">Prom./ticket</div><div class="stat-value" style="color:${color}">${pesos(ticketProm)}</div></div>
         <div class="stat"><div class="stat-label">Resultado neto</div><div class="stat-value ${(sumTotal-sumGst)>=0?'green':'red'}">${pesos(sumTotal-sumGst)}</div></div>
       </div>
-      ${!esDia ? `<div class="grid3 mt16">
+      ${!esDia ? `<div class="grid4 mt16">
         <div class="stat"><div class="stat-label">Máx. día</div><div class="stat-value" style="color:${color}">${pesos(maxV)}</div></div>
         <div class="stat"><div class="stat-label">Prom. diario</div><div class="stat-value">${pesos(avgV)}</div></div>
         <div class="stat"><div class="stat-label">Mín. día</div><div class="stat-value">${pesos(minV)}</div></div>
+        <div class="stat"><div class="stat-label">Días laborables</div><div class="stat-value" style="color:${color}">${ventasDias.length}</div><div style="font-size:11px;color:var(--muted);margin-top:4px">de ${range.length} días</div></div>
       </div>` : ''}
     </div>
     ${!esDia && range.length<=62 ? `
