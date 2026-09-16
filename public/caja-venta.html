@@ -591,6 +591,12 @@ function cambiarCaja(){
   screen = 'select-caja';
   render();
 }
+document.addEventListener('keydown', (ev)=>{
+  if(screen !== 'login' || !cajero) return;
+  if(ev.key >= '0' && ev.key <= '9'){ pinPress(ev.key); ev.preventDefault(); }
+  else if(ev.key === 'Backspace'){ pinBackspace(); ev.preventDefault(); }
+  else if(ev.key === 'Escape'){ pinCancel(); ev.preventDefault(); }
+});
 
 /* ── VENTA ── */
 function cajaEsc(){ return esc(caja||''); }
@@ -748,6 +754,7 @@ function norm(s){ return String(s||'').toLowerCase().normalize('NFD').replace(/[
 
 function onSearchInput(v){
   searchQuery = v;
+  if(v.trim().length>=2) activeCategory = null;
   saleError = '';
   render();
   const inp = document.getElementById('scan-input');
