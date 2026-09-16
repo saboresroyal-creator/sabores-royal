@@ -502,6 +502,7 @@ tr:hover td { background:var(--surface2); }
       <button class="ptab" onclick="setPeriod('semana',this)">7 días</button>
       <button class="ptab" onclick="setPeriod('mes',this)">30 días</button>
       <button class="ptab" onclick="setPeriod('rango',this)">📅 Rango</button>
+      <button class="ptab" onclick="setPeriod('meses',this)">📊 Meses</button>
     </div>
   </div>
 
@@ -520,7 +521,7 @@ tr:hover td { background:var(--surface2); }
   </div>
 
   <!-- BOTÓN EXPORTAR EXCEL -->
-  <div style="display:flex;justify-content:flex-end;margin-bottom:10px;">
+  <div id="exportarExcelBtnWrap" style="display:flex;justify-content:flex-end;margin-bottom:10px;">
     <button class="btn btn-green" onclick="abrirModalExportar()" style="font-size:12px;padding:7px 16px;display:flex;align-items:center;gap:6px;">
       <span style="font-size:15px;">📥</span> Exportar Excel
     </button>
@@ -1230,6 +1231,14 @@ function renderStats() {
   const today = todayStr();
   const rangoFiltros = document.getElementById('rangoFiltros');
   if(rangoFiltros) rangoFiltros.style.display = currentPeriod === 'rango' ? 'block' : 'none';
+  const exportBtnWrap = document.getElementById('exportarExcelBtnWrap');
+  if(exportBtnWrap) exportBtnWrap.style.display = currentPeriod === 'meses' ? 'none' : 'flex';
+
+  if(currentPeriod === 'meses') {
+    const cajaIdx = currentCajaVista === 'todas' ? null : parseInt(currentCajaVista.replace('caja',''));
+    renderStatsComparativoMeses(container, cajaIdx);
+    return;
+  }
 
   // Obtener rango de fechas según período
   let range;
@@ -1505,6 +1514,111 @@ function renderStatsCajaIndividual(container, range, cajaIdx) {
         {label:'Negro',data:chartNeg,color:'#a855f7'}
       ]);
       makeBarChart('chartCajaTk', chartLabels, chartTk, color);
+    }, 50);
+  }
+}
+
+// ── COMPARATIVO MES A MES ──
+function renderStatsComparativoMeses(container, cajaIdx) {
+  const isTodas = cajaIdx === null;
+  const nombresCaja = ['CAJA 1','CAJA 2','CAJA CENTRAL','CAJA 3','CAJA 4'];
+  const colores = ['#c5a028','#60a5fa','#a855f7','#22c55e','#f59e0b'];
+  const color = isTodas ? '#c5a028' : (colores[cajaIdx] || '#c5a028');
+  const titulo = isTodas ? 'TODAS LAS CAJAS' : (nombresCaja[cajaIdx] || ('CAJA '+(cajaIdx+1)));
+
+  const fechasConDatos = Object.keys(state.dias).filter(d=>{
+    return isTodas ? true : !!(state.dias[d].cajas && state.dias[d].cajas[cajaIdx]);
+  }).sort();
+
+  if(!fechasConDatos.length) {
+    container.innerHTML = '<div class="card" style="text-align:center;color:var(--muted);padding:40px;">Todavía no hay datos cargados para comparar.</div>';
+    return;
+  }
+
+  const porMes = {};
+  fechasConDatos.forEach(d=>{
+    const mesKey = d.slice(0,7); // YYYY-MM
+    (porMes[mesKey] = porMes[mesKey] || []).push(d);
+  });
+  const mesesNombres = ['Enero','Febrero','Marzo','Abril','Mayo','Junio','Julio','Agosto','Septiembre','Octubre','Noviembre','Diciembre'];
+  const nombreMes = k => {
+    const [y,m] = k.split('-');
+    return mesesNombres[parseInt(m)-1] + ' ' + y;
+  };
+
+  const statsFn = isTodas ? dayStats : (d=>dayCajaStats(d, cajaIdx));
+
+  const filas = Object.keys(porMes).sort().map(mesKey => {
+    let sumTotal=0,sumEf=0,sumTar=0,sumNeg=0,sumTk=0,sumGst=0,diasLaborables=0;
+    porMes[mesKey].forEach(d=>{
+      const s = statsFn(d);
+      sumTotal+=s.total; sumEf+=s.efectivo; sumTar+=s.tarjeta; sumNeg+=s.negro; sumTk+=s.tickets; sumGst+=s.gastos;
+      if(s.total>0) diasLaborables++;
+    });
+    return { mesKey, sumTotal, sumEf, sumTar, sumNeg, sumTk, sumGst, diasLaborables, promDiario: diasLaborables>0?sumTotal/diasLaborables:0, resultado: sumTotal-sumGst };
+  });
+
+  filas.forEach((f,i)=>{
+    f.variacion = (i>0 && filas[i-1].sumTotal>0) ? ((f.sumTotal-filas[i-1].sumTotal)/filas[i-1].sumTotal*100) : null;
+  });
+
+  const rowsHtml = [...filas].reverse().map(f => `
+    <tr>
+      <td style="font-weight:700;">${nombreMes(f.mesKey)}</td>
+      <td class="num yellow">${pesos(f.sumTotal)}</td>
+      <td class="num green">${pesos(f.sumEf)}</td>
+      <td class="num blue">${pesos(f.sumTar)}</td>
+      <td class="num purple">${pesos(f.sumNeg)}</td>
+      <td class="num red">${pesos(f.sumGst)}</td>
+      <td class="num ${f.resultado>=0?'green':'red'}">${pesos(f.resultado)}</td>
+      <td class="num">${f.sumTk}</td>
+      <td class="num">${f.diasLaborables}</td>
+      <td class="num">${pesos(f.promDiario)}</td>
+      <td class="num" style="color:${f.variacion==null?'var(--muted)':(f.variacion>=0?'var(--green)':'var(--red)')}">${f.variacion==null?'—':(f.variacion>=0?'▲ ':'▼ ')+Math.abs(f.variacion).toFixed(1)+'%'}</td>
+    </tr>
+  `).join('');
+
+  const chartLabels = filas.map(f=>nombreMes(f.mesKey));
+  const chartVentas = filas.map(f=>f.sumTotal);
+  const chartDias = filas.map(f=>f.diasLaborables);
+
+  container.innerHTML = `
+    <div class="card mb16">
+      <div class="card-title"><div class="dot" style="background:${color}"></div>COMPARATIVO MES A MES — ${titulo}</div>
+      <div style="overflow-x:auto;">
+        <table>
+          <thead><tr>
+            <th>Mes</th>
+            <th class="num yellow">Venta Total</th>
+            <th class="num green">Efectivo</th>
+            <th class="num blue">Tarjeta</th>
+            <th class="num" style="color:var(--purple)">Negro</th>
+            <th class="num red">Gastos</th>
+            <th class="num">Resultado neto</th>
+            <th class="num">Tickets</th>
+            <th class="num">Días laborables</th>
+            <th class="num">Prom./día laborable</th>
+            <th class="num">Var. vs mes ant.</th>
+          </tr></thead>
+          <tbody>${rowsHtml}</tbody>
+        </table>
+      </div>
+    </div>
+    ${filas.length>1 ? `
+    <div class="card mb16">
+      <div class="card-title"><div class="dot" style="background:${color}"></div>VENTA TOTAL POR MES</div>
+      <div class="chart-wrap"><canvas id="chartMesesVentas"></canvas></div>
+    </div>
+    <div class="card mb16">
+      <div class="card-title"><div class="dot"></div>DÍAS LABORABLES POR MES</div>
+      <div class="chart-wrap"><canvas id="chartMesesDias"></canvas></div>
+    </div>` : ''}
+  `;
+
+  if(filas.length>1) {
+    setTimeout(()=>{
+      makeBarChart('chartMesesVentas', chartLabels, chartVentas, color);
+      makeBarChart('chartMesesDias', chartLabels, chartDias, '#60a5fa');
     }, 50);
   }
 }
