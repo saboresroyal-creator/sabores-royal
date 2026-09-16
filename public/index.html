@@ -1079,7 +1079,21 @@ async function rpcFetch(name, args){
 
 async function apiSyncProducts(){
   try{
-    const data = await supaFetch('/products?select=*', 'GET');
+    // Supabase/PostgREST no devuelve más de 1000 filas por consulta si no se
+    // pagina explícitamente. Con más de 1000 productos cargados, un simple
+    // select=* se quedaba trunco y los productos más nuevos (los que quedan
+    // fuera de las primeras 1000 filas) desaparecían solos de la app en el
+    // siguiente auto-sync, aunque seguían bien guardados en la base.
+    const pageSize = 1000;
+    let data = [];
+    let offset = 0;
+    while(true){
+      const page = await supaFetch(`/products?select=*&order=id.asc&limit=${pageSize}&offset=${offset}`, 'GET');
+      if(!page || page.length===0) break;
+      data = data.concat(page);
+      if(page.length < pageSize) break;
+      offset += pageSize;
+    }
     if(!data || data.length===0) return;
     const apiMapped = data.map(p=>{
       const local = state.products.find(lp=>lp._apiId===p.id);
