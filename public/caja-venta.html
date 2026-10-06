@@ -766,16 +766,19 @@ function onScanKeydown(ev){
   if(!raw) return;
   const byBarcode = products.find(p => p.barcode && p.barcode === raw);
   if(byBarcode){ addToCart(byBarcode.id); return; }
+  const byDisplayBarcode = products.find(p => p.displayBarcode && p.displayBarcode === raw);
+  if(byDisplayBarcode){ addToCart(byDisplayBarcode.id, byDisplayBarcode.displayQty||1); toast('Caja completa: x'+(byDisplayBarcode.displayQty||1)+' '+byDisplayBarcode.name, 'ok'); return; }
   const matches = filterProducts();
   if(matches.length === 1){ addToCart(matches[0].id); return; }
   toast(matches.length ? 'Hay varias coincidencias, elegí de la lista' : 'No se encontró el producto', 'err');
 }
-function addToCart(id){
+function addToCart(id, qty){
+  qty = qty||1;
   const p = products.find(x=>x.id===id);
   if(!p) return;
   const existing = cart.find(it=>it.id===id);
-  if(existing) existing.qty += 1;
-  else cart.push({id:p.id, name:p.name, price:p.price, qty:1, barcode:p.barcode||'', photo_url:p.photo_url, photo_clean_url:p.photo_clean_url});
+  if(existing) existing.qty += qty;
+  else cart.push({id:p.id, name:p.name, price:p.price, qty, barcode:p.barcode||'', photo_url:p.photo_url, photo_clean_url:p.photo_clean_url});
   searchQuery = '';
   saleError = '';
   render();
@@ -1429,7 +1432,7 @@ async function init(){
   try{
     const [settingsRows, productRows] = await Promise.all([
       posFetch('/app_settings?setting_key=in.(pos_config,fiscal_config,pos_banner)&select=setting_key,setting_value'),
-      posFetch('/products?select=id,name,description,price,stock,barcode,cat,photo_url,photo_clean_url&order=name'),
+      posFetch('/products?select=id,name,description,price,stock,barcode,display_qty,display_barcode,cat,photo_url,photo_clean_url&order=name'),
     ]);
     (settingsRows||[]).forEach(row=>{
       try{
@@ -1439,7 +1442,7 @@ async function init(){
         if(row.setting_key === 'pos_banner' && parsed) posBanner = parsed;
       }catch(e){}
     });
-    products = (productRows||[]).map(p=>({id:p.id, name:p.name, desc:p.description||'', price:Number(p.price)||0, stock:Number(p.stock)||0, barcode:p.barcode||'', cat:p.cat||'Otros', photo_url:p.photo_url||'', photo_clean_url:p.photo_clean_url||''}));
+    products = (productRows||[]).map(p=>({id:p.id, name:p.name, desc:p.description||'', price:Number(p.price)||0, stock:Number(p.stock)||0, barcode:p.barcode||'', displayQty:p.display_qty||null, displayBarcode:p.display_barcode||'', cat:p.cat||'Otros', photo_url:p.photo_url||'', photo_clean_url:p.photo_clean_url||''}));
   }catch(e){
     toast('No se pudo conectar: ' + e.message, 'err');
   }

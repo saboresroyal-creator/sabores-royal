@@ -1119,6 +1119,7 @@ async function apiSyncProducts(){
       sinAzucar: p.sin_azucar||false,
       displayQty: p.display_qty||null,
       displayDiscount: p.display_discount||null,
+      displayBarcode: p.display_barcode||"",
       promoPrice: p.promo_price ? Number(p.promo_price) : null,
       promoUntil: p.promo_until||null,
       superOffer: p.super_offer||false,
@@ -1488,6 +1489,7 @@ async function apiSaveProduct(product){
       sin_azucar: product.sinAzucar||false,
       display_qty: product.displayQty||null,
       display_discount: product.displayDiscount||null,
+      display_barcode: product.displayBarcode||null,
       promo_price: product.promoPrice||null,
       promo_until: product.promoUntil||null,
       super_offer: product.superOffer||false,
@@ -1806,7 +1808,8 @@ function cartItemLineTotal(item){
     return (effectivePriceForWeight(p)/1000) * item.grams;
   }
   const base = effectivePrice(p);
-  if(p.displayQty && p.displayDiscount && item.qty >= p.displayQty){
+  const client = state.currentClientPhone ? state.clients[state.currentClientPhone] : null;
+  if(!wholesaleModeActive(client) && p.displayQty && p.displayDiscount && item.qty >= p.displayQty){
     return Math.round(base * (1 - p.displayDiscount/100)) * item.qty;
   }
   return base * item.qty;
@@ -2931,7 +2934,7 @@ function renderProductDetail(id){
   const _unitPr = effectivePrice(p);
   const _clW = state.currentClientPhone ? state.clients[state.currentClientPhone] : null;
   const _isWholesale = wholesaleModeActive(_clW);
-  const _hasDisp = p.displayQty && p.displayDiscount && qty >= p.displayQty;
+  const _hasDisp = !_isWholesale && p.displayQty && p.displayDiscount && qty >= p.displayQty;
   const _lineTotal = _hasDisp ? Math.round(_unitPr * (1 - p.displayDiscount/100)) * qty : _unitPr * qty;
   const _pdPromo = _isWholesale ? null : activePromo(p);
   const _pdPromoPct = _pdPromo!==null ? Math.round((1-_pdPromo/p.price)*100) : null;
@@ -2948,7 +2951,10 @@ function renderProductDetail(id){
     <div class="pd-body">
       <h2>${p.name}</h2>
       <div class="pd-price">${pdPriceHtml(p)}</div>
-      ${p.displayQty && p.displayDiscount ? `<div style="background:${_hasDisp?'rgba(39,174,96,0.15)':'rgba(52,152,219,0.12)'};border:1px solid ${_hasDisp?'rgba(39,174,96,0.4)':'rgba(52,152,219,0.3)'};border-radius:10px;padding:10px 12px;margin:8px 0;font-size:13px;">${_hasDisp?`<span style="color:#2ecc71;font-weight:700;">✓ Precio display aplicado</span>`:`<span style="color:#5dade2;font-weight:700;">📦 Comprá ${p.displayQty} unidades</span> →`} <b>${money(Math.round(applyClientDiscount(_unitPr*(1-p.displayDiscount/100))))}/u</b> <span style="background:#e67e22;color:#fff;font-size:9px;font-weight:800;border-radius:6px;padding:2px 6px;">-${p.displayDiscount}%</span></div>` : ''}
+      ${!_isWholesale && p.displayQty && p.displayDiscount ? `<div style="background:${_hasDisp?'rgba(39,174,96,0.15)':'rgba(52,152,219,0.12)'};border:1px solid ${_hasDisp?'rgba(39,174,96,0.4)':'rgba(52,152,219,0.3)'};border-radius:10px;padding:10px 12px;margin:8px 0;font-size:13px;">
+        <div>${_hasDisp?`<span style="color:#2ecc71;font-weight:700;">✓ Precio display aplicado</span>`:`<span style="color:#5dade2;font-weight:700;">📦 Comprá ${p.displayQty} unidades</span> →`} <b>${money(Math.round(applyClientDiscount(_unitPr*(1-p.displayDiscount/100))))}/u</b> <span style="background:#e67e22;color:#fff;font-size:9px;font-weight:800;border-radius:6px;padding:2px 6px;">-${p.displayDiscount}%</span></div>
+        ${!_hasDisp ? `<button class="pc-add" style="margin-top:8px; background:#5dade2; color:#fff;" onclick="setDetailQty(${p.displayQty})">Comprar caja x${p.displayQty} directo</button>` : ''}
+      </div>` : ''}
       ${p.sinAzucar ? `<span style="background:#b8860b;color:#fff;font-size:10px;font-weight:800;border-radius:8px;padding:3px 10px;display:inline-block;margin-bottom:6px;cursor:pointer;" onclick="nav('catalog',{section:'sinazucar'})">SIN AZÚCAR · SUGAR FREE</span>` : ''}
       <p class="pd-desc">${p.desc||''}</p>
       ${outOfStock ? `
@@ -3015,18 +3021,17 @@ function applyClientDiscount(price){
   const pct = clientDiscountPct();
   return pct > 0 ? Math.round(price * (1 - pct/100)) : price;
 }
-// "Suelto" (precio actual por unidad — minorista o mayorista, el que
-// corresponda) vs. "Caja/Display" (precio por unidad llevando el bulto
-// completo, con el descuento de p.displayDiscount cargado en el
-// producto). effectivePrice() ya devuelve el precio mayorista cuando
-// corresponde, así que el descuento de bulto se aplica sobre el precio
-// de cada cliente — mayorista incluido, no solo minorista.
+// "Suelto" (precio minorista por unidad) vs. "Caja/Display" (precio por
+// unidad llevando el bulto completo, con el descuento de p.displayDiscount
+// cargado en el producto). Solo aplica a clientes minoristas — el
+// mayorista ya tiene su propio precio y no suma el descuento de bulto.
 function displayBoxHintHtml(p){
   const unitDisplay = Math.round(applyClientDiscount(effectivePrice(p)*(1-p.displayDiscount/100)));
   const boxTotal = unitDisplay * p.displayQty;
   return `<div style="margin-top:6px; background:rgba(198,34,34,0.09); border:1px solid rgba(198,34,34,0.28); border-radius:9px; padding:6px 9px;">
     <div style="color:#c62222; font-weight:800; font-size:13.5px; line-height:1.25;">Mejor ${money(unitDisplay)} <span style="font-weight:600; font-size:10.5px;">/un.</span></div>
     <div style="font-size:10.5px; color:rgba(44,15,82,0.75); font-weight:700; margin-top:1px;">📦 Caja x${p.displayQty} · ${money(boxTotal)}</div>
+    <button class="pc-add" style="margin-top:6px; background:#c62222; color:#fff;" onclick="event.stopPropagation(); addToCart('${p.id}', ${p.displayQty})">Comprar caja x${p.displayQty}</button>
   </div>`;
 }
 function discBadge(pct, sm=false){
@@ -3081,6 +3086,8 @@ function pcImgBadgeHtml(p){
 // no repetir la lógica de "sin stock" en cada uno.
 function pcCardBodyHtml(p){
   const outOfStock = isOutOfStock(p);
+  const client = state.currentClientPhone ? state.clients[state.currentClientPhone] : null;
+  const isWholesaleClient = wholesaleModeActive(client);
   return `
     <h4>${p.name}</h4>
     ${p.sellByWeight ? `
@@ -3088,7 +3095,7 @@ function pcCardBodyHtml(p){
       <button class="pc-add" onclick="event.stopPropagation(); openProduct('${p.id}')">Elegir cantidad</button>
     ` : `
       <div class="pc-price">${pcPriceHtml(p)}</div>
-      ${p.displayQty && p.displayDiscount && !outOfStock ? displayBoxHintHtml(p) : ''}
+      ${!isWholesaleClient && p.displayQty && p.displayDiscount && !outOfStock ? displayBoxHintHtml(p) : ''}
       ${outOfStock
         ? `<button class="pc-add" disabled>Sin stock</button>`
         : `<button class="pc-add" onclick="event.stopPropagation(); addToCart('${p.id}',1)">Agregar</button>`}
@@ -7414,6 +7421,14 @@ function openProductModal(id){
           </div>
         </div>
         <p style="font-size:11px; color:rgba(255,255,255,0.45); margin-top:8px;">Si el cliente compra esa cantidad, se aplica el descuento automáticamente.</p>
+        <div class="form-group" style="margin:10px 0 0;">
+          <label>Código de barras de la caja/display</label>
+          <div style="display:flex; gap:8px;">
+            <input id="pm-display-barcode" value="${p&&p.displayBarcode?p.displayBarcode:''}" placeholder="Escaneá o escribí el código de la caja" style="flex:1;">
+            <button type="button" class="icon-btn" style="flex:none; width:44px;" title="Escanear" onclick="openBarcodeScannerModal(code=>{ document.getElementById('pm-display-barcode').value=code; })">${ic('camera')}</button>
+          </div>
+          <p style="font-size:11px; color:rgba(255,255,255,0.45); margin-top:4px;">Es un código distinto al de la unidad suelta — escaneá el que trae impreso la caja cerrada.</p>
+        </div>
       </div>
 
       <div style="padding:6px 0 0; display:flex; gap:10px;">
@@ -7511,6 +7526,7 @@ function saveProductModal(id){
   const hidden = document.getElementById("pm-hidden-toggle").classList.contains("on");
   const displayQty = Number(document.getElementById("pm-display-qty").value)||null;
   const displayDiscount = Number(document.getElementById("pm-display-discount").value)||null;
+  const displayBarcode = document.getElementById("pm-display-barcode").value.trim();
   const superOffer = document.getElementById("pm-superoffer-toggle").classList.contains("on");
   const promoPriceRaw = sellByWeight
     ? document.getElementById("pm-promo-price-per-kg").value.trim()
@@ -7539,12 +7555,12 @@ function saveProductModal(id){
   let savedProduct;
   if(id){
     const p = state.products.find(pr=>pr.id===id);
-    Object.assign(p, {name, section, cat, sub, price, wholesalePrice, stock, desc, barcode, sellByWeight, pricePerKg, wholesalePricePerKg, minGrams, sinTacc, sinAzucar, hidden, displayQty, displayDiscount, promoPrice, promoUntil, superOffer, photo:adminPhotoDraft.current||p.photo, photoClean});
+    Object.assign(p, {name, section, cat, sub, price, wholesalePrice, stock, desc, barcode, sellByWeight, pricePerKg, wholesalePricePerKg, minGrams, sinTacc, sinAzucar, hidden, displayQty, displayDiscount, displayBarcode, promoPrice, promoUntil, superOffer, photo:adminPhotoDraft.current||p.photo, photoClean});
     savedProduct = p;
   }else{
     savedProduct = {
       id: "p"+Date.now(), section, cat, sub, name, price, wholesalePrice, stock, desc, barcode,
-      sellByWeight, pricePerKg, wholesalePricePerKg, minGrams, sinTacc, sinAzucar, hidden, displayQty, displayDiscount, promoPrice, promoUntil, superOffer,
+      sellByWeight, pricePerKg, wholesalePricePerKg, minGrams, sinTacc, sinAzucar, hidden, displayQty, displayDiscount, displayBarcode, promoPrice, promoUntil, superOffer,
       photo: adminPhotoDraft.current||"", photoClean
     };
     state.products.push(savedProduct);
