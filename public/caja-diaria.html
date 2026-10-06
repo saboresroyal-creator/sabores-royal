@@ -1555,7 +1555,7 @@ function renderStatsComparativoMeses(container, cajaIdx) {
       sumTotal+=s.total; sumEf+=s.efectivo; sumTar+=s.tarjeta; sumNeg+=s.negro; sumTk+=s.tickets; sumGst+=s.gastos;
       if(s.total>0) diasLaborables++;
     });
-    return { mesKey, sumTotal, sumEf, sumTar, sumNeg, sumTk, sumGst, diasLaborables, promDiario: diasLaborables>0?sumTotal/diasLaborables:0, resultado: sumTotal-sumGst };
+    return { mesKey, sumTotal, sumEf, sumTar, sumNeg, sumTk, sumGst, diasLaborables, promDiario: diasLaborables>0?sumTotal/diasLaborables:0, ticketProm: sumTk>0?sumTotal/sumTk:0, resultado: sumTotal-sumGst };
   });
 
   filas.forEach((f,i)=>{
@@ -1572,6 +1572,7 @@ function renderStatsComparativoMeses(container, cajaIdx) {
       <td class="num red">${pesos(f.sumGst)}</td>
       <td class="num ${f.resultado>=0?'green':'red'}">${pesos(f.resultado)}</td>
       <td class="num">${f.sumTk}</td>
+      <td class="num gold">${pesos(f.ticketProm)}</td>
       <td class="num">${f.diasLaborables}</td>
       <td class="num">${pesos(f.promDiario)}</td>
       <td class="num" style="color:${f.variacion==null?'var(--muted)':(f.variacion>=0?'var(--green)':'var(--red)')}">${f.variacion==null?'—':(f.variacion>=0?'▲ ':'▼ ')+Math.abs(f.variacion).toFixed(1)+'%'}</td>
@@ -1596,6 +1597,7 @@ function renderStatsComparativoMeses(container, cajaIdx) {
             <th class="num red">Gastos</th>
             <th class="num">Resultado neto</th>
             <th class="num">Tickets</th>
+            <th class="num yellow">Prom./ticket</th>
             <th class="num">Días laborables</th>
             <th class="num">Prom./día laborable</th>
             <th class="num">Var. vs mes ant.</th>
