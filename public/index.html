@@ -2955,6 +2955,7 @@ function renderProductDetail(id){
         <div>${_hasDisp?`<span style="color:#2ecc71;font-weight:700;">✓ Precio display aplicado</span>`:`<span style="color:#5dade2;font-weight:700;">📦 Comprá ${p.displayQty} unidades</span> →`} <b>${money(Math.round(applyClientDiscount(_unitPr*(1-p.displayDiscount/100))))}/u</b> <span style="background:#e67e22;color:#fff;font-size:9px;font-weight:800;border-radius:6px;padding:2px 6px;">-${p.displayDiscount}%</span></div>
         ${!_hasDisp ? `<button class="pc-add" style="margin-top:8px; background:#5dade2; color:#fff;" onclick="setDetailQty(${p.displayQty})">Comprar caja x${p.displayQty} directo</button>` : ''}
       </div>` : ''}
+      ${_isWholesale && p.displayQty && qty < p.displayQty ? `<button class="pc-add" style="margin:8px 0; background:transparent; border:1.5px solid #6db8e8; color:#6db8e8;" onclick="setDetailQty(${p.displayQty})">📦 Comprar caja x${p.displayQty} directo</button>` : ''}
       ${p.sinAzucar ? `<span style="background:#b8860b;color:#fff;font-size:10px;font-weight:800;border-radius:8px;padding:3px 10px;display:inline-block;margin-bottom:6px;cursor:pointer;" onclick="nav('catalog',{section:'sinazucar'})">SIN AZÚCAR · SUGAR FREE</span>` : ''}
       <p class="pd-desc">${p.desc||''}</p>
       ${outOfStock ? `
@@ -3099,6 +3100,7 @@ function pcCardBodyHtml(p){
       ${outOfStock
         ? `<button class="pc-add" disabled>Sin stock</button>`
         : `<button class="pc-add" onclick="event.stopPropagation(); addToCart('${p.id}',1)">Agregar</button>`}
+      ${isWholesaleClient && p.displayQty && !outOfStock ? `<button class="pc-add" style="margin-top:6px; background:transparent; border:1.5px solid #6db8e8; color:#6db8e8;" onclick="event.stopPropagation(); addToCart('${p.id}', ${p.displayQty})">📦 Comprar caja x${p.displayQty}</button>` : ''}
     `}
   `;
 }
@@ -9061,7 +9063,9 @@ function renderAdminClientDetail(phone){
         ${c.discountPct?`<span style="color:var(--gold2); font-weight:600; font-size:12.5px;">· ${c.discountPct}% desc. especial</span>`:''}
       </div>
       <div style="font-size:13px; color:rgba(255,255,255,0.75); line-height:1.9;">
-        <div style="display:flex; align-items:center; gap:6px;">${ic('phone')} ${escapeHtml(c.phone)}</div>
+        <div style="display:flex; align-items:center; gap:6px;">${ic('phone')} ${escapeHtml(c.phone)}
+          <button onclick="editClientPhone('${c.phone}')" title="Corregir teléfono" style="background:none; border:none; color:rgba(255,255,255,0.45); cursor:pointer; padding:2px; display:inline-flex; align-items:center;">${ic('edit')}</button>
+        </div>
         ${c.email?`<div>✉️ ${escapeHtml(c.email)}</div>`:''}
         ${c.address?`<div>📍 ${escapeHtml(c.address)}${c.city?`, ${escapeHtml(c.city)}`:''}</div>`:''}
         ${c.doc?`<div>🪪 DNI/CUIT ${escapeHtml(c.doc)}</div>`:''}
@@ -9146,6 +9150,34 @@ async function apiDeleteClient(phone){
     console.warn('Error eliminando cliente:', e);
     toast('El cliente se borró acá pero no en el servidor: '+e.message, 'err');
   }
+}
+// Corrige el teléfono de un cliente ya cargado (typo, falta el "9", etc.)
+// sin perder sus puntos, su estado de mayorista ni su historial de pedidos.
+// phone NO es la primary key en Supabase (clients.id lo es), así que
+// cambiarlo con un UPDATE es seguro — pero local (state.clients) sí está
+// indexado por teléfono, así que hay que mover la entrada de clave.
+function editClientPhone(phone){
+  const c = state.clients[phone];
+  if(!c) return;
+  const current = phone.replace(/^\+549/,'');
+  const input = prompt(`Teléfono de ${c.name} (actual: ${c.phone})\nIngresá el número correcto (con o sin 9/054, se normaliza solo).`, current);
+  if(input === null || !input.trim()) return;
+  const newPhone = normalizePhone(input);
+  if(newPhone === phone){ toast('Es el mismo número', 'err'); return; }
+  if(state.clients[newPhone]){ toast('Ya existe otro cliente con ese número — fusionalos en vez de pisarlo', 'err'); return; }
+  delete state.clients[phone];
+  c.phone = newPhone;
+  state.clients[newPhone] = c;
+  if(state.currentClientPhone === phone) state.currentClientPhone = newPhone;
+  state.orders.forEach(o=>{ if(o.customer && o.customer.phone===phone) o.customer.phone = newPhone; });
+  saveState();
+  render();
+  adminFetch('/clients?phone=eq.'+encodeURIComponent(phone), 'PATCH', {phone:newPhone}).catch(e=>{
+    console.warn('Error guardando teléfono:', e);
+    toast('Se corrigió acá pero no en el servidor: '+e.message, 'err');
+  });
+  adminFetch('/orders?client_phone=eq.'+encodeURIComponent(phone), 'PATCH', {client_phone:newPhone}).catch(e=>console.warn('Error moviendo pedidos:', e));
+  toast(`Teléfono corregido a ${newPhone}`, 'ok');
 }
 function editClientPoints(phone){
   const c = state.clients[phone];
