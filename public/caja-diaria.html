@@ -1050,6 +1050,14 @@ function renderDiaMeta(d) {
   renderClimaBox(d);
 }
 
+// Resume lluvia/temperatura para un conjunto de fechas (solo las que ya tienen clima cargado)
+function climaStatsFechas(fechas) {
+  const climas = fechas.map(d=>state.dias[d] && state.dias[d].clima).filter(Boolean);
+  const conLluvia = climas.filter(c=>c.lluvia>0).length;
+  const tempProm = climas.length ? climas.reduce((s,c)=>s+(c.tMin+c.tMax)/2,0)/climas.length : null;
+  return { total: climas.length, conLluvia, tempProm };
+}
+
 function diaBadgesHtml(day) {
   if(!day) return '';
   let html = '';
@@ -1686,6 +1694,8 @@ function renderStatsTodas(container, range) {
   const minV = ventasConDatos.length ? Math.min(...ventasConDatos) : 0;
   const avgV = ventasConDatos.length ? sumTotal/ventasConDatos.length : 0;
   const ticketProm = sumTk>0 ? sumTotal/sumTk : 0;
+  const diasLaborablesFechas = range.filter(d=>dayStats(d).total>0);
+  const climaLab = climaStatsFechas(diasLaborablesFechas);
   const esDia = range.length === 1;
   const chartLabels = range.map(d=>d.slice(5));
   const chartTotal = range.map(d=>dayStats(d).total);
@@ -1713,7 +1723,11 @@ function renderStatsTodas(container, range) {
         <div class="stat"><div class="stat-label">Prom. diario</div><div class="stat-value">${pesos(avgV)}</div></div>
         <div class="stat"><div class="stat-label">Mín. día</div><div class="stat-value">${pesos(minV)}</div></div>
         <div class="stat"><div class="stat-label">Días laborables</div><div class="stat-value">${ventasConDatos.length}</div><div style="font-size:11px;color:var(--muted);margin-top:4px">de ${range.length} días</div></div>
-      </div>` : ''}
+      </div>
+      ${climaLab.total>0 ? `<div class="grid2 mt16">
+        <div class="stat"><div class="stat-label">Días con lluvia</div><div class="stat-value" style="color:#60a5fa;">🌧️ ${climaLab.conLluvia}</div><div style="font-size:11px;color:var(--muted);margin-top:4px">de ${climaLab.total} días laborables con clima</div></div>
+        <div class="stat"><div class="stat-label">Temp. promedio</div><div class="stat-value gold">${climaLab.tempProm.toFixed(1)}°</div></div>
+      </div>` : ''}` : ''}
     </div>
     ${!esDia && range.length<=62 ? `
     <div class="card mb16">
@@ -1819,6 +1833,8 @@ function renderStatsCajaIndividual(container, range, cajaIdx) {
   const minV = ventasDias.length ? Math.min(...ventasDias) : 0;
   const avgV = ventasDias.length ? sumTotal/ventasDias.length : 0;
   const ticketProm = sumTk>0 ? sumTotal/sumTk : 0;
+  const diasLaborablesFechas = diasConDatos.filter(d=>dayCajaStats(d,cajaIdx).total>0);
+  const climaLab = climaStatsFechas(diasLaborablesFechas);
   const esDia = range.length===1;
 
   const chartLabels = range.map(d=>d.slice(5));
@@ -1848,7 +1864,11 @@ function renderStatsCajaIndividual(container, range, cajaIdx) {
         <div class="stat"><div class="stat-label">Prom. diario</div><div class="stat-value">${pesos(avgV)}</div></div>
         <div class="stat"><div class="stat-label">Mín. día</div><div class="stat-value">${pesos(minV)}</div></div>
         <div class="stat"><div class="stat-label">Días laborables</div><div class="stat-value" style="color:${color}">${ventasDias.length}</div><div style="font-size:11px;color:var(--muted);margin-top:4px">de ${range.length} días</div></div>
-      </div>` : ''}
+      </div>
+      ${climaLab.total>0 ? `<div class="grid2 mt16">
+        <div class="stat"><div class="stat-label">Días con lluvia</div><div class="stat-value" style="color:#60a5fa;">🌧️ ${climaLab.conLluvia}</div><div style="font-size:11px;color:var(--muted);margin-top:4px">de ${climaLab.total} días laborables con clima</div></div>
+        <div class="stat"><div class="stat-label">Temp. promedio</div><div class="stat-value" style="color:${color}">${climaLab.tempProm.toFixed(1)}°</div></div>
+      </div>` : ''}` : ''}
     </div>
     ${!esDia && range.length<=62 ? `
     <div class="card mb16">
@@ -1907,13 +1927,15 @@ function renderStatsComparativoMeses(container, cajaIdx) {
 
   const filas = Object.keys(porMes).sort().map(mesKey => {
     let sumTotal=0,sumEf=0,sumTar=0,sumNeg=0,sumTk=0,sumGst=0,diasLaborables=0,diasFeriados=0;
+    const fechasLaborables = [];
     porMes[mesKey].forEach(d=>{
       const s = statsFn(d);
       sumTotal+=s.total; sumEf+=s.efectivo; sumTar+=s.tarjeta; sumNeg+=s.negro; sumTk+=s.tickets; sumGst+=s.gastos;
-      if(s.total>0) diasLaborables++;
+      if(s.total>0) { diasLaborables++; fechasLaborables.push(d); }
       if(state.dias[d] && state.dias[d].feriado) diasFeriados++;
     });
-    return { mesKey, sumTotal, sumEf, sumTar, sumNeg, sumTk, sumGst, diasLaborables, diasFeriados, promDiario: diasLaborables>0?sumTotal/diasLaborables:0, ticketProm: sumTk>0?sumTotal/sumTk:0, resultado: sumTotal-sumGst };
+    const climaLab = climaStatsFechas(fechasLaborables);
+    return { mesKey, sumTotal, sumEf, sumTar, sumNeg, sumTk, sumGst, diasLaborables, diasFeriados, climaLab, promDiario: diasLaborables>0?sumTotal/diasLaborables:0, ticketProm: sumTk>0?sumTotal/sumTk:0, resultado: sumTotal-sumGst };
   });
 
   filas.forEach((f,i)=>{
@@ -1933,6 +1955,8 @@ function renderStatsComparativoMeses(container, cajaIdx) {
       <td class="num gold">${pesos(f.ticketProm)}</td>
       <td class="num">${f.diasLaborables}</td>
       <td class="num">${f.diasFeriados>0?('🎉 '+f.diasFeriados):'—'}</td>
+      <td class="num">${f.climaLab.total>0?('🌧️ '+f.climaLab.conLluvia+' / '+f.climaLab.total):'—'}</td>
+      <td class="num">${f.climaLab.tempProm!=null?f.climaLab.tempProm.toFixed(1)+'°':'—'}</td>
       <td class="num">${pesos(f.promDiario)}</td>
       <td class="num" style="color:${f.variacion==null?'var(--muted)':(f.variacion>=0?'var(--green)':'var(--red)')}">${f.variacion==null?'—':(f.variacion>=0?'▲ ':'▼ ')+Math.abs(f.variacion).toFixed(1)+'%'}</td>
     </tr>
@@ -1959,6 +1983,8 @@ function renderStatsComparativoMeses(container, cajaIdx) {
             <th class="num yellow">Prom./ticket</th>
             <th class="num">Días laborables</th>
             <th class="num">Feriados</th>
+            <th class="num">Días con lluvia</th>
+            <th class="num">Temp. prom.</th>
             <th class="num">Prom./día laborable</th>
             <th class="num">Var. vs mes ant.</th>
           </tr></thead>
