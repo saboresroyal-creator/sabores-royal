@@ -414,6 +414,13 @@ tr:hover td { background:var(--surface2); }
     <div style="display:flex;align-items:flex-end;">
       <button class="btn btn-ghost" onclick="setToday()">HOY</button>
     </div>
+    <div style="display:flex;align-items:flex-end;">
+      <button class="btn btn-ghost" id="btnFeriado" onclick="toggleFeriado()">🎉 Feriado</button>
+    </div>
+    <div id="climaBox" style="display:flex;align-items:center;gap:6px;font-family:var(--mono);font-size:13px;color:var(--text);margin-left:auto;"></div>
+  </div>
+  <div id="feriadoNombreWrap" style="display:none;margin:-10px 0 16px;">
+    <input type="text" id="feriadoNombreInput" placeholder="Nombre del feriado (opcional, ej: Día de la Independencia)" oninput="updateFeriadoNombre(this.value)" style="width:100%;background:var(--surface2);border:1px solid var(--border);color:var(--text);border-radius:8px;padding:8px 12px;font-size:13px;">
   </div>
 
   <!-- RESUMEN DEL DÍA -->
@@ -1005,6 +1012,115 @@ function loadCargaDay() {
   renderCajas(day, d);
   updateResumen(d);
   updateEfectivoRealCentral(d);
+  renderDiaMeta(d);
+}
+
+// ── FERIADO Y CLIMA DEL DÍA ──
+const CLIMA_LAT = -32.9468, CLIMA_LON = -60.6393; // Rosario, Santa Fe
+
+function toggleFeriado() {
+  const d = document.getElementById('selectedDate').value;
+  if(!d) return;
+  const day = getDay(d);
+  day.feriado = !day.feriado;
+  if(!day.feriado) day.feriadoNombre = '';
+  save();
+  renderDiaMeta(d);
+}
+
+function updateFeriadoNombre(val) {
+  const d = document.getElementById('selectedDate').value;
+  if(!d) return;
+  getDay(d).feriadoNombre = val;
+  save();
+}
+
+function renderDiaMeta(d) {
+  const day = state.dias[d] || {};
+  const btn = document.getElementById('btnFeriado');
+  const wrap = document.getElementById('feriadoNombreWrap');
+  const input = document.getElementById('feriadoNombreInput');
+  if(btn) {
+    btn.style.borderColor = day.feriado ? '#f59e0b' : '';
+    btn.style.color = day.feriado ? '#f59e0b' : '';
+    btn.style.background = day.feriado ? 'rgba(245,158,11,0.12)' : '';
+  }
+  if(wrap) wrap.style.display = day.feriado ? 'block' : 'none';
+  if(input && document.activeElement !== input) input.value = day.feriadoNombre || '';
+  renderClimaBox(d);
+}
+
+function diaBadgesHtml(day) {
+  if(!day) return '';
+  let html = '';
+  if(day.feriado) html += ` <span title="${(day.feriadoNombre||'Feriado').replace(/"/g,'')}" style="font-size:11px;">🎉</span>`;
+  if(day.clima) {
+    const [icon,label] = weatherLabel(day.clima.code);
+    html += ` <span title="${label}" style="font-size:11px;color:var(--muted);font-weight:400;">${icon} ${day.clima.tMin}°/${day.clima.tMax}°</span>`;
+  }
+  return html;
+}
+
+function weatherLabel(code) {
+  const map = {
+    0:['☀️','Despejado'], 1:['🌤️','Mayormente despejado'], 2:['⛅','Parcialmente nublado'], 3:['☁️','Nublado'],
+    45:['🌫️','Niebla'], 48:['🌫️','Niebla escarchada'],
+    51:['🌦️','Llovizna débil'], 53:['🌦️','Llovizna'], 55:['🌧️','Llovizna intensa'],
+    56:['🌧️','Llovizna helada'], 57:['🌧️','Llovizna helada intensa'],
+    61:['🌦️','Lluvia débil'], 63:['🌧️','Lluvia'], 65:['🌧️','Lluvia intensa'],
+    66:['🌧️','Lluvia helada'], 67:['🌧️','Lluvia helada intensa'],
+    71:['🌨️','Nieve débil'], 73:['🌨️','Nieve'], 75:['❄️','Nieve intensa'], 77:['🌨️','Granizo fino'],
+    80:['🌦️','Chaparrones débiles'], 81:['🌧️','Chaparrones'], 82:['⛈️','Chaparrones intensos'],
+    85:['🌨️','Chaparrones de nieve'], 86:['❄️','Chaparrones de nieve intensos'],
+    95:['⛈️','Tormenta'], 96:['⛈️','Tormenta con granizo'], 99:['⛈️','Tormenta con granizo fuerte']
+  };
+  return map[code] || ['🌡️','Sin datos'];
+}
+
+async function fetchClima(d, force) {
+  const day = getDay(d);
+  if(day.clima && !force) return day.clima;
+  const today = todayStr();
+  const diffDays = Math.round((new Date(d+'T00:00:00') - new Date(today+'T00:00:00')) / 86400000);
+  const reciente = diffDays >= -6 && diffDays <= 16;
+  const base = reciente ? 'https://api.open-meteo.com/v1/forecast' : 'https://archive-api.open-meteo.com/v1/archive';
+  const url = `${base}?latitude=${CLIMA_LAT}&longitude=${CLIMA_LON}&start_date=${d}&end_date=${d}&daily=weathercode,temperature_2m_max,temperature_2m_min&timezone=America%2FArgentina%2FBuenos_Aires`;
+  try{
+    const res = await fetch(url);
+    if(!res.ok) throw new Error('HTTP '+res.status);
+    const data = await res.json();
+    if(!data.daily || !data.daily.time || !data.daily.time.length) throw new Error('sin datos');
+    day.clima = {
+      tMax: Math.round(data.daily.temperature_2m_max[0]),
+      tMin: Math.round(data.daily.temperature_2m_min[0]),
+      code: data.daily.weathercode[0],
+      fetchedAt: Date.now()
+    };
+    save();
+    return day.clima;
+  }catch(e){
+    console.warn('Clima:', e);
+    return null;
+  }
+}
+
+function renderClimaBox(d) {
+  const box = document.getElementById('climaBox');
+  if(!box) return;
+  const day = state.dias[d];
+  if(day && day.clima) {
+    const [icon,label] = weatherLabel(day.clima.code);
+    box.innerHTML = `<span style="font-size:18px;">${icon}</span><span>${day.clima.tMin}°/${day.clima.tMax}° <span style="color:var(--muted);font-size:11px;">· ${label}</span></span><button class="btn btn-ghost" style="padding:2px 8px;font-size:10px;" onclick="refreshClima('${d}')" title="Actualizar clima">🔄</button>`;
+  } else {
+    box.innerHTML = `<span style="color:var(--muted);font-size:12px;">Cargando clima…</span>`;
+    fetchClima(d).then(()=>{ if(document.getElementById('selectedDate').value===d) renderClimaBox(d); });
+  }
+}
+
+function refreshClima(d) {
+  const box = document.getElementById('climaBox');
+  if(box) box.innerHTML = '<span style="color:var(--muted);font-size:12px;">Actualizando…</span>';
+  fetchClima(d, true).then(()=>renderClimaBox(d));
 }
 
 function toggleCajasOpcionales() {
@@ -1612,9 +1728,10 @@ function renderTablaDiariaTodas(range) {
     const day = state.dias[d];
     const ds = dayStats(d);
     const fecha = d.slice(8)+'/'+d.slice(5,7)+'/'+d.slice(0,4);
+    const fechaBadges = diaBadgesHtml(day);
     // Fila total del día
     const filaDia = `<tr style="background:rgba(197,160,40,0.1);">
-      <td class="yellow" style="font-weight:700;">${fecha}</td>
+      <td class="yellow" style="font-weight:700;">${fecha}${fechaBadges}</td>
       <td style="color:var(--muted);font-size:11px;">TOTAL DÍA</td>
       <td class="num green">${pesos(ds.efectivo)}</td>
       <td class="num blue">${pesos(ds.tarjeta)}</td>
@@ -1770,13 +1887,14 @@ function renderStatsComparativoMeses(container, cajaIdx) {
   const statsFn = isTodas ? dayStats : (d=>dayCajaStats(d, cajaIdx));
 
   const filas = Object.keys(porMes).sort().map(mesKey => {
-    let sumTotal=0,sumEf=0,sumTar=0,sumNeg=0,sumTk=0,sumGst=0,diasLaborables=0;
+    let sumTotal=0,sumEf=0,sumTar=0,sumNeg=0,sumTk=0,sumGst=0,diasLaborables=0,diasFeriados=0;
     porMes[mesKey].forEach(d=>{
       const s = statsFn(d);
       sumTotal+=s.total; sumEf+=s.efectivo; sumTar+=s.tarjeta; sumNeg+=s.negro; sumTk+=s.tickets; sumGst+=s.gastos;
       if(s.total>0) diasLaborables++;
+      if(state.dias[d] && state.dias[d].feriado) diasFeriados++;
     });
-    return { mesKey, sumTotal, sumEf, sumTar, sumNeg, sumTk, sumGst, diasLaborables, promDiario: diasLaborables>0?sumTotal/diasLaborables:0, ticketProm: sumTk>0?sumTotal/sumTk:0, resultado: sumTotal-sumGst };
+    return { mesKey, sumTotal, sumEf, sumTar, sumNeg, sumTk, sumGst, diasLaborables, diasFeriados, promDiario: diasLaborables>0?sumTotal/diasLaborables:0, ticketProm: sumTk>0?sumTotal/sumTk:0, resultado: sumTotal-sumGst };
   });
 
   filas.forEach((f,i)=>{
@@ -1795,6 +1913,7 @@ function renderStatsComparativoMeses(container, cajaIdx) {
       <td class="num">${f.sumTk}</td>
       <td class="num gold">${pesos(f.ticketProm)}</td>
       <td class="num">${f.diasLaborables}</td>
+      <td class="num">${f.diasFeriados>0?('🎉 '+f.diasFeriados):'—'}</td>
       <td class="num">${pesos(f.promDiario)}</td>
       <td class="num" style="color:${f.variacion==null?'var(--muted)':(f.variacion>=0?'var(--green)':'var(--red)')}">${f.variacion==null?'—':(f.variacion>=0?'▲ ':'▼ ')+Math.abs(f.variacion).toFixed(1)+'%'}</td>
     </tr>
@@ -1820,6 +1939,7 @@ function renderStatsComparativoMeses(container, cajaIdx) {
             <th class="num">Tickets</th>
             <th class="num yellow">Prom./ticket</th>
             <th class="num">Días laborables</th>
+            <th class="num">Feriados</th>
             <th class="num">Prom./día laborable</th>
             <th class="num">Var. vs mes ant.</th>
           </tr></thead>
@@ -1861,7 +1981,7 @@ function renderTablaDiariaCaja(range, cajaIdx, nombre, color) {
       ? (c.gastos||[]).map(g=>`<span style="font-size:10px;color:var(--muted);display:block;">• ${g.concepto||'Gasto'}: ${pesos(parseFloat(g.monto)||0)}</span>`).join('')
       : '';
     return `<tr>
-      <td class="yellow" style="font-weight:600;">${fecha}</td>
+      <td class="yellow" style="font-weight:600;">${fecha}${diaBadgesHtml(day)}</td>
       <td style="font-size:12px;color:var(--muted)">${cs.cajero}</td>
       <td class="num green">${pesos(cs.efectivo)}</td>
       <td class="num blue">${pesos(cs.tarjeta)}</td>
