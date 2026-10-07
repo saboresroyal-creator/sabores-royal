@@ -2763,10 +2763,17 @@ function parseFilaCheque(cols, anioBase) {
   const monto = parseArNumber(cols[4]||'');
   let fechaEmision = parseFechaFlexible(cols[1]||'', anioBase);
   let fechaPago = parseFechaFlexible(cols[2]||'', anioBase);
-  // Si el vencimiento quedó antes que la emisión, es porque cruza de año
-  // (ej: emitido en diciembre, vence en enero) — se le suma un año.
+  // Si el vencimiento quedó antes que la emisión SOLO se asume cruce de año
+  // cuando el patrón es compatible (emitido oct/nov/dic, vence ene/feb/mar) —
+  // si quedó antes dentro del mismo mes o meses cercanos, es más probable que
+  // sea un dato tal cual está en la planilla (no siempre están en orden) y no
+  // hay que inventarle un año de más.
   if(fechaEmision && fechaPago && fechaPago < fechaEmision) {
-    fechaPago = (parseInt(fechaPago.slice(0,4),10)+1) + fechaPago.slice(4);
+    const mesEmision = parseInt(fechaEmision.slice(5,7),10);
+    const mesPago = parseInt(fechaPago.slice(5,7),10);
+    if(mesEmision>=10 && mesPago<=3) {
+      fechaPago = (parseInt(fechaPago.slice(0,4),10)+1) + fechaPago.slice(4);
+    }
   }
   return {numero, fechaEmision, fechaPago, proveedor, monto};
 }
