@@ -643,6 +643,14 @@ tr:hover td { background:var(--surface2); }
      PANEL: CHEQUES PROVEEDORES
 ══════════════════════════════════════════ -->
 <div class="panel" id="panel-cheques">
+
+  <!-- Sub-vistas: Cheques oficiales vs Borrador -->
+  <div class="ptabs mb16" id="chequesVistaTabs">
+    <button class="ptab active" onclick="setChequesVista('cheques',this)">📋 Cheques</button>
+    <button class="ptab" onclick="setChequesVista('borrador',this)">📝 Borrador<span id="chequesBorradorBadge"></span></button>
+  </div>
+
+  <div id="chequesVistaCheques">
   <!-- Calendario de vencimientos -->
   <div class="card mb16">
     <div class="card-title" style="display:flex;align-items:center;justify-content:space-between;flex-wrap:wrap;row-gap:8px;">
@@ -722,6 +730,56 @@ tr:hover td { background:var(--surface2); }
 
   <!-- Lista -->
   <div id="chequesList"></div>
+  </div>
+
+  <!-- ══ VISTA: BORRADOR ══ -->
+  <div id="chequesVistaBorrador" style="display:none;">
+    <p class="hint" style="margin-bottom:16px;">Cargá acá los cheques que todavía estás por emitir (por ejemplo, los 10 que tenés que hacer hoy). Cuando ya los hayas hecho y controlado uno por uno, confirmalos para que pasen a la lista general de Cheques.</p>
+
+    <!-- Formulario -->
+    <div class="card mb16">
+      <div class="card-title"><div class="dot"></div>NUEVO CHEQUE (BORRADOR)</div>
+      <div class="grid4 mb16">
+        <div>
+          <label>Proveedor (liberado a)</label>
+          <input type="text" id="chqbProveedor" placeholder="Ej: Emporio">
+        </div>
+        <div>
+          <label>Monto ($)</label>
+          <input type="number" id="chqbMonto" placeholder="0">
+        </div>
+        <div>
+          <label>N° de cheque (si ya lo tenés)</label>
+          <input type="text" id="chqbNumero" placeholder="Opcional">
+        </div>
+        <div>
+          <label>Vencimiento</label>
+          <input type="date" id="chqbFechaPago">
+        </div>
+      </div>
+      <div class="grid3 mb16">
+        <div>
+          <label>Fecha de emisión (opcional)</label>
+          <input type="date" id="chqbFechaEmision">
+        </div>
+        <div style="grid-column:span 2;">
+          <label>Nota (opcional)</label>
+          <input type="text" id="chqbNota" placeholder="Ej: cheque a 90 días">
+        </div>
+      </div>
+      <div class="flex">
+        <button class="btn btn-gold" id="btnGuardarChequeBorrador" onclick="guardarChequeBorrador()">+ Agregar al borrador</button>
+        <button class="btn btn-ghost" id="btnCancelarEdicionBorrador" onclick="cancelarEdicionChequeBorrador()" style="display:none;">Cancelar edición</button>
+      </div>
+    </div>
+
+    <div class="grid2 mb16" id="chequesBorradorResumen"></div>
+    <div style="display:flex;justify-content:flex-end;margin-bottom:12px;">
+      <button class="btn btn-green" onclick="confirmarTodoElBorrador()">✓ Confirmar todos y pasar a Cheques</button>
+    </div>
+
+    <div id="chequesBorradorList"></div>
+  </div>
 </div>
 
 <!-- ══════════════════════════════════════════
@@ -757,7 +815,7 @@ tr:hover td { background:var(--surface2); }
 // ============================================================
 // STATE
 // ============================================================
-let state = { dias:{}, impuestos:[], cheques:[], cajeros:['Gastón','Matías','Gabriel','Emanuel'] };
+let state = { dias:{}, impuestos:[], cheques:[], chequesBorrador:[], cajeros:['Gastón','Matías','Gabriel','Emanuel'] };
 let currentPeriod = 'dia';
 let currentCajaVista = 'todas'; // 'todas' | 'caja0' | 'caja1' | 'caja3' | 'caja4'
 let charts = {};
@@ -960,7 +1018,7 @@ function rerenderAll(){
   const name = panel ? panel.id.replace('panel-','') : '';
   if(name==='estadisticas') { destroyCharts(); renderStats(); }
   if(name==='impuestos') renderImpuestos();
-  if(name==='cheques') renderCheques();
+  if(name==='cheques') { renderCheques(); renderChequesBorrador(); }
   if(name==='ajustes') renderCajeros();
   if(name==='gastos') { updateConceptosDatalist(); renderBusquedaGastos(); }
   updateBadge();
@@ -1055,6 +1113,7 @@ document.addEventListener('visibilitychange', ()=>{ if(document.visibilityState 
 function normalizeState(){
   if(!state.impuestos) state.impuestos = [];
   if(!state.cheques) state.cheques = [];
+  if(!state.chequesBorrador) state.chequesBorrador = [];
   if(!state.cajeros) state.cajeros = ['Gastón','Matías','Gabriel','Emanuel'];
   if(!state.dias) state.dias = {};
   if(!state.updatedAt) state.updatedAt = 0;
@@ -2658,6 +2717,125 @@ function cancelarEdicionCheque() {
   document.getElementById('btnCancelarEdicionCheque').style.display = 'none';
 }
 
+// ── SUB-VISTA: CHEQUES vs BORRADOR ──
+let chequesVista = 'cheques';
+function setChequesVista(v, el) {
+  chequesVista = v;
+  document.querySelectorAll('#chequesVistaTabs .ptab').forEach(t=>t.classList.remove('active'));
+  el.classList.add('active');
+  document.getElementById('chequesVistaCheques').style.display = v==='cheques' ? 'block' : 'none';
+  document.getElementById('chequesVistaBorrador').style.display = v==='borrador' ? 'block' : 'none';
+  if(v==='borrador') renderChequesBorrador();
+}
+
+let chequeBorradorEditandoId = null;
+
+function guardarChequeBorrador() {
+  const proveedor = document.getElementById('chqbProveedor').value.trim();
+  const monto = parseFloat(document.getElementById('chqbMonto').value)||0;
+  const numero = document.getElementById('chqbNumero').value.trim();
+  const fechaPago = document.getElementById('chqbFechaPago').value;
+  const fechaEmision = document.getElementById('chqbFechaEmision').value;
+  const nota = document.getElementById('chqbNota').value.trim();
+  if(!proveedor || !monto || !fechaPago) { alert('Completá proveedor, monto y vencimiento.'); return; }
+  if(chequeBorradorEditandoId) {
+    const c = state.chequesBorrador.find(x=>x.id===chequeBorradorEditandoId);
+    if(c) Object.assign(c, {proveedor, monto, numero, fechaPago, fechaEmision, nota});
+  } else {
+    state.chequesBorrador.push({id:Date.now(), proveedor, monto, numero, fechaPago, fechaEmision, nota});
+  }
+  save();
+  cancelarEdicionChequeBorrador();
+  renderChequesBorrador();
+}
+
+function editarChequeBorrador(id) {
+  const c = state.chequesBorrador.find(x=>x.id===id);
+  if(!c) return;
+  chequeBorradorEditandoId = id;
+  document.getElementById('chqbProveedor').value = c.proveedor||'';
+  document.getElementById('chqbMonto').value = c.monto||'';
+  document.getElementById('chqbNumero').value = c.numero||'';
+  document.getElementById('chqbFechaPago').value = c.fechaPago||'';
+  document.getElementById('chqbFechaEmision').value = c.fechaEmision||'';
+  document.getElementById('chqbNota').value = c.nota||'';
+  document.getElementById('btnGuardarChequeBorrador').textContent = '💾 Guardar cambios';
+  document.getElementById('btnCancelarEdicionBorrador').style.display = 'inline-flex';
+  document.getElementById('chqbProveedor').scrollIntoView({behavior:'smooth', block:'center'});
+}
+
+function cancelarEdicionChequeBorrador() {
+  chequeBorradorEditandoId = null;
+  ['chqbProveedor','chqbMonto','chqbNumero','chqbFechaPago','chqbFechaEmision','chqbNota'].forEach(id=>{ document.getElementById(id).value=''; });
+  document.getElementById('btnGuardarChequeBorrador').textContent = '+ Agregar al borrador';
+  document.getElementById('btnCancelarEdicionBorrador').style.display = 'none';
+}
+
+function removeChequeBorrador(id) {
+  if(!confirm('¿Eliminar este cheque del borrador?')) return;
+  state.chequesBorrador = state.chequesBorrador.filter(c=>c.id!==id);
+  save();
+  renderChequesBorrador();
+}
+
+// Pasa un cheque del borrador a la lista general (estado pendiente) y lo saca del borrador.
+function confirmarChequeBorrador(id) {
+  const idx = state.chequesBorrador.findIndex(x=>x.id===id);
+  if(idx===-1) return;
+  const c = state.chequesBorrador[idx];
+  state.cheques.push({id:Date.now()+idx, proveedor:c.proveedor, monto:c.monto, numero:c.numero, fechaPago:c.fechaPago, fechaEmision:c.fechaEmision, nota:c.nota||'', estado:'pendiente'});
+  state.chequesBorrador.splice(idx,1);
+  save();
+  renderChequesBorrador();
+  renderCheques();
+}
+
+function confirmarTodoElBorrador() {
+  if(!state.chequesBorrador.length) { alert('No hay cheques en el borrador.'); return; }
+  if(!confirm(`¿Confirmar los ${state.chequesBorrador.length} cheques del borrador y pasarlos a Cheques?`)) return;
+  const base = Date.now();
+  state.chequesBorrador.forEach((c,i)=>{
+    state.cheques.push({id:base+i, proveedor:c.proveedor, monto:c.monto, numero:c.numero, fechaPago:c.fechaPago, fechaEmision:c.fechaEmision, nota:c.nota||'', estado:'pendiente'});
+  });
+  state.chequesBorrador = [];
+  save();
+  renderChequesBorrador();
+  renderCheques();
+  alert('Cheques confirmados y cargados en la lista general.');
+}
+
+function renderChequesBorrador() {
+  const resumenEl = document.getElementById('chequesBorradorResumen');
+  const listEl = document.getElementById('chequesBorradorList');
+  const badge = document.getElementById('chequesBorradorBadge');
+  if(badge) badge.textContent = state.chequesBorrador.length ? ` (${state.chequesBorrador.length})` : '';
+  if(!resumenEl || !listEl) return;
+  const total = state.chequesBorrador.reduce((s,c)=>s+c.monto,0);
+  resumenEl.innerHTML = `
+    <div class="stat"><div class="stat-label">Cheques en espera</div><div class="stat-value gold">${state.chequesBorrador.length}</div></div>
+    <div class="stat"><div class="stat-label">Monto total</div><div class="stat-value gold">${pesos(total)}</div></div>
+  `;
+  if(!state.chequesBorrador.length) {
+    listEl.innerHTML = '<div class="card" style="text-align:center;color:var(--muted);padding:40px;">Cargá acá los cheques que todavía estás por emitir. Cuando los tengas hechos y controlados, confirmalos para que pasen a la lista general.</div>';
+    return;
+  }
+  const sorted = [...state.chequesBorrador].sort((a,b)=>a.fechaPago.localeCompare(b.fechaPago));
+  listEl.innerHTML = `<div class="grid3">${sorted.map(c=>`
+    <div class="imp-card" style="border-style:dashed;">
+      <div class="imp-nombre">${c.proveedor}</div>
+      <div class="imp-monto">${pesos(c.monto)}</div>
+      <div class="imp-vence">Vence: ${c.fechaPago}${c.numero?' · N° '+c.numero:''}${c.fechaEmision?' · emitido '+c.fechaEmision:''}</div>
+      ${c.nota?`<div style="font-size:11px;color:var(--muted);margin-top:4px;">${c.nota}</div>`:''}
+      <div class="imp-status" style="color:var(--gold);">📝 BORRADOR — todavía no emitido</div>
+      <div class="flex mt16" style="flex-wrap:wrap;gap:6px;">
+        <button class="btn btn-green btn-sm" onclick="confirmarChequeBorrador(${c.id})">✓ Confirmar</button>
+        <button class="btn btn-ghost btn-sm" onclick="editarChequeBorrador(${c.id})">✎ Editar</button>
+        <button class="btn btn-ghost btn-sm" onclick="removeChequeBorrador(${c.id})">🗑 Eliminar</button>
+      </div>
+    </div>
+  `).join('')}</div>`;
+}
+
 function setChequesFiltro(f, el) {
   chequesFiltro = f;
   document.querySelectorAll('#chequesFiltro .ptab').forEach(t=>t.classList.remove('active'));
@@ -3102,7 +3280,7 @@ function switchTab(name, el) {
   document.getElementById(`panel-${name}`).classList.add('active');
   if(name==='estadisticas') { destroyCharts(); renderStats(); }
   if(name==='impuestos') renderImpuestos();
-  if(name==='cheques') renderCheques();
+  if(name==='cheques') { renderCheques(); renderChequesBorrador(); }
   if(name==='ajustes') renderCajeros();
   if(name==='gastos') { updateConceptosDatalist(); renderBusquedaGastos(); }
 }
@@ -3144,6 +3322,7 @@ async function init() {
   loadCargaDay();
   renderImpuestos();
   renderCheques();
+  renderChequesBorrador();
   updateConceptosDatalist();
 }
 
