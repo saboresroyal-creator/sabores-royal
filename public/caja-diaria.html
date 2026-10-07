@@ -304,9 +304,9 @@ tr:hover td { background:var(--surface2); }
 .cal-day.vencido { border-color:var(--red); background:var(--red-dim); }
 .cal-day.todo-cobrado { border-color:var(--green); }
 .cal-num { font-size:11px; color:var(--muted); }
-.cal-count { font-size:11px; font-weight:700; margin-top:4px; }
-.cal-monto { font-size:10px; color:var(--muted); margin-top:2px; }
-@media(max-width:600px){ .cal-day{min-height:48px;padding:4px;} .cal-count{font-size:10px;} .cal-monto{display:none;} }
+.cal-monto { font-size:13px; font-weight:700; color:var(--gold); margin-top:4px; line-height:1.2; }
+.cal-count { font-size:10px; color:var(--muted); margin-top:2px; }
+@media(max-width:600px){ .cal-day{min-height:48px;padding:4px;} .cal-monto{font-size:11px;} .cal-count{display:none;} }
 
 /* ── RESUMEN BAR ── */
 .resumen-bar {
@@ -2586,11 +2586,11 @@ function renderChequesCalendario() {
     let inner = `<div class="cal-num">${day}</div>`;
     if(cheques.length){
       if(pendientes.length){
-        inner += `<div class="cal-count">${pendientes.length} pend. 📝</div><div class="cal-monto">${pesos(montoPendiente)}</div>`;
+        inner += `<div class="cal-monto">${pesos(montoPendiente)}</div><div class="cal-count">${pendientes.length} 📝</div>`;
       } else {
         inner += `<div class="cal-count" style="color:var(--green);">✓ cobrado</div>`;
       }
-      if(rechazados.length) inner += `<div class="cal-monto" style="color:var(--red);">⚠ ${rechazados.length} rech.</div>`;
+      if(rechazados.length) inner += `<div class="cal-count" style="color:var(--red);">⚠ ${rechazados.length} rech.</div>`;
     }
     cells += `<div class="${cls}" ${cheques.length?`onclick="chequesCalSeleccionarDia('${dateStr}')" title="Ver cheques del ${day}/${monthIdx+1}"`:''}>${inner}</div>`;
   }
