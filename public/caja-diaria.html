@@ -1086,7 +1086,11 @@ async function fetchClima(d, force) {
   const base = reciente ? 'https://api.open-meteo.com/v1/forecast' : 'https://archive-api.open-meteo.com/v1/archive';
   const url = `${base}?latitude=${CLIMA_LAT}&longitude=${CLIMA_LON}&start_date=${d}&end_date=${d}&daily=weathercode,temperature_2m_max,temperature_2m_min&timezone=America%2FArgentina%2FBuenos_Aires`;
   try{
-    const res = await fetch(url);
+    const controller = new AbortController();
+    const timer = setTimeout(()=>controller.abort(), 8000);
+    let res;
+    try{ res = await fetch(url, {signal: controller.signal}); }
+    finally{ clearTimeout(timer); }
     if(!res.ok) throw new Error('HTTP '+res.status);
     const data = await res.json();
     if(!data.daily || !data.daily.time || !data.daily.time.length) throw new Error('sin datos');
@@ -1104,6 +1108,8 @@ async function fetchClima(d, force) {
   }
 }
 
+const _climaFailed = new Set();
+
 function renderClimaBox(d) {
   const box = document.getElementById('climaBox');
   if(!box) return;
@@ -1111,16 +1117,25 @@ function renderClimaBox(d) {
   if(day && day.clima) {
     const [icon,label] = weatherLabel(day.clima.code);
     box.innerHTML = `<span style="font-size:18px;">${icon}</span><span>${day.clima.tMin}°/${day.clima.tMax}° <span style="color:var(--muted);font-size:11px;">· ${label}</span></span><button class="btn btn-ghost" style="padding:2px 8px;font-size:10px;" onclick="refreshClima('${d}')" title="Actualizar clima">🔄</button>`;
+  } else if(_climaFailed.has(d)) {
+    box.innerHTML = `<button class="btn btn-ghost" style="font-size:11px;padding:6px 10px;" onclick="refreshClima('${d}')">⚠️ Clima no disponible — reintentar</button>`;
   } else {
     box.innerHTML = `<span style="color:var(--muted);font-size:12px;">Cargando clima…</span>`;
-    fetchClima(d).then(()=>{ if(document.getElementById('selectedDate').value===d) renderClimaBox(d); });
+    fetchClima(d).then(clima=>{
+      if(!clima) _climaFailed.add(d);
+      if(document.getElementById('selectedDate').value===d) renderClimaBox(d);
+    });
   }
 }
 
 function refreshClima(d) {
+  _climaFailed.delete(d);
   const box = document.getElementById('climaBox');
   if(box) box.innerHTML = '<span style="color:var(--muted);font-size:12px;">Actualizando…</span>';
-  fetchClima(d, true).then(()=>renderClimaBox(d));
+  fetchClima(d, true).then(clima=>{
+    if(!clima) _climaFailed.add(d);
+    renderClimaBox(d);
+  });
 }
 
 function toggleCajasOpcionales() {
