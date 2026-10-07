@@ -291,6 +291,23 @@ tr:hover td { background:var(--surface2); }
 .imp-vence { font-size:11px; color:var(--muted); margin-top:4px; }
 .imp-status { font-size:10px; font-weight:700; letter-spacing:2px; text-transform:uppercase; margin-top:6px; }
 
+/* ── CALENDARIO DE CHEQUES ── */
+.cal-grid { display:grid; grid-template-columns:repeat(7,1fr); gap:4px; margin-top:14px; }
+.cal-dow { text-align:center; font-size:10px; color:var(--muted); letter-spacing:1px; text-transform:uppercase; padding-bottom:4px; }
+.cal-day { min-height:64px; border-radius:8px; background:var(--surface2); border:1px solid var(--border); padding:6px; font-family:var(--mono); }
+.cal-day.empty { background:transparent; border-color:transparent; }
+.cal-day.today .cal-num { color:var(--gold); font-weight:700; }
+.cal-day.has-cheques { cursor:pointer; }
+.cal-day.has-cheques:hover { border-color:var(--gold); }
+.cal-day.selected { outline:2px solid var(--gold); outline-offset:-1px; }
+.cal-day.alerta { border-color:var(--yellow); background:var(--yellow-dim); }
+.cal-day.vencido { border-color:var(--red); background:var(--red-dim); }
+.cal-day.todo-cobrado { border-color:var(--green); }
+.cal-num { font-size:11px; color:var(--muted); }
+.cal-count { font-size:11px; font-weight:700; margin-top:4px; }
+.cal-monto { font-size:10px; color:var(--muted); margin-top:2px; }
+@media(max-width:600px){ .cal-day{min-height:48px;padding:4px;} .cal-count{font-size:10px;} .cal-monto{display:none;} }
+
 /* ── RESUMEN BAR ── */
 .resumen-bar {
   background: var(--surface);
@@ -626,6 +643,20 @@ tr:hover td { background:var(--surface2); }
      PANEL: CHEQUES PROVEEDORES
 ══════════════════════════════════════════ -->
 <div class="panel" id="panel-cheques">
+  <!-- Calendario de vencimientos -->
+  <div class="card mb16">
+    <div class="card-title" style="display:flex;align-items:center;justify-content:space-between;flex-wrap:wrap;row-gap:8px;">
+      <span style="display:flex;align-items:center;gap:8px;"><div class="dot"></div>CALENDARIO DE VENCIMIENTOS</span>
+      <div style="display:flex;gap:6px;align-items:center;">
+        <button class="btn btn-ghost btn-sm" onclick="chequesCalMes(-1)">‹</button>
+        <span id="chequesCalLabel" style="font-family:var(--mono);font-size:12px;min-width:120px;text-align:center;"></span>
+        <button class="btn btn-ghost btn-sm" onclick="chequesCalMes(1)">›</button>
+        <button class="btn btn-ghost btn-sm" onclick="chequesCalHoy()">Hoy</button>
+      </div>
+    </div>
+    <div id="chequesCalGrid" class="cal-grid"></div>
+  </div>
+
   <!-- Resumen -->
   <div class="grid4 mb16" id="chequesResumen"></div>
 
@@ -669,6 +700,9 @@ tr:hover td { background:var(--surface2); }
     <button class="ptab" onclick="setChequesFiltro('pendiente',this)">Pendientes</button>
     <button class="ptab" onclick="setChequesFiltro('cobrado',this)">Cobrados</button>
     <button class="ptab" onclick="setChequesFiltro('rechazado',this)">Rechazados</button>
+  </div>
+  <div id="chequesDiaFiltroWrap" style="display:none;margin:-10px 0 16px;">
+    <button class="btn btn-ghost btn-sm" onclick="chequesCalSeleccionarDia(null)">✕ Ver todos los días — filtrando por <span id="chequesDiaFiltroLabel"></span></button>
   </div>
 
   <!-- Lista -->
@@ -2483,7 +2517,75 @@ function updateBadge() {
 // CHEQUES PROVEEDORES
 // ============================================================
 let chequesFiltro = 'todos';
+let chequesCalDiaSel = null;
 const CHEQUE_ALERTA_DIAS = 5;
+(function(){ const n=new Date(); window._chequesCalYear=n.getFullYear(); window._chequesCalMonthIdx=n.getMonth(); })();
+
+function chequesCalMes(delta) {
+  window._chequesCalMonthIdx += delta;
+  if(window._chequesCalMonthIdx<0){ window._chequesCalMonthIdx=11; window._chequesCalYear--; }
+  if(window._chequesCalMonthIdx>11){ window._chequesCalMonthIdx=0; window._chequesCalYear++; }
+  renderChequesCalendario();
+}
+
+function chequesCalHoy() {
+  const n = new Date();
+  window._chequesCalYear = n.getFullYear();
+  window._chequesCalMonthIdx = n.getMonth();
+  renderChequesCalendario();
+}
+
+function chequesCalSeleccionarDia(dateStr) {
+  chequesCalDiaSel = (chequesCalDiaSel === dateStr) ? null : dateStr;
+  renderCheques();
+}
+
+function renderChequesCalendario() {
+  const grid = document.getElementById('chequesCalGrid');
+  const label = document.getElementById('chequesCalLabel');
+  if(!grid || !label) return;
+  const mesesNombres = ['Enero','Febrero','Marzo','Abril','Mayo','Junio','Julio','Agosto','Septiembre','Octubre','Noviembre','Diciembre'];
+  const year = window._chequesCalYear, monthIdx = window._chequesCalMonthIdx;
+  label.textContent = mesesNombres[monthIdx] + ' ' + year;
+
+  // Agrupar cheques por fecha de vencimiento
+  const porDia = {};
+  state.cheques.forEach(c=>{
+    if(!c.fechaPago) return;
+    (porDia[c.fechaPago] = porDia[c.fechaPago] || []).push(c);
+  });
+
+  const today = todayStr();
+  const first = new Date(year, monthIdx, 1);
+  const startOffset = (first.getDay()+6)%7; // lunes=0
+  const daysInMonth = new Date(year, monthIdx+1, 0).getDate();
+
+  let cells = '';
+  ['L','M','X','J','V','S','D'].forEach(d=>cells+=`<div class="cal-dow">${d}</div>`);
+  for(let i=0;i<startOffset;i++) cells += `<div class="cal-day empty"></div>`;
+  for(let day=1; day<=daysInMonth; day++){
+    const dateStr = year+'-'+String(monthIdx+1).padStart(2,'0')+'-'+String(day).padStart(2,'0');
+    const cheques = porDia[dateStr]||[];
+    const pendientes = cheques.filter(c=>c.estado==='pendiente');
+    const totalMonto = cheques.reduce((s,c)=>s+c.monto,0);
+    let cls = 'cal-day';
+    if(dateStr===today) cls+=' today';
+    if(cheques.length) cls+=' has-cheques';
+    if(dateStr===chequesCalDiaSel) cls+=' selected';
+    if(pendientes.length){
+      const diff = Math.ceil((new Date(dateStr+'T00:00:00')-new Date(today+'T00:00:00'))/86400000);
+      if(diff<0) cls+=' vencido';
+      else if(diff<=CHEQUE_ALERTA_DIAS) cls+=' alerta';
+    } else if(cheques.length){
+      cls+=' todo-cobrado';
+    }
+    cells += `<div class="${cls}" ${cheques.length?`onclick="chequesCalSeleccionarDia('${dateStr}')" title="Ver cheques del ${day}/${monthIdx+1}"`:''}>
+      <div class="cal-num">${day}</div>
+      ${cheques.length?`<div class="cal-count">${cheques.length} 📝</div><div class="cal-monto">${pesos(totalMonto)}</div>`:''}
+    </div>`;
+  }
+  grid.innerHTML = cells;
+}
 
 function addCheque() {
   const proveedor = document.getElementById('chqProveedor').value.trim();
@@ -2531,12 +2633,18 @@ function renderChequesResumen() {
 
 function renderCheques() {
   renderChequesResumen();
+  renderChequesCalendario();
+  const diaWrap = document.getElementById('chequesDiaFiltroWrap');
+  const diaLabel = document.getElementById('chequesDiaFiltroLabel');
+  if(diaWrap) diaWrap.style.display = chequesCalDiaSel ? 'block' : 'none';
+  if(diaLabel && chequesCalDiaSel) diaLabel.textContent = chequesCalDiaSel.slice(8)+'/'+chequesCalDiaSel.slice(5,7)+'/'+chequesCalDiaSel.slice(0,4);
   const container = document.getElementById('chequesList');
   if(!container) return;
   let list = state.cheques;
   if(chequesFiltro !== 'todos') list = list.filter(c=>c.estado===chequesFiltro);
+  if(chequesCalDiaSel) list = list.filter(c=>c.fechaPago===chequesCalDiaSel);
   if(!list.length) {
-    container.innerHTML = `<div class="card" style="text-align:center;color:var(--muted);padding:40px;">No hay cheques${chequesFiltro!=='todos'?' en este estado':' cargados'}.</div>`;
+    container.innerHTML = `<div class="card" style="text-align:center;color:var(--muted);padding:40px;">No hay cheques${(chequesFiltro!=='todos'||chequesCalDiaSel)?' para este filtro':' cargados'}.</div>`;
     updateChequesBadge();
     return;
   }
