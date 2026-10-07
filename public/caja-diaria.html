@@ -396,6 +396,7 @@ tr:hover td { background:var(--surface2); }
 </head>
 <body>
 <datalist id="conceptosGastos"></datalist>
+<datalist id="chequesProveedoresList"></datalist>
 
 <!-- HEADER -->
 <div class="header">
@@ -682,7 +683,7 @@ tr:hover td { background:var(--surface2); }
     <div class="grid4 mb16">
       <div>
         <label>Proveedor (liberado a)</label>
-        <input type="text" id="chqProveedor" placeholder="Ej: Emporio">
+        <input type="text" id="chqProveedor" list="chequesProveedoresList" placeholder="Ej: Emporio">
       </div>
       <div>
         <label>Monto ($)</label>
@@ -747,7 +748,7 @@ tr:hover td { background:var(--surface2); }
       <div class="grid4 mb16">
         <div>
           <label>Proveedor (liberado a)</label>
-          <input type="text" id="chqbProveedor" placeholder="Ej: Emporio">
+          <input type="text" id="chqbProveedor" list="chequesProveedoresList" placeholder="Ej: Emporio">
         </div>
         <div>
           <label>Monto ($)</label>
@@ -2707,7 +2708,7 @@ function renderChequesCalQuickAdd() {
       <button class="btn btn-ghost btn-sm" onclick="chequesCalAbrirAlta(null)">✕ Cerrar</button>
     </div>
     <div class="grid4 mb16">
-      <div><label>Proveedor</label><input type="text" id="calQAProveedor" placeholder="Ej: Emporio"></div>
+      <div><label>Proveedor</label><input type="text" id="calQAProveedor" list="chequesProveedoresList" placeholder="Ej: Emporio"></div>
       <div><label>Monto ($)</label><input type="number" id="calQAMonto" placeholder="0"></div>
       <div><label>N° de cheque</label><input type="text" id="calQANumero" placeholder="Opcional"></div>
       <div><label>Fecha de emisión (opcional)</label><input type="date" id="calQAFechaEmision"></div>
@@ -2882,6 +2883,7 @@ function renderChequesBorrador() {
   const listEl = document.getElementById('chequesBorradorList');
   const badge = document.getElementById('chequesBorradorBadge');
   if(badge) badge.textContent = state.chequesBorrador.length ? ` (${state.chequesBorrador.length})` : '';
+  updateChequesProveedoresDatalist();
   if(!resumenEl || !listEl) return;
   const total = state.chequesBorrador.reduce((s,c)=>s+c.monto,0);
   resumenEl.innerHTML = `
@@ -2997,6 +2999,7 @@ function renderCheques() {
   renderChequesResumen();
   renderChequesCalendario();
   renderChequesPlazoProveedor();
+  updateChequesProveedoresDatalist();
   const diaWrap = document.getElementById('chequesDiaFiltroWrap');
   const diaLabel = document.getElementById('chequesDiaFiltroLabel');
   if(diaWrap) diaWrap.style.display = chequesCalDiaSel ? 'block' : 'none';
@@ -3240,6 +3243,14 @@ async function resetData() {
 // ============================================================
 // AUTOCOMPLETADO DE CONCEPTOS
 // ============================================================
+function updateChequesProveedoresDatalist() {
+  const proveedores = new Set();
+  state.cheques.forEach(c => { if(c.proveedor && c.proveedor.trim()) proveedores.add(c.proveedor.trim()); });
+  (state.chequesBorrador||[]).forEach(c => { if(c.proveedor && c.proveedor.trim()) proveedores.add(c.proveedor.trim()); });
+  const dl = document.getElementById('chequesProveedoresList');
+  if(dl) dl.innerHTML = [...proveedores].sort().map(p=>`<option value="${p}">`).join('');
+}
+
 function updateConceptosDatalist() {
   const conceptos = new Set();
   Object.values(state.dias).forEach(day => {
