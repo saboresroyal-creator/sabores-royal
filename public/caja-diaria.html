@@ -303,6 +303,7 @@ tr:hover td { background:var(--surface2); }
 .cal-day.alerta { border-color:var(--yellow); background:var(--yellow-dim); }
 .cal-day.vencido { border-color:var(--red); background:var(--red-dim); }
 .cal-day.todo-cobrado { border-color:var(--green); }
+.cal-day.has-borrador { border-style:dashed; border-color:var(--gold); }
 .cal-num { font-size:11px; color:var(--muted); }
 .cal-monto { font-size:13px; font-weight:700; color:var(--gold); margin-top:4px; line-height:1.2; }
 .cal-count { font-size:10px; color:var(--muted); margin-top:2px; }
@@ -2629,6 +2630,11 @@ function renderChequesCalendario() {
     if(!c.fechaPago) return;
     (porDia[c.fechaPago] = porDia[c.fechaPago] || []).push(c);
   });
+  const porDiaBorrador = {};
+  (state.chequesBorrador||[]).forEach(c=>{
+    if(!c.fechaPago) return;
+    (porDiaBorrador[c.fechaPago] = porDiaBorrador[c.fechaPago] || []).push(c);
+  });
 
   const today = todayStr();
   const first = new Date(year, monthIdx, 1);
@@ -2641,14 +2647,18 @@ function renderChequesCalendario() {
   for(let day=1; day<=daysInMonth; day++){
     const dateStr = year+'-'+String(monthIdx+1).padStart(2,'0')+'-'+String(day).padStart(2,'0');
     const cheques = porDia[dateStr]||[];
+    const borradores = porDiaBorrador[dateStr]||[];
     const pendientes = cheques.filter(c=>c.estado==='pendiente');
     const rechazados = cheques.filter(c=>c.estado==='rechazado');
     const montoPendiente = pendientes.reduce((s,c)=>s+c.monto,0);
+    const montoBorrador = borradores.reduce((s,c)=>s+c.monto,0);
+    const montoCombinado = montoPendiente + montoBorrador;
     let cls = 'cal-day';
     if(dateStr===today) cls+=' today';
     if(cheques.length) cls+=' has-cheques';
+    else if(borradores.length) cls+=' has-borrador';
     if(dateStr===chequesCalDiaSel) cls+=' selected';
-    if(pendientes.length){
+    if(pendientes.length || borradores.length){
       const diff = Math.ceil((new Date(dateStr+'T00:00:00')-new Date(today+'T00:00:00'))/86400000);
       if(diff<0) cls+=' vencido';
       else if(diff<=CHEQUE_ALERTA_DIAS) cls+=' alerta';
@@ -2656,9 +2666,10 @@ function renderChequesCalendario() {
       cls+=' todo-cobrado';
     }
     let inner = `<div class="cal-num">${day}</div>`;
-    if(cheques.length){
-      if(pendientes.length){
-        inner += `<div class="cal-monto">${pesos(montoPendiente)}</div><div class="cal-count">${pendientes.length} 📝</div>`;
+    if(cheques.length || borradores.length){
+      if(pendientes.length || borradores.length){
+        inner += `<div class="cal-monto">${pesos(montoCombinado)}</div><div class="cal-count">${pendientes.length+borradores.length} 📝</div>`;
+        if(montoBorrador>0) inner += `<div class="cal-count" style="color:var(--gold);">+${pesos(montoBorrador)} borrador</div>`;
       } else {
         inner += `<div class="cal-count" style="color:var(--green);">✓ cobrado</div>`;
       }
@@ -2747,6 +2758,7 @@ function guardarChequeBorrador() {
   save();
   cancelarEdicionChequeBorrador();
   renderChequesBorrador();
+  renderChequesCalendario();
 }
 
 function editarChequeBorrador(id) {
@@ -2776,6 +2788,7 @@ function removeChequeBorrador(id) {
   state.chequesBorrador = state.chequesBorrador.filter(c=>c.id!==id);
   save();
   renderChequesBorrador();
+  renderChequesCalendario();
 }
 
 // Pasa un cheque del borrador a la lista general (estado pendiente) y lo saca del borrador.
