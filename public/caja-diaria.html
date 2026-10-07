@@ -708,6 +708,7 @@ tr:hover td { background:var(--surface2); }
     <button class="ptab" onclick="setChequesFiltro('pendiente',this)">Pendientes</button>
     <button class="ptab" onclick="setChequesFiltro('cobrado',this)">Cobrados</button>
     <button class="ptab" onclick="setChequesFiltro('rechazado',this)">Rechazados</button>
+    <button class="ptab" onclick="setChequesFiltro('vencido',this)">Vencidos</button>
   </div>
   <div id="chequesDiaFiltroWrap" style="display:none;margin:-10px 0 16px;">
     <button class="btn btn-ghost btn-sm" onclick="chequesCalSeleccionarDia(null)">✕ Ver todos los días — filtrando por <span id="chequesDiaFiltroLabel"></span></button>
@@ -2643,11 +2644,13 @@ function renderChequesResumen() {
   const proximos = pendientes.filter(c=>Math.ceil((new Date(c.fechaPago+'T00:00:00')-today)/(1000*60*60*24))<=CHEQUE_ALERTA_DIAS);
   const totalProximos = proximos.reduce((s,c)=>s+c.monto,0);
   const rechazados = state.cheques.filter(c=>c.estado==='rechazado').length;
+  const vencidos = state.cheques.filter(c=>c.estado==='vencido').length;
   const cobrados = state.cheques.filter(c=>c.estado==='cobrado').length;
   el.innerHTML = `
     <div class="stat"><div class="stat-label">Pendiente total</div><div class="stat-value gold">${pesos(totalPendiente)}</div><div style="font-size:11px;color:var(--muted);margin-top:4px">${pendientes.length} cheque(s)</div></div>
     <div class="stat"><div class="stat-label">Próximos ${CHEQUE_ALERTA_DIAS} días</div><div class="stat-value" style="color:${proximos.length?'var(--yellow)':'var(--text)'}">${pesos(totalProximos)}</div><div style="font-size:11px;color:var(--muted);margin-top:4px">${proximos.length} cheque(s)</div></div>
     <div class="stat"><div class="stat-label">Rechazados</div><div class="stat-value" style="color:${rechazados?'var(--red)':'var(--text)'}">${rechazados}</div></div>
+    <div class="stat"><div class="stat-label">Vencidos (no sirven)</div><div class="stat-value" style="color:${vencidos?'var(--red)':'var(--text)'}">${vencidos}</div></div>
     <div class="stat"><div class="stat-label">Cobrados</div><div class="stat-value green">${cobrados}</div></div>
   `;
 }
@@ -2678,19 +2681,21 @@ function renderCheques() {
     const diff = Math.ceil((vence-today)/(1000*60*60*24));
     let cls='imp-card', status='', statusColor='var(--muted)';
     if(c.estado==='rechazado'){ cls+=' vencido'; status='✗ RECHAZADO'; statusColor='var(--red)'; }
+    else if(c.estado==='vencido'){ cls+=' vencido'; status='⊘ VENCIDO — no sirve'; statusColor='var(--red)'; }
     else if(c.estado==='cobrado'){ cls+=' pagado'; status='✓ COBRADO'; statusColor='var(--green)'; }
-    else if(diff<0){ cls+=' vencido'; status=`⚠ Venció hace ${Math.abs(diff)} día(s)`; statusColor='var(--red)'; }
+    else if(diff<0){ cls+=' vencido'; status=`⚠ Venció hace ${Math.abs(diff)} día(s) sin cobrar`; statusColor='var(--red)'; }
     else if(diff<=CHEQUE_ALERTA_DIAS){ cls+=' alerta'; status=`⏰ Vence en ${diff} día(s)`; statusColor='var(--yellow)'; }
     else { status=`Faltan ${diff} días`; }
 
     return `<div class="${cls}">
       <div class="imp-nombre">${c.proveedor}</div>
-      <div class="imp-monto">${pesos(c.monto)}</div>
+      <div class="imp-monto" style="${c.estado==='vencido'?'text-decoration:line-through;opacity:.6;':''}">${pesos(c.monto)}</div>
       <div class="imp-vence">Vence: ${c.fechaPago}${c.numero?' · N° '+c.numero:''}${c.fechaEmision?' · emitido '+c.fechaEmision:''}</div>
       ${c.nota?`<div style="font-size:11px;color:var(--muted);margin-top:4px;">${c.nota}</div>`:''}
       <div class="imp-status" style="color:${statusColor}">${status}</div>
       <div class="flex mt16" style="flex-wrap:wrap;gap:6px;">
         ${c.estado!=='cobrado' ? `<button class="btn btn-green btn-sm" onclick="setChequeEstado(${c.id},'cobrado')">Cobrado</button>`:''}
+        ${c.estado!=='vencido' ? `<button class="btn btn-red btn-sm" onclick="setChequeEstado(${c.id},'vencido')">Vencido</button>`:''}
         ${c.estado!=='rechazado' ? `<button class="btn btn-red btn-sm" onclick="setChequeEstado(${c.id},'rechazado')">Rechazado</button>`:''}
         ${c.estado!=='pendiente' ? `<button class="btn btn-ghost btn-sm" onclick="setChequeEstado(${c.id},'pendiente')">Pendiente</button>`:''}
         <button class="btn btn-ghost btn-sm" onclick="removeCheque(${c.id})">✕</button>
