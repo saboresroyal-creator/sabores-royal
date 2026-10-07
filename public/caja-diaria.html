@@ -304,6 +304,9 @@ tr:hover td { background:var(--surface2); }
 .cal-day.vencido { border-color:var(--red); background:var(--red-dim); }
 .cal-day.todo-cobrado { border-color:var(--green); }
 .cal-day.has-borrador { border-style:dashed; border-color:var(--gold); }
+.cal-day { cursor:pointer; }
+.cal-day.empty { cursor:default; }
+.cal-day.qa-open { box-shadow:0 0 0 2px var(--gold) inset; }
 .cal-num { font-size:11px; color:var(--muted); }
 .cal-monto { font-size:13px; font-weight:700; color:var(--gold); margin-top:4px; line-height:1.2; }
 .cal-count { font-size:10px; color:var(--muted); margin-top:2px; }
@@ -664,6 +667,7 @@ tr:hover td { background:var(--surface2); }
       </div>
     </div>
     <div id="chequesCalGrid" class="cal-grid"></div>
+    <div id="chequesCalQuickAdd"></div>
   </div>
 
   <!-- Resumen -->
@@ -2658,6 +2662,7 @@ function renderChequesCalendario() {
     if(cheques.length) cls+=' has-cheques';
     else if(borradores.length) cls+=' has-borrador';
     if(dateStr===chequesCalDiaSel) cls+=' selected';
+    if(dateStr===chequesCalQuickAddFecha) cls+=' qa-open';
     if(pendientes.length || borradores.length){
       const diff = Math.ceil((new Date(dateStr+'T00:00:00')-new Date(today+'T00:00:00'))/86400000);
       if(diff<0) cls+=' vencido';
@@ -2675,9 +2680,64 @@ function renderChequesCalendario() {
       }
       if(rechazados.length) inner += `<div class="cal-count" style="color:var(--red);">⚠ ${rechazados.length} rech.</div>`;
     }
-    cells += `<div class="${cls}" ${cheques.length?`onclick="chequesCalSeleccionarDia('${dateStr}')" title="Ver cheques del ${day}/${monthIdx+1}"`:''}>${inner}</div>`;
+    cells += `<div class="${cls}" onclick="chequesCalAbrirAlta('${dateStr}')" title="Cargar cheque al borrador para el ${day}/${monthIdx+1}">${inner}</div>`;
   }
   grid.innerHTML = cells;
+  renderChequesCalQuickAdd();
+}
+
+let chequesCalQuickAddFecha = null;
+
+function chequesCalAbrirAlta(dateStr) {
+  chequesCalQuickAddFecha = (chequesCalQuickAddFecha === dateStr) ? null : dateStr;
+  renderChequesCalendario();
+}
+
+function renderChequesCalQuickAdd() {
+  const qa = document.getElementById('chequesCalQuickAdd');
+  if(!qa) return;
+  if(!chequesCalQuickAddFecha) { qa.innerHTML = ''; return; }
+  const dateStr = chequesCalQuickAddFecha;
+  const fechaLinda = dateStr.slice(8)+'/'+dateStr.slice(5,7)+'/'+dateStr.slice(0,4);
+  const cheques = state.cheques.filter(c=>c.fechaPago===dateStr);
+  const borradores = state.chequesBorrador.filter(c=>c.fechaPago===dateStr);
+  qa.innerHTML = `<div class="card mt16" style="border-color:var(--gold);">
+    <div class="card-title" style="display:flex;align-items:center;justify-content:space-between;">
+      <span>📝 Cargar al borrador — vence ${fechaLinda}</span>
+      <button class="btn btn-ghost btn-sm" onclick="chequesCalAbrirAlta(null)">✕ Cerrar</button>
+    </div>
+    <div class="grid4 mb16">
+      <div><label>Proveedor</label><input type="text" id="calQAProveedor" placeholder="Ej: Emporio"></div>
+      <div><label>Monto ($)</label><input type="number" id="calQAMonto" placeholder="0"></div>
+      <div><label>N° de cheque</label><input type="text" id="calQANumero" placeholder="Opcional"></div>
+      <div><label>Fecha de emisión (opcional)</label><input type="date" id="calQAFechaEmision"></div>
+    </div>
+    <div style="margin-bottom:12px;">
+      <label style="font-size:11px;color:var(--muted);letter-spacing:1px;text-transform:uppercase;display:block;margin-bottom:5px;">Nota (opcional)</label>
+      <input type="text" id="calQANota" placeholder="Ej: cheque a 90 días" style="width:100%;background:var(--surface2);border:1px solid var(--border);color:var(--text);border-radius:8px;padding:8px 12px;font-size:13px;">
+    </div>
+    <button class="btn btn-gold" onclick="chequesCalGuardarAltaRapida()">+ Agregar y seguir cargando</button>
+    ${borradores.length ? `<div style="margin-top:12px;font-size:12px;color:var(--gold);">📝 Ya hay ${borradores.length} en borrador para este día (${pesos(borradores.reduce((s,c)=>s+c.monto,0))}).</div>` : ''}
+    ${cheques.length ? `<button class="btn btn-ghost btn-sm" style="margin-top:8px;" onclick="chequesCalSeleccionarDia('${dateStr}')">👁 Ver los ${cheques.length} cheques confirmados de este día</button>` : ''}
+  </div>`;
+}
+
+function chequesCalGuardarAltaRapida() {
+  const proveedor = document.getElementById('calQAProveedor').value.trim();
+  const monto = parseFloat(document.getElementById('calQAMonto').value)||0;
+  const numero = document.getElementById('calQANumero').value.trim();
+  const fechaEmision = document.getElementById('calQAFechaEmision').value;
+  const nota = document.getElementById('calQANota').value.trim();
+  if(!proveedor || !monto) { alert('Completá proveedor y monto.'); return; }
+  state.chequesBorrador.push({id:Date.now(), proveedor, monto, numero, fechaPago: chequesCalQuickAddFecha, fechaEmision, nota});
+  save();
+  document.getElementById('calQAProveedor').value='';
+  document.getElementById('calQAMonto').value='';
+  document.getElementById('calQANumero').value='';
+  document.getElementById('calQANota').value='';
+  renderChequesCalendario();
+  renderChequesBorrador();
+  document.getElementById('calQAProveedor').focus();
 }
 
 let chequeEditandoId = null;
