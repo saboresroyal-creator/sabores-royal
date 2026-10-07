@@ -697,6 +697,11 @@ tr:hover td { background:var(--surface2); }
     <button class="btn btn-gold" onclick="addCheque()">+ Agregar cheque</button>
   </div>
 
+  <!-- Buscador -->
+  <div style="margin-bottom:12px;">
+    <input type="search" id="chequesBuscarNumero" placeholder="🔍 Buscar por N° de cheque..." oninput="setChequesBusqueda(this.value)" style="width:100%;background:var(--surface2);border:1px solid var(--border);color:var(--text);border-radius:8px;padding:10px 12px;font-size:13px;font-family:var(--mono);">
+  </div>
+
   <!-- Filtros -->
   <div class="ptabs mb16" id="chequesFiltro">
     <button class="ptab active" onclick="setChequesFiltro('todos',this)">Todos</button>
@@ -2520,6 +2525,7 @@ function updateBadge() {
 // CHEQUES PROVEEDORES
 // ============================================================
 let chequesFiltro = 'todos';
+let chequesBusqueda = '';
 let chequesCalDiaSel = null;
 const CHEQUE_ALERTA_DIAS = 5;
 (function(){ const n=new Date(); window._chequesCalYear=n.getFullYear(); window._chequesCalMonthIdx=n.getMonth(); })();
@@ -2623,6 +2629,11 @@ function setChequesFiltro(f, el) {
   renderCheques();
 }
 
+function setChequesBusqueda(val) {
+  chequesBusqueda = (val||'').trim().toLowerCase();
+  renderCheques();
+}
+
 function renderChequesResumen() {
   const el = document.getElementById('chequesResumen');
   if(!el) return;
@@ -2653,8 +2664,10 @@ function renderCheques() {
   let list = state.cheques;
   if(chequesFiltro !== 'todos') list = list.filter(c=>c.estado===chequesFiltro);
   if(chequesCalDiaSel) list = list.filter(c=>c.fechaPago===chequesCalDiaSel);
+  if(chequesBusqueda) list = list.filter(c=>(c.numero||'').toLowerCase().includes(chequesBusqueda));
   if(!list.length) {
-    container.innerHTML = `<div class="card" style="text-align:center;color:var(--muted);padding:40px;">No hay cheques${(chequesFiltro!=='todos'||chequesCalDiaSel)?' para este filtro':' cargados'}.</div>`;
+    const hayFiltro = chequesFiltro!=='todos' || chequesCalDiaSel || chequesBusqueda;
+    container.innerHTML = `<div class="card" style="text-align:center;color:var(--muted);padding:40px;">No hay cheques${hayFiltro?' para este filtro':' cargados'}${chequesBusqueda?` (buscando N° "${chequesBusqueda}")`:''}.</div>`;
     updateChequesBadge();
     return;
   }
