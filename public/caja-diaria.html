@@ -694,8 +694,14 @@ tr:hover td { background:var(--surface2); }
         <input type="text" id="chqNota" placeholder="Ej: cheque a 90 días">
       </div>
     </div>
-    <button class="btn btn-gold" onclick="addCheque()">+ Agregar cheque</button>
+    <div class="flex">
+      <button class="btn btn-gold" id="btnGuardarCheque" onclick="guardarCheque()">+ Agregar cheque</button>
+      <button class="btn btn-ghost" id="btnCancelarEdicionCheque" onclick="cancelarEdicionCheque()" style="display:none;">Cancelar edición</button>
+    </div>
   </div>
+
+  <!-- Plazo promedio por proveedor -->
+  <div id="chequesPlazoProveedor"></div>
 
   <!-- Buscador -->
   <div style="margin-bottom:12px;">
@@ -2604,7 +2610,9 @@ function renderChequesCalendario() {
   grid.innerHTML = cells;
 }
 
-function addCheque() {
+let chequeEditandoId = null;
+
+function guardarCheque() {
   const proveedor = document.getElementById('chqProveedor').value.trim();
   const monto = parseFloat(document.getElementById('chqMonto').value)||0;
   const numero = document.getElementById('chqNumero').value.trim();
@@ -2612,15 +2620,42 @@ function addCheque() {
   const fechaEmision = document.getElementById('chqFechaEmision').value;
   const nota = document.getElementById('chqNota').value.trim();
   if(!proveedor || !monto || !fechaPago) { alert('Completá proveedor, monto y vencimiento.'); return; }
-  state.cheques.push({id:Date.now(), proveedor, monto, numero, fechaPago, fechaEmision, nota, estado:'pendiente'});
+  if(chequeEditandoId) {
+    const c = state.cheques.find(x=>x.id===chequeEditandoId);
+    if(c) Object.assign(c, {proveedor, monto, numero, fechaPago, fechaEmision, nota});
+  } else {
+    state.cheques.push({id:Date.now(), proveedor, monto, numero, fechaPago, fechaEmision, nota, estado:'pendiente'});
+  }
   save();
+  cancelarEdicionCheque();
+  renderCheques();
+}
+
+function editarCheque(id) {
+  const c = state.cheques.find(x=>x.id===id);
+  if(!c) return;
+  chequeEditandoId = id;
+  document.getElementById('chqProveedor').value = c.proveedor||'';
+  document.getElementById('chqMonto').value = c.monto||'';
+  document.getElementById('chqNumero').value = c.numero||'';
+  document.getElementById('chqFechaPago').value = c.fechaPago||'';
+  document.getElementById('chqFechaEmision').value = c.fechaEmision||'';
+  document.getElementById('chqNota').value = c.nota||'';
+  document.getElementById('btnGuardarCheque').textContent = '💾 Guardar cambios';
+  document.getElementById('btnCancelarEdicionCheque').style.display = 'inline-flex';
+  document.getElementById('chqProveedor').scrollIntoView({behavior:'smooth', block:'center'});
+}
+
+function cancelarEdicionCheque() {
+  chequeEditandoId = null;
   document.getElementById('chqProveedor').value='';
   document.getElementById('chqMonto').value='';
   document.getElementById('chqNumero').value='';
   document.getElementById('chqFechaPago').value='';
   document.getElementById('chqFechaEmision').value='';
   document.getElementById('chqNota').value='';
-  renderCheques();
+  document.getElementById('btnGuardarCheque').textContent = '+ Agregar cheque';
+  document.getElementById('btnCancelarEdicionCheque').style.display = 'none';
 }
 
 function setChequesFiltro(f, el) {
@@ -2655,9 +2690,62 @@ function renderChequesResumen() {
   `;
 }
 
+// ── PLAZO PROMEDIO (emisión → vencimiento) POR PROVEEDOR ──
+function renderChequesPlazoProveedor() {
+  const el = document.getElementById('chequesPlazoProveedor');
+  if(!el) return;
+  const porProveedor = {};
+  state.cheques.forEach(c=>{
+    if(!c.fechaEmision || !c.fechaPago || !c.proveedor) return;
+    const dias = Math.round((new Date(c.fechaPago+'T00:00:00') - new Date(c.fechaEmision+'T00:00:00')) / 86400000);
+    if(dias < 0) return; // dato raro (vencimiento antes de emisión) — no lo usamos para el promedio
+    const key = c.proveedor.trim().toUpperCase();
+    if(!porProveedor[key]) porProveedor[key] = {proveedor: c.proveedor.trim(), dias:[], monto:0};
+    porProveedor[key].dias.push(dias);
+    porProveedor[key].monto += c.monto;
+  });
+  const filas = Object.values(porProveedor).map(p=>({
+    proveedor: p.proveedor,
+    cantidad: p.dias.length,
+    promedio: p.dias.reduce((a,b)=>a+b,0)/p.dias.length,
+    min: Math.min(...p.dias),
+    max: Math.max(...p.dias),
+    monto: p.monto
+  })).sort((a,b)=>b.promedio-a.promedio);
+
+  if(!filas.length) { el.innerHTML = ''; return; }
+
+  el.innerHTML = `<div class="card mb16">
+    <div class="card-title"><div class="dot"></div>PLAZO PROMEDIO POR PROVEEDOR (emisión → vencimiento)</div>
+    <div style="overflow-x:auto;">
+      <table>
+        <thead><tr>
+          <th>Proveedor</th>
+          <th class="num">Cheques</th>
+          <th class="num">Prom. días</th>
+          <th class="num">Mín.</th>
+          <th class="num">Máx.</th>
+          <th class="num yellow">Monto total</th>
+        </tr></thead>
+        <tbody>${filas.map(f=>`
+          <tr>
+            <td>${f.proveedor}</td>
+            <td class="num">${f.cantidad}</td>
+            <td class="num gold" style="font-weight:700;">${Math.round(f.promedio)} días</td>
+            <td class="num" style="color:var(--muted)">${f.min}</td>
+            <td class="num" style="color:var(--muted)">${f.max}</td>
+            <td class="num yellow">${pesos(f.monto)}</td>
+          </tr>
+        `).join('')}</tbody>
+      </table>
+    </div>
+  </div>`;
+}
+
 function renderCheques() {
   renderChequesResumen();
   renderChequesCalendario();
+  renderChequesPlazoProveedor();
   const diaWrap = document.getElementById('chequesDiaFiltroWrap');
   const diaLabel = document.getElementById('chequesDiaFiltroLabel');
   if(diaWrap) diaWrap.style.display = chequesCalDiaSel ? 'block' : 'none';
@@ -2698,7 +2786,8 @@ function renderCheques() {
         ${c.estado!=='vencido' ? `<button class="btn btn-red btn-sm" onclick="setChequeEstado(${c.id},'vencido')">Vencido</button>`:''}
         ${c.estado!=='rechazado' ? `<button class="btn btn-red btn-sm" onclick="setChequeEstado(${c.id},'rechazado')">Rechazado</button>`:''}
         ${c.estado!=='pendiente' ? `<button class="btn btn-ghost btn-sm" onclick="setChequeEstado(${c.id},'pendiente')">Pendiente</button>`:''}
-        <button class="btn btn-ghost btn-sm" onclick="removeCheque(${c.id})">✕</button>
+        <button class="btn btn-ghost btn-sm" onclick="editarCheque(${c.id})">✎ Editar</button>
+        <button class="btn btn-ghost btn-sm" onclick="removeCheque(${c.id})">🗑 Eliminar</button>
       </div>
     </div>`;
   }).join('')}</div>`;
