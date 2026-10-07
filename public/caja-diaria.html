@@ -701,7 +701,10 @@ tr:hover td { background:var(--surface2); }
     <div class="grid3 mb16">
       <div>
         <label>Fecha de emisión (opcional)</label>
-        <input type="date" id="chqFechaEmision">
+        <div style="display:flex;gap:6px;">
+          <input type="date" id="chqFechaEmision" style="flex:1;">
+          <button type="button" class="btn btn-ghost btn-sm" onclick="document.getElementById('chqFechaEmision').value=todayStr()">Hoy</button>
+        </div>
       </div>
       <div style="grid-column:span 2;">
         <label>Nota (opcional)</label>
@@ -766,7 +769,10 @@ tr:hover td { background:var(--surface2); }
       <div class="grid3 mb16">
         <div>
           <label>Fecha de emisión (opcional)</label>
-          <input type="date" id="chqbFechaEmision">
+          <div style="display:flex;gap:6px;">
+            <input type="date" id="chqbFechaEmision" style="flex:1;">
+            <button type="button" class="btn btn-ghost btn-sm" onclick="document.getElementById('chqbFechaEmision').value=todayStr()">Hoy</button>
+          </div>
         </div>
         <div style="grid-column:span 2;">
           <label>Nota (opcional)</label>
@@ -2711,7 +2717,7 @@ function renderChequesCalQuickAdd() {
       <div><label>Proveedor</label><input type="text" id="calQAProveedor" list="chequesProveedoresList" placeholder="Ej: Emporio"></div>
       <div><label>Monto ($)</label><input type="number" id="calQAMonto" placeholder="0"></div>
       <div><label>N° de cheque</label><input type="text" id="calQANumero" placeholder="Opcional"></div>
-      <div><label>Fecha de emisión (opcional)</label><input type="date" id="calQAFechaEmision"></div>
+      <div><label>Fecha de emisión (opcional)</label><div style="display:flex;gap:6px;"><input type="date" id="calQAFechaEmision" value="${todayStr()}" style="flex:1;"><button type="button" class="btn btn-ghost btn-sm" onclick="document.getElementById('calQAFechaEmision').value=todayStr()">Hoy</button></div></div>
     </div>
     <div style="margin-bottom:12px;">
       <label style="font-size:11px;color:var(--muted);letter-spacing:1px;text-transform:uppercase;display:block;margin-bottom:5px;">Nota (opcional)</label>
@@ -2783,7 +2789,7 @@ function cancelarEdicionCheque() {
   document.getElementById('chqMonto').value='';
   document.getElementById('chqNumero').value='';
   document.getElementById('chqFechaPago').value='';
-  document.getElementById('chqFechaEmision').value='';
+  document.getElementById('chqFechaEmision').value=todayStr();
   document.getElementById('chqNota').value='';
   document.getElementById('btnGuardarCheque').textContent = '+ Agregar cheque';
   document.getElementById('btnCancelarEdicionCheque').style.display = 'none';
@@ -2839,7 +2845,8 @@ function editarChequeBorrador(id) {
 
 function cancelarEdicionChequeBorrador() {
   chequeBorradorEditandoId = null;
-  ['chqbProveedor','chqbMonto','chqbNumero','chqbFechaPago','chqbFechaEmision','chqbNota'].forEach(id=>{ document.getElementById(id).value=''; });
+  ['chqbProveedor','chqbMonto','chqbNumero','chqbFechaPago','chqbNota'].forEach(id=>{ document.getElementById(id).value=''; });
+  document.getElementById('chqbFechaEmision').value = todayStr();
   document.getElementById('btnGuardarChequeBorrador').textContent = '+ Agregar al borrador';
   document.getElementById('btnCancelarEdicionBorrador').style.display = 'none';
 }
@@ -3407,6 +3414,8 @@ async function init() {
   renderImpuestos();
   renderCheques();
   renderChequesBorrador();
+  document.getElementById('chqFechaEmision').value = todayStr();
+  document.getElementById('chqbFechaEmision').value = todayStr();
   updateConceptosDatalist();
 }
 
