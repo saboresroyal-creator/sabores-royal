@@ -397,6 +397,7 @@ tr:hover td { background:var(--surface2); }
   <div class="tab" onclick="switchTab('estadisticas',this)">📊 Estadísticas</div>
   <div class="tab" onclick="switchTab('gastos',this)">🔍 Gastos</div>
   <div class="tab" onclick="switchTab('impuestos',this)" id="tabImpuestos">🧾 Impuestos</div>
+  <div class="tab" onclick="switchTab('cheques',this)" id="tabCheques">💳 Cheques</div>
   <div class="tab" onclick="switchTab('ajustes',this)">⚙ Ajustes</div>
 </div>
 
@@ -622,6 +623,59 @@ tr:hover td { background:var(--surface2); }
 </div>
 
 <!-- ══════════════════════════════════════════
+     PANEL: CHEQUES PROVEEDORES
+══════════════════════════════════════════ -->
+<div class="panel" id="panel-cheques">
+  <!-- Resumen -->
+  <div class="grid4 mb16" id="chequesResumen"></div>
+
+  <!-- Formulario -->
+  <div class="card mb16">
+    <div class="card-title"><div class="dot"></div>NUEVO CHEQUE</div>
+    <div class="grid4 mb16">
+      <div>
+        <label>Proveedor (liberado a)</label>
+        <input type="text" id="chqProveedor" placeholder="Ej: Emporio">
+      </div>
+      <div>
+        <label>Monto ($)</label>
+        <input type="number" id="chqMonto" placeholder="0">
+      </div>
+      <div>
+        <label>N° de cheque</label>
+        <input type="text" id="chqNumero" placeholder="Ej: 2037">
+      </div>
+      <div>
+        <label>Vencimiento</label>
+        <input type="date" id="chqFechaPago">
+      </div>
+    </div>
+    <div class="grid3 mb16">
+      <div>
+        <label>Fecha de emisión (opcional)</label>
+        <input type="date" id="chqFechaEmision">
+      </div>
+      <div style="grid-column:span 2;">
+        <label>Nota (opcional)</label>
+        <input type="text" id="chqNota" placeholder="Ej: cheque a 90 días">
+      </div>
+    </div>
+    <button class="btn btn-gold" onclick="addCheque()">+ Agregar cheque</button>
+  </div>
+
+  <!-- Filtros -->
+  <div class="ptabs mb16" id="chequesFiltro">
+    <button class="ptab active" onclick="setChequesFiltro('todos',this)">Todos</button>
+    <button class="ptab" onclick="setChequesFiltro('pendiente',this)">Pendientes</button>
+    <button class="ptab" onclick="setChequesFiltro('cobrado',this)">Cobrados</button>
+    <button class="ptab" onclick="setChequesFiltro('rechazado',this)">Rechazados</button>
+  </div>
+
+  <!-- Lista -->
+  <div id="chequesList"></div>
+</div>
+
+<!-- ══════════════════════════════════════════
      PANEL: AJUSTES
 ══════════════════════════════════════════ -->
 <div class="panel" id="panel-ajustes">
@@ -654,7 +708,7 @@ tr:hover td { background:var(--surface2); }
 // ============================================================
 // STATE
 // ============================================================
-let state = { dias:{}, impuestos:[], cajeros:['Gastón','Matías','Gabriel','Emanuel'] };
+let state = { dias:{}, impuestos:[], cheques:[], cajeros:['Gastón','Matías','Gabriel','Emanuel'] };
 let currentPeriod = 'dia';
 let currentCajaVista = 'todas'; // 'todas' | 'caja0' | 'caja1' | 'caja3' | 'caja4'
 let charts = {};
@@ -857,6 +911,7 @@ function rerenderAll(){
   const name = panel ? panel.id.replace('panel-','') : '';
   if(name==='estadisticas') { destroyCharts(); renderStats(); }
   if(name==='impuestos') renderImpuestos();
+  if(name==='cheques') renderCheques();
   if(name==='ajustes') renderCajeros();
   if(name==='gastos') { updateConceptosDatalist(); renderBusquedaGastos(); }
   updateBadge();
@@ -950,6 +1005,7 @@ document.addEventListener('visibilitychange', ()=>{ if(document.visibilityState 
 // ============================================================
 function normalizeState(){
   if(!state.impuestos) state.impuestos = [];
+  if(!state.cheques) state.cheques = [];
   if(!state.cajeros) state.cajeros = ['Gastón','Matías','Gabriel','Emanuel'];
   if(!state.dias) state.dias = {};
   if(!state.updatedAt) state.updatedAt = 0;
@@ -2424,6 +2480,121 @@ function updateBadge() {
 }
 
 // ============================================================
+// CHEQUES PROVEEDORES
+// ============================================================
+let chequesFiltro = 'todos';
+const CHEQUE_ALERTA_DIAS = 5;
+
+function addCheque() {
+  const proveedor = document.getElementById('chqProveedor').value.trim();
+  const monto = parseFloat(document.getElementById('chqMonto').value)||0;
+  const numero = document.getElementById('chqNumero').value.trim();
+  const fechaPago = document.getElementById('chqFechaPago').value;
+  const fechaEmision = document.getElementById('chqFechaEmision').value;
+  const nota = document.getElementById('chqNota').value.trim();
+  if(!proveedor || !monto || !fechaPago) { alert('Completá proveedor, monto y vencimiento.'); return; }
+  state.cheques.push({id:Date.now(), proveedor, monto, numero, fechaPago, fechaEmision, nota, estado:'pendiente'});
+  save();
+  document.getElementById('chqProveedor').value='';
+  document.getElementById('chqMonto').value='';
+  document.getElementById('chqNumero').value='';
+  document.getElementById('chqFechaPago').value='';
+  document.getElementById('chqFechaEmision').value='';
+  document.getElementById('chqNota').value='';
+  renderCheques();
+}
+
+function setChequesFiltro(f, el) {
+  chequesFiltro = f;
+  document.querySelectorAll('#chequesFiltro .ptab').forEach(t=>t.classList.remove('active'));
+  el.classList.add('active');
+  renderCheques();
+}
+
+function renderChequesResumen() {
+  const el = document.getElementById('chequesResumen');
+  if(!el) return;
+  const today = new Date(); today.setHours(0,0,0,0);
+  const pendientes = state.cheques.filter(c=>c.estado==='pendiente');
+  const totalPendiente = pendientes.reduce((s,c)=>s+c.monto,0);
+  const proximos = pendientes.filter(c=>Math.ceil((new Date(c.fechaPago+'T00:00:00')-today)/(1000*60*60*24))<=CHEQUE_ALERTA_DIAS);
+  const totalProximos = proximos.reduce((s,c)=>s+c.monto,0);
+  const rechazados = state.cheques.filter(c=>c.estado==='rechazado').length;
+  const cobrados = state.cheques.filter(c=>c.estado==='cobrado').length;
+  el.innerHTML = `
+    <div class="stat"><div class="stat-label">Pendiente total</div><div class="stat-value gold">${pesos(totalPendiente)}</div><div style="font-size:11px;color:var(--muted);margin-top:4px">${pendientes.length} cheque(s)</div></div>
+    <div class="stat"><div class="stat-label">Próximos ${CHEQUE_ALERTA_DIAS} días</div><div class="stat-value" style="color:${proximos.length?'var(--yellow)':'var(--text)'}">${pesos(totalProximos)}</div><div style="font-size:11px;color:var(--muted);margin-top:4px">${proximos.length} cheque(s)</div></div>
+    <div class="stat"><div class="stat-label">Rechazados</div><div class="stat-value" style="color:${rechazados?'var(--red)':'var(--text)'}">${rechazados}</div></div>
+    <div class="stat"><div class="stat-label">Cobrados</div><div class="stat-value green">${cobrados}</div></div>
+  `;
+}
+
+function renderCheques() {
+  renderChequesResumen();
+  const container = document.getElementById('chequesList');
+  if(!container) return;
+  let list = state.cheques;
+  if(chequesFiltro !== 'todos') list = list.filter(c=>c.estado===chequesFiltro);
+  if(!list.length) {
+    container.innerHTML = `<div class="card" style="text-align:center;color:var(--muted);padding:40px;">No hay cheques${chequesFiltro!=='todos'?' en este estado':' cargados'}.</div>`;
+    updateChequesBadge();
+    return;
+  }
+  const today = new Date(); today.setHours(0,0,0,0);
+  const sorted = [...list].sort((a,b)=>a.fechaPago.localeCompare(b.fechaPago));
+  container.innerHTML = `<div class="grid3">${sorted.map(c=>{
+    const vence = new Date(c.fechaPago+'T00:00:00');
+    const diff = Math.ceil((vence-today)/(1000*60*60*24));
+    let cls='imp-card', status='', statusColor='var(--muted)';
+    if(c.estado==='rechazado'){ cls+=' vencido'; status='✗ RECHAZADO'; statusColor='var(--red)'; }
+    else if(c.estado==='cobrado'){ cls+=' pagado'; status='✓ COBRADO'; statusColor='var(--green)'; }
+    else if(diff<0){ cls+=' vencido'; status=`⚠ Venció hace ${Math.abs(diff)} día(s)`; statusColor='var(--red)'; }
+    else if(diff<=CHEQUE_ALERTA_DIAS){ cls+=' alerta'; status=`⏰ Vence en ${diff} día(s)`; statusColor='var(--yellow)'; }
+    else { status=`Faltan ${diff} días`; }
+
+    return `<div class="${cls}">
+      <div class="imp-nombre">${c.proveedor}</div>
+      <div class="imp-monto">${pesos(c.monto)}</div>
+      <div class="imp-vence">Vence: ${c.fechaPago}${c.numero?' · N° '+c.numero:''}${c.fechaEmision?' · emitido '+c.fechaEmision:''}</div>
+      ${c.nota?`<div style="font-size:11px;color:var(--muted);margin-top:4px;">${c.nota}</div>`:''}
+      <div class="imp-status" style="color:${statusColor}">${status}</div>
+      <div class="flex mt16" style="flex-wrap:wrap;gap:6px;">
+        ${c.estado!=='cobrado' ? `<button class="btn btn-green btn-sm" onclick="setChequeEstado(${c.id},'cobrado')">Cobrado</button>`:''}
+        ${c.estado!=='rechazado' ? `<button class="btn btn-red btn-sm" onclick="setChequeEstado(${c.id},'rechazado')">Rechazado</button>`:''}
+        ${c.estado!=='pendiente' ? `<button class="btn btn-ghost btn-sm" onclick="setChequeEstado(${c.id},'pendiente')">Pendiente</button>`:''}
+        <button class="btn btn-ghost btn-sm" onclick="removeCheque(${c.id})">✕</button>
+      </div>
+    </div>`;
+  }).join('')}</div>`;
+  updateChequesBadge();
+}
+
+function setChequeEstado(id, estado) {
+  const c = state.cheques.find(x=>x.id===id);
+  if(c) { c.estado = estado; save(); renderCheques(); }
+}
+
+function removeCheque(id) {
+  if(!confirm('¿Eliminar este cheque?')) return;
+  state.cheques = state.cheques.filter(c=>c.id!==id);
+  save(); renderCheques();
+}
+
+function updateChequesBadge() {
+  const today = new Date(); today.setHours(0,0,0,0);
+  const alertas = state.cheques.filter(c=>{
+    if(c.estado==='rechazado') return true;
+    if(c.estado!=='pendiente') return false;
+    return Math.ceil((new Date(c.fechaPago+'T00:00:00')-today)/(1000*60*60*24))<=CHEQUE_ALERTA_DIAS;
+  }).length;
+  const tab = document.getElementById('tabCheques');
+  if(!tab) return;
+  const existing = tab.querySelector('.badge');
+  if(existing) existing.remove();
+  if(alertas>0) tab.innerHTML += `<span class="badge">${alertas}</span>`;
+}
+
+// ============================================================
 // CAJEROS
 // ============================================================
 function renderCajeros() {
@@ -2624,6 +2795,7 @@ function switchTab(name, el) {
   document.getElementById(`panel-${name}`).classList.add('active');
   if(name==='estadisticas') { destroyCharts(); renderStats(); }
   if(name==='impuestos') renderImpuestos();
+  if(name==='cheques') renderCheques();
   if(name==='ajustes') renderCajeros();
   if(name==='gastos') { updateConceptosDatalist(); renderBusquedaGastos(); }
 }
@@ -2664,6 +2836,7 @@ async function init() {
   dateInput.addEventListener('change', loadCargaDay);
   loadCargaDay();
   renderImpuestos();
+  renderCheques();
   updateConceptosDatalist();
 }
 
