@@ -662,7 +662,10 @@ tr:hover td { background:var(--surface2); }
 
   <!-- Formulario -->
   <div class="card mb16">
-    <div class="card-title"><div class="dot"></div>NUEVO CHEQUE</div>
+    <div class="card-title" style="display:flex;align-items:center;justify-content:space-between;">
+      <span style="display:flex;align-items:center;gap:8px;"><div class="dot"></div>NUEVO CHEQUE</span>
+      <button class="btn btn-ghost btn-sm" onclick="abrirImportCheques()">📋 Pegar desde Excel</button>
+    </div>
     <div class="grid4 mb16">
       <div>
         <label>Proveedor (liberado a)</label>
@@ -2567,7 +2570,8 @@ function renderChequesCalendario() {
     const dateStr = year+'-'+String(monthIdx+1).padStart(2,'0')+'-'+String(day).padStart(2,'0');
     const cheques = porDia[dateStr]||[];
     const pendientes = cheques.filter(c=>c.estado==='pendiente');
-    const totalMonto = cheques.reduce((s,c)=>s+c.monto,0);
+    const rechazados = cheques.filter(c=>c.estado==='rechazado');
+    const montoPendiente = pendientes.reduce((s,c)=>s+c.monto,0);
     let cls = 'cal-day';
     if(dateStr===today) cls+=' today';
     if(cheques.length) cls+=' has-cheques';
@@ -2579,10 +2583,16 @@ function renderChequesCalendario() {
     } else if(cheques.length){
       cls+=' todo-cobrado';
     }
-    cells += `<div class="${cls}" ${cheques.length?`onclick="chequesCalSeleccionarDia('${dateStr}')" title="Ver cheques del ${day}/${monthIdx+1}"`:''}>
-      <div class="cal-num">${day}</div>
-      ${cheques.length?`<div class="cal-count">${cheques.length} 📝</div><div class="cal-monto">${pesos(totalMonto)}</div>`:''}
-    </div>`;
+    let inner = `<div class="cal-num">${day}</div>`;
+    if(cheques.length){
+      if(pendientes.length){
+        inner += `<div class="cal-count">${pendientes.length} pend. 📝</div><div class="cal-monto">${pesos(montoPendiente)}</div>`;
+      } else {
+        inner += `<div class="cal-count" style="color:var(--green);">✓ cobrado</div>`;
+      }
+      if(rechazados.length) inner += `<div class="cal-monto" style="color:var(--red);">⚠ ${rechazados.length} rech.</div>`;
+    }
+    cells += `<div class="${cls}" ${cheques.length?`onclick="chequesCalSeleccionarDia('${dateStr}')" title="Ver cheques del ${day}/${monthIdx+1}"`:''}>${inner}</div>`;
   }
   grid.innerHTML = cells;
 }
@@ -2700,6 +2710,81 @@ function updateChequesBadge() {
   const existing = tab.querySelector('.badge');
   if(existing) existing.remove();
   if(alertas>0) tab.innerHTML += `<span class="badge">${alertas}</span>`;
+}
+
+// ── IMPORTAR CHEQUES DESDE EXCEL ──
+// Formato argentino: punto como separador de miles, coma como decimal
+// (ej: "1.726.878,08"). Sin punto/coma de miles, "65175,9" también entra.
+function parseArNumber(str) {
+  if(!str) return 0;
+  const limpio = str.trim().replace(/\./g,'').replace(',', '.');
+  return parseFloat(limpio) || 0;
+}
+
+const MESES_ABR = {
+  ene:1, enero:1, feb:2, febrero:2, mar:3, marzo:3, abr:4, abril:4,
+  may:5, mayo:5, jun:6, junio:6, jul:7, julio:7, ago:8, agosto:8,
+  sep:9, sept:9, set:9, septiembre:9, setiembre:9,
+  oct:10, octubre:10, nov:11, noviembre:11, dic:12, diciembre:12
+};
+
+// Entiende "07-oct" / "07/oct" (sin año, usa anioBase), "7/10/2026" y "2026-10-07".
+function parseFechaFlexible(str, anioBase) {
+  str = (str||'').trim();
+  if(!str) return '';
+  let m = str.match(/^(\d{4})-(\d{1,2})-(\d{1,2})$/);
+  if(m) return m[1]+'-'+m[2].padStart(2,'0')+'-'+m[3].padStart(2,'0');
+  m = str.match(/^(\d{1,2})[\/-](\d{1,2})[\/-](\d{4})$/);
+  if(m) return m[3]+'-'+m[1].padStart(2,'0')+'-'+m[2].padStart(2,'0');
+  m = str.match(/^(\d{1,2})[\/-]([a-zA-Záéíóúñ]+)\.?$/);
+  if(m) {
+    const mes = MESES_ABR[m[2].toLowerCase().replace(/\.$/,'')];
+    if(mes) return anioBase+'-'+String(mes).padStart(2,'0')+'-'+String(parseInt(m[1],10)).padStart(2,'0');
+  }
+  return '';
+}
+
+function parseFilaCheque(cols, anioBase) {
+  const numero = (cols[0]||'').trim();
+  const proveedor = (cols[3]||'').trim();
+  const monto = parseArNumber(cols[4]||'');
+  let fechaEmision = parseFechaFlexible(cols[1]||'', anioBase);
+  let fechaPago = parseFechaFlexible(cols[2]||'', anioBase);
+  // Si el vencimiento quedó antes que la emisión, es porque cruza de año
+  // (ej: emitido en diciembre, vence en enero) — se le suma un año.
+  if(fechaEmision && fechaPago && fechaPago < fechaEmision) {
+    fechaPago = (parseInt(fechaPago.slice(0,4),10)+1) + fechaPago.slice(4);
+  }
+  return {numero, fechaEmision, fechaPago, proveedor, monto};
+}
+
+function abrirImportCheques() {
+  document.getElementById('impChqAnio').value = new Date().getFullYear();
+  document.getElementById('impChqTexto').value = '';
+  document.getElementById('modalImportCheques').style.display = 'flex';
+}
+function cerrarImportCheques() {
+  document.getElementById('modalImportCheques').style.display = 'none';
+}
+
+function procesarImportCheques() {
+  const raw = document.getElementById('impChqTexto').value;
+  const anio = parseInt(document.getElementById('impChqAnio').value, 10) || new Date().getFullYear();
+  const lineas = raw.split('\n').map(l=>l.replace(/\r$/,'')).filter(l=>l.trim());
+  let agregados = 0, saltadas = 0;
+  lineas.forEach((linea, i)=>{
+    const cols = linea.includes('\t') ? linea.split('\t') : linea.trim().split(/\s{2,}/);
+    if(cols.length < 5) { saltadas++; return; }
+    if(/^(nro|n°|numero|número)/i.test(cols[0].trim())) { saltadas++; return; } // encabezado pegado por error
+    const f = parseFilaCheque(cols, anio);
+    if(!f.proveedor || !f.monto || !f.fechaPago) { saltadas++; return; }
+    state.cheques.push({id:Date.now()+i, proveedor:f.proveedor, monto:f.monto, numero:f.numero, fechaPago:f.fechaPago, fechaEmision:f.fechaEmision, nota:'', estado:'pendiente'});
+    agregados++;
+  });
+  if(agregados>0) save();
+  renderCheques();
+  cerrarImportCheques();
+  alert(`${agregados} cheque(s) importado(s).` + (saltadas ? `\n${saltadas} fila(s) no se pudieron leer (revisá el formato).` : ''));
 }
 
 // ============================================================
@@ -2981,6 +3066,25 @@ init();
     <div class="modal-actions">
       <button class="btn btn-ghost" onclick="cerrarModalExportar()">Cancelar</button>
       <button class="btn btn-green" onclick="confirmarExportarExcel()">Exportar</button>
+    </div>
+  </div>
+</div>
+
+<!-- MODAL: IMPORTAR CHEQUES DESDE EXCEL -->
+<div class="modal-bg" id="modalImportCheques" style="display:none;" onclick="if(event.target===this) cerrarImportCheques()">
+  <div class="modal" style="max-width:540px;">
+    <h2>📋 Pegar cheques desde Excel</h2>
+    <p class="hint">Seleccioná y copiá las filas de tu planilla (sin encabezado) con las columnas en este orden: <b>N° Cheque · Fecha emisión · Vencimiento · Proveedor · Monto</b>. Pegalas acá abajo tal cual, una fila por línea.</p>
+    <div class="form-group" style="margin-bottom:12px;">
+      <label>Año de las fechas cortas (ej: "07-oct")</label>
+      <input type="number" id="impChqAnio" style="width:120px;background:var(--surface2);border:1px solid var(--border);color:var(--text);border-radius:8px;padding:8px 12px;font-size:13px;">
+    </div>
+    <textarea id="impChqTexto" placeholder="9080&#9;03-sept&#9;07-oct&#9;LA ESTRELLA&#9;200000&#10;1312&#9;11-sept&#9;07-oct&#9;TREGAR&#9;120000" style="width:100%;min-height:160px;background:var(--surface2);border:1px solid var(--border);color:var(--text);border-radius:8px;padding:10px 12px;font-size:12px;font-family:var(--mono);resize:vertical;"></textarea>
+    <p class="hint" style="margin-top:8px;margin-bottom:0;">Si una fecha corta de vencimiento cae antes que la de emisión, se asume que es del año siguiente (cheque que cruza fin de año).</p>
+
+    <div class="modal-actions">
+      <button class="btn btn-ghost" onclick="cerrarImportCheques()">Cancelar</button>
+      <button class="btn btn-green" onclick="procesarImportCheques()">Importar</button>
     </div>
   </div>
 </div>
