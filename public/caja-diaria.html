@@ -1055,8 +1055,10 @@ function diaBadgesHtml(day) {
   let html = '';
   if(day.feriado) html += ` <span title="${(day.feriadoNombre||'Feriado').replace(/"/g,'')}" style="font-size:11px;">🎉</span>`;
   if(day.clima) {
-    const [icon,label] = weatherLabel(day.clima.code);
-    html += ` <span title="${label}" style="font-size:11px;color:var(--muted);font-weight:400;">${icon} ${day.clima.tMin}°/${day.clima.tMax}°</span>`;
+    const sinDato = day.clima.lluvia==null;
+    const lluviaTitle = sinDato ? 'Lluvia: sin dato' : (day.clima.lluvia>0 ? `🌧️ ${day.clima.lluvia}mm` : 'Sin lluvia');
+    const lluviaIcon = sinDato ? '🌡️' : (day.clima.lluvia>0?'🌧️':'☀️');
+    html += ` <span title="${lluviaTitle}" style="font-size:11px;color:var(--muted);font-weight:400;">${lluviaIcon} ${day.clima.tMin}°/${day.clima.tMax}°</span>`;
   }
   return html;
 }
@@ -1084,7 +1086,7 @@ async function fetchClima(d, force) {
   const diffDays = Math.round((new Date(d+'T00:00:00') - new Date(today+'T00:00:00')) / 86400000);
   const reciente = diffDays >= -6 && diffDays <= 16;
   const base = reciente ? 'https://api.open-meteo.com/v1/forecast' : 'https://archive-api.open-meteo.com/v1/archive';
-  const url = `${base}?latitude=${CLIMA_LAT}&longitude=${CLIMA_LON}&start_date=${d}&end_date=${d}&daily=weathercode,temperature_2m_max,temperature_2m_min&timezone=America%2FArgentina%2FBuenos_Aires`;
+  const url = `${base}?latitude=${CLIMA_LAT}&longitude=${CLIMA_LON}&start_date=${d}&end_date=${d}&daily=weathercode,temperature_2m_max,temperature_2m_min,precipitation_sum&timezone=America%2FArgentina%2FBuenos_Aires`;
   try{
     const controller = new AbortController();
     const timer = setTimeout(()=>controller.abort(), 8000);
@@ -1098,6 +1100,7 @@ async function fetchClima(d, force) {
       tMax: Math.round(data.daily.temperature_2m_max[0]),
       tMin: Math.round(data.daily.temperature_2m_min[0]),
       code: data.daily.weathercode[0],
+      lluvia: data.daily.precipitation_sum ? (Math.round((data.daily.precipitation_sum[0]||0)*10)/10) : null,
       fetchedAt: Date.now()
     };
     save();
@@ -1115,8 +1118,9 @@ function renderClimaBox(d) {
   if(!box) return;
   const day = state.dias[d];
   if(day && day.clima) {
-    const [icon,label] = weatherLabel(day.clima.code);
-    box.innerHTML = `<span style="font-size:18px;">${icon}</span><span>${day.clima.tMin}°/${day.clima.tMax}° <span style="color:var(--muted);font-size:11px;">· ${label}</span></span><button class="btn btn-ghost" style="padding:2px 8px;font-size:10px;" onclick="refreshClima('${d}')" title="Actualizar clima">🔄</button>`;
+    const [icon] = weatherLabel(day.clima.code);
+    const lluviaTxt = day.clima.lluvia==null ? '' : (day.clima.lluvia>0 ? `🌧️ Llovió (${day.clima.lluvia}mm)` : '☀️ No llovió');
+    box.innerHTML = `<span style="font-size:18px;">${icon}</span><span>${day.clima.tMin}°/${day.clima.tMax}° <span style="color:var(--muted);font-size:11px;">· ${lluviaTxt}</span></span><button class="btn btn-ghost" style="padding:2px 8px;font-size:10px;" onclick="refreshClima('${d}')" title="Actualizar clima">🔄</button>`;
   } else if(_climaFailed.has(d)) {
     box.innerHTML = `<button class="btn btn-ghost" style="font-size:11px;padding:6px 10px;" onclick="refreshClima('${d}')">⚠️ Clima no disponible — reintentar</button>`;
   } else {
