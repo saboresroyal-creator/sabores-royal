@@ -3,8 +3,17 @@
 <head>
 <script defer src="/_vercel/insights/script.js"></script>
 <meta charset="UTF-8">
-<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover">
 <title>Sabores Royal — Dashboard de Cajas</title>
+<!-- Instalable en el celu ("Agregar a pantalla de inicio") -->
+<link rel="manifest" href="manifest-caja.json">
+<meta name="theme-color" content="#16161a">
+<link rel="apple-touch-icon" href="apple-touch-icon-caja.png">
+<link rel="icon" type="image/png" href="icon-caja-192.png">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+<meta name="apple-mobile-web-app-title" content="Caja Diaria">
 <script src="https://cdnjs.cloudflare.com/ajax/libs/Chart.js/4.4.1/chart.umd.min.js"></script>
 <script src="https://cdnjs.cloudflare.com/ajax/libs/xlsx/0.18.5/xlsx.full.min.js"></script>
 <script src="https://cdnjs.cloudflare.com/ajax/libs/jspdf/2.5.1/jspdf.umd.min.js"></script>
@@ -343,6 +352,25 @@ tr:hover td { background:var(--surface2); }
 .flex-end { justify-content:flex-end; }
 .w100 { width:100%; }
 .text-right { text-align:right; }
+
+/* ── CELULAR ── */
+@media(max-width:600px){
+  /* iOS hace zoom solo al tocar un campo con letra de menos de 16px */
+  input, select, textarea { font-size:16px; padding:10px 12px; }
+  .header { padding:10px 14px; }
+  .header-date { display:none; }
+  .brand-sub { display:none; }
+  .panel { padding:14px; }
+  .card, .caja-card { padding:14px; }
+  .btn { min-height:40px; }
+  .btn-sm { min-height:36px; padding:6px 12px; font-size:12px; }
+  .tab { padding:12px 14px; }
+  body { padding-bottom: env(safe-area-inset-bottom); }
+  th, td { padding:8px 6px; font-size:12px; }
+  /* una tabla que igual no entra se desplaza dentro de su tarjeta, no la página */
+  .card:has(table) { overflow-x:auto; }
+  .tbl-gastos th:nth-child(3), .tbl-gastos td:nth-child(3) { display:none; }
+}
 </style>
 </head>
 <body>
@@ -701,24 +729,214 @@ async function ensureCajaPin(){
     }catch(e){ wrong = true; }
   }
 }
-async function pullRemoteState(){
-  const raw = await cajaRpc('get_caja_diaria', {p_pin: CAJA_PIN});
-  if(raw){ try{ state = JSON.parse(raw); }catch(e){} }
+// ============================================================
+// SINCRONIZACIÓN ENTRE DISPOSITIVOS
+// ============================================================
+// Todo el estado viaja como un solo bloque. Antes, el que guardaba último
+// pisaba todo: si la caja estaba abierta en la compu y se cargaba un gasto
+// desde el celu, el próximo guardado de la compu lo borraba sin aviso.
+//
+// Ahora cada dispositivo recuerda la última versión que sincronizó con el
+// servidor (syncBase). Antes de subir, baja lo que hay en el servidor y
+// hace una unión de 3 vías (base / este dispositivo / servidor): se queda
+// con lo que cambió de cada lado. Además, con la página abierta, trae
+// los cambios de otros dispositivos cada 30 s y al volver a la pestaña.
+const SYNC_BASE_KEY = 'cajasApp_v2_base';
+let syncBase = null;
+try{ syncBase = JSON.parse(localStorage.getItem(SYNC_BASE_KEY) || 'null'); }catch(e){ syncBase = null; }
+let _syncChain = Promise.resolve();
+let _needsRender = false;
+
+function setSyncBase(s){
+  syncBase = JSON.parse(JSON.stringify(s));
+  try{ localStorage.setItem(SYNC_BASE_KEY, JSON.stringify(syncBase)); }catch(e){}
 }
-async function pushRemoteState(){
-  const statusEl = document.getElementById('backupStatus');
-  try{
-    const val = JSON.stringify(state);
-    await cajaRpc('save_caja_diaria', {p_pin: CAJA_PIN, p_data: val});
-    if(statusEl){ statusEl.textContent = '☁ Sincronizado ' + new Date().toLocaleTimeString('es-AR',{hour:'2-digit',minute:'2-digit'}); statusEl.style.color = 'var(--green)'; }
-  }catch(e){
-    if(statusEl){ statusEl.textContent = '⚠ Sin sincronizar (' + e.message + ')'; statusEl.style.color = 'var(--red)'; }
+
+// JSON con las claves ordenadas, para comparar objetos sin que importe
+// el orden en que se crearon las propiedades.
+function stableStr(v){
+  if(Array.isArray(v)) return '[' + v.map(stableStr).join(',') + ']';
+  if(v && typeof v === 'object') return '{' + Object.keys(v).filter(k=>v[k]!==undefined).sort().map(k=>JSON.stringify(k)+':'+stableStr(v[k])).join(',') + '}';
+  return JSON.stringify(v === undefined ? null : v);
+}
+function sameData(a, b){
+  const strip = s => { if(!s || typeof s !== 'object') return s; const c = Object.assign({}, s); delete c.updatedAt; return c; };
+  return stableStr(strip(a)) === stableStr(strip(b));
+}
+const isObj = v => v !== null && typeof v === 'object' && !Array.isArray(v);
+const isEmptyVal = v => v === undefined || v === null || v === '';
+
+// Arrays "de registros" (las cajas de un día: objetos con listas adentro)
+// se unen posición por posición. Arrays con id (impuestos) se unen por id.
+// El resto (gastos, cajeros) se une como conjunto: se aplican sobre la
+// versión del servidor los ítems que este dispositivo agregó o borró.
+function mergeArrays(b, l, r){
+  b = Array.isArray(b) ? b : [];
+  const all = [...l, ...r];
+  if(all.some(x => isObj(x) && Object.values(x).some(v => v && typeof v === 'object'))){
+    const out = [];
+    for(let i = 0; i < Math.max(l.length, r.length); i++){
+      const m = merge3(b[i], l[i], r[i]);
+      if(m !== undefined) out.push(m);
+    }
+    return out;
   }
+  if(all.length && all.every(x => isObj(x) && x.id !== undefined)){
+    const byId = arr => new Map(arr.map(x => [String(x.id), x]));
+    const bm = byId(b), lm = byId(l), rm = byId(r);
+    const ids = [...rm.keys(), ...[...lm.keys()].filter(k => !rm.has(k))];
+    return ids.map(k => merge3(bm.get(k), lm.get(k), rm.get(k))).filter(x => x !== undefined);
+  }
+  const count = arr => { const m = new Map(); arr.forEach(x => { const k = stableStr(x); m.set(k, (m.get(k)||0) + 1); }); return m; };
+  const bc = count(b), lc = count(l);
+  const out = r.slice();
+  for(const [k, n] of bc){ // borrados en este dispositivo
+    let del = n - (lc.get(k) || 0);
+    for(let i = out.length - 1; i >= 0 && del > 0; i--){ if(stableStr(out[i]) === k){ out.splice(i, 1); del--; } }
+  }
+  for(const x of l){ // agregados en este dispositivo
+    const k = stableStr(x);
+    if((lc.get(k) || 0) > (bc.get(k) || 0)){ out.push(x); bc.set(k, (bc.get(k) || 0) + 1); }
+  }
+  return out;
+}
+
+function merge3(b, l, r){
+  if(stableStr(l) === stableStr(r)) return l;
+  if(b !== undefined && stableStr(l) === stableStr(b)) return r;
+  if(b !== undefined && stableStr(r) === stableStr(b)) return l;
+  if(l === undefined) return b === undefined ? r : undefined; // borrado acá
+  if(r === undefined) return b === undefined ? l : undefined; // borrado en otro lado
+  if(isObj(l) && isObj(r)){
+    const out = {};
+    for(const k of new Set([...Object.keys(r), ...Object.keys(l)])){
+      const m = merge3(isObj(b) ? b[k] : undefined, l[k], r[k]);
+      if(m !== undefined) out[k] = m;
+    }
+    return out;
+  }
+  if(Array.isArray(l) && Array.isArray(r)) return mergeArrays(b, l, r);
+  // El mismo dato cambiado en los dos lados. Si nadie lo tenía antes (ej:
+  // un día que se abrió vacío acá y se cargó en otro lado), gana el que
+  // tiene algo; si no, gana este dispositivo.
+  if(b === undefined && isEmptyVal(l)) return r;
+  return l;
+}
+
+function mergeWithRemote(remote){
+  const merged = merge3(syncBase || undefined, state, remote);
+  merged.updatedAt = Math.max(state.updatedAt || 0, remote.updatedAt || 0);
+  return merged;
+}
+// Cómo queda este dispositivo después de ver lo que hay en el servidor.
+// Sin base (primera vez con esta versión, o nunca pudo sincronizar) no se
+// sabe qué cambió de cada lado: como antes, gana la versión más nueva,
+// salvo que la local sea más nueva, y ahí se unen en vez de pisar.
+function reconcile(remote){
+  if(!syncBase){
+    return (state.updatedAt || 0) > (remote.updatedAt || 0) ? mergeWithRemote(remote) : remote;
+  }
+  return sameData(state, syncBase) ? remote : mergeWithRemote(remote);
+}
+
+function isEditing(){
+  const el = document.activeElement;
+  return !!el && ['INPUT','TEXTAREA','SELECT'].includes(el.tagName);
+}
+function rerenderAll(){
+  _needsRender = false;
+  loadCargaDay();
+  const panel = document.querySelector('.panel.active');
+  const name = panel ? panel.id.replace('panel-','') : '';
+  if(name==='estadisticas') { destroyCharts(); renderStats(); }
+  if(name==='impuestos') renderImpuestos();
+  if(name==='ajustes') renderCajeros();
+  if(name==='gastos') { updateConceptosDatalist(); renderBusquedaGastos(); }
+  updateBadge();
+}
+// Si llegan cambios mientras se está escribiendo en un campo, se
+// redibuja recién al salir del campo (para no borrar lo que se tipea).
+function renderWhenIdle(){
+  if(isEditing()) _needsRender = true;
+  else rerenderAll();
+}
+document.addEventListener('focusout', ()=>{
+  setTimeout(()=>{ if(_needsRender && !isEditing()) rerenderAll(); }, 50);
+});
+
+function setSyncStatus(ok, msg){
+  const statusEl = document.getElementById('backupStatus');
+  if(!statusEl) return;
+  statusEl.textContent = ok ? '☁ Sincronizado ' + new Date().toLocaleTimeString('es-AR',{hour:'2-digit',minute:'2-digit'}) : '⚠ Sin sincronizar (' + msg + ')';
+  statusEl.style.color = ok ? 'var(--green)' : 'var(--red)';
+}
+function queueSync(fn){
+  _syncChain = _syncChain.then(fn, fn);
+  return _syncChain;
+}
+
+async function fetchRemote(){
+  const raw = await cajaRpc('get_caja_diaria', {p_pin: CAJA_PIN});
+  return raw ? JSON.parse(raw) : null;
+}
+
+// Sube este dispositivo. force = pisar el servidor a propósito (importar
+// un backup o borrar todo); si no, primero se une con lo del servidor.
+function pushRemoteState({force = false} = {}){
+  return queueSync(async ()=>{
+    try{
+      if(!force){
+        const remote = await fetchRemote();
+        if(remote && !(syncBase && remote.updatedAt === syncBase.updatedAt && sameData(remote, syncBase))){
+          // Se llegó acá porque este dispositivo cambió algo, así que hay
+          // que unir (nunca adoptar lo del servidor tal cual).
+          const merged = mergeWithRemote(remote);
+          const changedHere = !sameData(merged, state);
+          state = merged;
+          normalizeState();
+          if(changedHere) renderWhenIdle();
+        }
+      }
+      state.updatedAt = Date.now();
+      localStorage.setItem('cajasApp_v2', JSON.stringify(state));
+      await cajaRpc('save_caja_diaria', {p_pin: CAJA_PIN, p_data: JSON.stringify(state)});
+      setSyncBase(state);
+      setSyncStatus(true);
+    }catch(e){
+      setSyncStatus(false, e.message);
+    }
+  });
+}
+
+// Trae lo que cargaron otros dispositivos.
+function pullRemoteState(){
+  return queueSync(async ()=>{
+    if(!CAJA_PIN) return;
+    try{
+      const remote = await fetchRemote();
+      if(!remote) return;
+      if(syncBase && remote.updatedAt === syncBase.updatedAt && sameData(remote, syncBase)) return; // nada nuevo
+      const next = reconcile(remote);
+      const changedHere = !sameData(next, state);
+      state = next;
+      normalizeState();
+      localStorage.setItem('cajasApp_v2', JSON.stringify(state));
+      setSyncBase(remote);
+      if(changedHere) renderWhenIdle();
+      // Si había cambios de este dispositivo que el servidor no tiene, se suben.
+      if(!sameData(state, remote)) scheduleRemoteSync();
+      setSyncStatus(true);
+    }catch(e){
+      setSyncStatus(false, e.message);
+    }
+  });
 }
 function scheduleRemoteSync(){
   clearTimeout(_remoteSyncTimer);
-  _remoteSyncTimer = setTimeout(pushRemoteState, 1200);
+  _remoteSyncTimer = setTimeout(()=>pushRemoteState(), 1200);
 }
+setInterval(()=>{ if(document.visibilityState === 'visible') pullRemoteState(); }, 30000);
+document.addEventListener('visibilitychange', ()=>{ if(document.visibilityState === 'visible') pullRemoteState(); });
 
 // ============================================================
 // PERSIST
@@ -736,7 +954,10 @@ function load() {
   normalizeState();
 }
 
-function todayStr() { return new Date().toISOString().slice(0,10); }
+// Fecha AAAA-MM-DD en la hora local del dispositivo. toISOString() da la
+// fecha en UTC: en Argentina, después de las 21 h ya marcaba el día siguiente.
+function localDateStr(d) { return d.getFullYear() + '-' + String(d.getMonth()+1).padStart(2,'0') + '-' + String(d.getDate()).padStart(2,'0'); }
+function todayStr() { return localDateStr(new Date()); }
 
 function getDay(d) {
   if(!state.dias[d]) {
@@ -1262,7 +1483,7 @@ function renderStats() {
     range = [];
     let cur = new Date(desde + 'T00:00:00');
     const end = new Date(hasta + 'T00:00:00');
-    while(cur <= end) { range.push(cur.toISOString().slice(0,10)); cur.setDate(cur.getDate()+1); }
+    while(cur <= end) { range.push(localDateStr(cur)); cur.setDate(cur.getDate()+1); }
   }
 
   if(currentCajaVista === 'todas') {
@@ -1277,7 +1498,7 @@ function getDateRange(days) {
   const dates = [];
   for(let i=days-1;i>=0;i--) {
     const d = new Date(); d.setDate(d.getDate()-i);
-    dates.push(d.toISOString().slice(0,10));
+    dates.push(localDateStr(d));
   }
   return dates;
 }
@@ -1704,7 +1925,7 @@ function getRangeActual() {
     const r = [];
     let cur = new Date(desde+'T00:00:00');
     const end = new Date(hasta+'T00:00:00');
-    while(cur<=end){ r.push(cur.toISOString().slice(0,10)); cur.setDate(cur.getDate()+1); }
+    while(cur<=end){ r.push(localDateStr(cur)); cur.setDate(cur.getDate()+1); }
     return r;
   }
   return [];
@@ -2105,7 +2326,7 @@ function importData() {
         // marca con la fecha más reciente posible en vez de heredar la del backup.
         state.updatedAt = Date.now();
         localStorage.setItem('cajasApp_v2', JSON.stringify(state));
-        await pushRemoteState();
+        await pushRemoteState({force: true});
         alert('Datos importados correctamente.'); location.reload();
       } catch(e){ alert('Archivo inválido.'); }
     };
@@ -2118,7 +2339,7 @@ async function resetData() {
   if(!confirm('¿Borrar TODOS los datos? Esta acción no se puede deshacer.')) return;
   state = { dias:{}, impuestos:[], cajeros:['Gastón','Matías','Gabriel','Emanuel'], updatedAt: Date.now() };
   localStorage.setItem('cajasApp_v2', JSON.stringify(state));
-  try{ await pushRemoteState(); }catch(e){}
+  try{ await pushRemoteState({force: true}); }catch(e){}
   location.reload();
 }
 
@@ -2177,7 +2398,7 @@ function renderBusquedaGastos() {
           <div style="font-family:var(--mono);font-size:16px;color:var(--red);">Total: ${pesos(totalFiltrado)}</div>
         </div>
       </div>
-      <table>
+      <table class="tbl-gastos">
         <thead><tr><th>Fecha</th><th>Caja</th><th>Cajero</th><th>Concepto</th><th class="num">Monto</th></tr></thead>
         <tbody>
           ${resultados.map(r=>`<tr>
@@ -2256,26 +2477,17 @@ async function init() {
   load();
   await ensureCajaPin();
   try{
-    const raw = await cajaRpc('get_caja_diaria', {p_pin: CAJA_PIN});
-    if(raw){
-      const remote = JSON.parse(raw);
-      const remoteUpdatedAt = remote.updatedAt || 0;
-      const localUpdatedAt = state.updatedAt || 0;
-      if(remoteUpdatedAt > localUpdatedAt){
-        // El servidor tiene una versión más nueva que este dispositivo (se cargó
-        // desde otro lado) — la adoptamos acá.
-        state = remote;
-        normalizeState();
-        localStorage.setItem('cajasApp_v2', JSON.stringify(state));
-      } else if(localUpdatedAt > remoteUpdatedAt){
-        // Este dispositivo tiene cambios más nuevos que el servidor (por ejemplo,
-        // se cargó algo estando sin conexión) — los subimos para no perderlos, en
-        // vez de pisarlos acá con la versión vieja del servidor.
-        await pushRemoteState();
-      }
-      // Mismo updatedAt en ambos lados: ya están sincronizados, no hay que hacer nada.
+    const remote = await fetchRemote();
+    if(remote){
+      // Une lo que haya en el servidor con lo que este dispositivo tenga sin
+      // subir (ej: algo cargado sin conexión), sin que uno pise al otro.
+      state = reconcile(remote);
+      normalizeState();
+      localStorage.setItem('cajasApp_v2', JSON.stringify(state));
+      setSyncBase(remote);
+      if(!sameData(state, remote)) await pushRemoteState();
     } else {
-      await pushRemoteState();
+      await pushRemoteState({force: true});
     }
   }catch(e){
     console.warn('No se pudo sincronizar con el servidor, se usan los datos locales:', e);
