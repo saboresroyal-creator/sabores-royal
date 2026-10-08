@@ -2839,7 +2839,7 @@ function renderChequesCalQuickAdd() {
     </div>
     <div class="grid4 mb16">
       <div><label>Proveedor</label><input type="text" id="calQAProveedor" list="chequesProveedoresList" placeholder="Ej: Emporio"></div>
-      <div><label>Monto ($)</label><input type="number" id="calQAMonto" placeholder="0"></div>
+      <div><label>Monto ($)</label><input type="number" id="calQAMonto" placeholder="0,00" step="0.01" inputmode="decimal" oninput="renderSumaCalQA()"></div>
       <div><label>N° de cheque</label><input type="text" id="calQANumero" placeholder="Opcional"></div>
       <div><label>Fecha de emisión (opcional)</label><div style="display:flex;gap:6px;"><input type="date" id="calQAFechaEmision" value="${todayStr()}" style="flex:1;"><button type="button" class="btn btn-ghost btn-sm" onclick="document.getElementById('calQAFechaEmision').value=todayStr()">Hoy</button></div></div>
     </div>
@@ -2847,10 +2847,18 @@ function renderChequesCalQuickAdd() {
       <label style="font-size:11px;color:var(--muted);letter-spacing:1px;text-transform:uppercase;display:block;margin-bottom:5px;">Nota (opcional)</label>
       <input type="text" id="calQANota" placeholder="Ej: cheque a 90 días" style="width:100%;background:var(--surface2);border:1px solid var(--border);color:var(--text);border-radius:8px;padding:8px 12px;font-size:13px;">
     </div>
-    <button class="btn btn-gold" onclick="chequesCalGuardarAltaRapida()">+ Agregar y seguir cargando</button>
+    <div class="flex" style="flex-wrap:wrap;gap:12px;">
+      <button class="btn btn-gold" onclick="chequesCalGuardarAltaRapida()">+ Agregar y seguir cargando</button>
+      <div id="calQASuma" style="font-family:var(--mono);font-size:13px;align-self:center;"></div>
+    </div>
     ${borradores.length ? `<div style="margin-top:12px;font-size:12px;color:var(--gold);">📝 Ya hay ${borradores.length} en borrador para este día (${pesos(borradores.reduce((s,c)=>s+c.monto,0))}).</div>` : ''}
     ${cheques.length ? `<button class="btn btn-ghost btn-sm" style="margin-top:8px;" onclick="chequesCalSeleccionarDia('${dateStr}')">👁 Ver los ${cheques.length} cheques confirmados de este día</button>` : ''}
   </div>`;
+  renderSumaCalQA();
+}
+function renderSumaCalQA() {
+  const el = document.getElementById('calQASuma');
+  if(el) el.innerHTML = sumaBorradorHtml(parseFloat((document.getElementById('calQAMonto')||{}).value)||0, 0);
 }
 
 function chequesCalGuardarAltaRapida() {
@@ -3060,14 +3068,17 @@ function renderChequesBorrador() {
 function renderSumaBorrador() {
   const el = document.getElementById('chequesBorradorSuma');
   if(!el) return;
-  const n = state.chequesBorrador.length;
-  const total = state.chequesBorrador.reduce((s,c)=>s+c.monto,0);
   let enEdicion = 0;
   if(chequeBorradorEditandoId) { const c = state.chequesBorrador.find(x=>x.id===chequeBorradorEditandoId); if(c) enEdicion = c.monto; }
-  const tipeado = parseFloat(document.getElementById('chqbMonto').value)||0;
-  let html = n ? `🧮 Llevás <b>${n}</b> cheque(s) por <b style="color:var(--gold)">${pesos(total)}</b>` : '<span style="color:var(--muted)">🧮 Todavía no hay cheques en el borrador</span>';
+  el.innerHTML = sumaBorradorHtml(parseFloat(document.getElementById('chqbMonto').value)||0, enEdicion);
+}
+// "Llevás N cheques por $X" del borrador entero, y cómo quedaría con el monto que se está tipeando.
+function sumaBorradorHtml(tipeado, enEdicion) {
+  const n = state.chequesBorrador.length;
+  const total = state.chequesBorrador.reduce((s,c)=>s+c.monto,0);
+  let html = n ? `🧮 Total borrador: <b>${n}</b> cheque(s) por <b style="color:var(--gold)">${pesos(total)}</b>` : '<span style="color:var(--muted)">🧮 Todavía no hay cheques en el borrador</span>';
   if(tipeado) html += ` <span style="color:var(--muted)">→ con este quedaría</span> <b style="color:var(--green)">${pesos(total - enEdicion + tipeado)}</b>`;
-  el.innerHTML = html;
+  return html;
 }
 
 function setChequesFiltro(f, el) {
