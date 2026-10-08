@@ -451,6 +451,7 @@ tr:hover td { background:var(--surface2); }
   <div class="tab" onclick="switchTab('impuestos',this)" id="tabImpuestos">🧾 Impuestos</div>
   <div class="tab" onclick="switchTab('cheques',this)" id="tabCheques">💳 Cheques</div>
   <div class="tab" onclick="switchTab('deuda',this)" id="tabDeuda">📑 Deuda Proveedores</div>
+  <div class="tab" onclick="switchTab('bancos',this)" id="tabBancos">🏦 Bancos</div>
   <div class="tab" onclick="switchTab('finales',this)">📈 Finales</div>
   <div class="tab" onclick="switchTab('ajustes',this)">⚙ Ajustes</div>
 </div>
@@ -948,10 +949,71 @@ tr:hover td { background:var(--surface2); }
 </div>
 
 <!-- ══════════════════════════════════════════
+     PANEL: BANCOS (préstamos en cuotas y descubierto)
+══════════════════════════════════════════ -->
+<div class="panel" id="panel-bancos">
+  <datalist id="bancosList"></datalist>
+
+  <!-- Resumen -->
+  <div class="grid4 mb16" id="bancosResumen"></div>
+
+  <!-- Descubierto por banco -->
+  <div class="card mb16">
+    <div class="card-title"><div class="dot"></div>DESCUBIERTO POR BANCO</div>
+    <p class="hint" style="margin-bottom:12px;">Cambiá el monto y se guarda solo al salir del campo. Finales toma el total de acá.</p>
+    <div id="bancosDescubiertos"></div>
+    <div class="flex mt16" style="flex-wrap:wrap;gap:8px;">
+      <input type="text" id="descNuevoBanco" list="bancosList" placeholder="Banco (ej: Galicia)" style="flex:1;min-width:150px;">
+      <input type="number" id="descNuevoMonto" placeholder="Descubierto $" step="0.01" inputmode="decimal" style="flex:1;min-width:150px;">
+      <button class="btn btn-gold" onclick="agregarDescubierto()">+ Agregar</button>
+    </div>
+  </div>
+
+  <!-- Próximas cuotas -->
+  <div class="card mb16">
+    <div class="card-title"><div class="dot"></div>CUOTAS A PAGAR (vencidas y próximos 30 días)</div>
+    <div id="bancosProximas" style="overflow-x:auto;"></div>
+  </div>
+
+  <!-- Préstamos -->
+  <div class="card mb16">
+    <div class="card-title" style="display:flex;align-items:center;justify-content:space-between;flex-wrap:wrap;row-gap:8px;">
+      <span style="display:flex;align-items:center;gap:8px;"><div class="dot"></div>PRÉSTAMOS</span>
+      <button class="btn btn-gold btn-sm" onclick="abrirPrestamoForm()">+ Nuevo préstamo</button>
+    </div>
+
+    <div id="prestamoForm" style="display:none;border:1px solid var(--gold);border-radius:10px;padding:16px;margin-bottom:16px;">
+      <div style="font-size:12px;color:var(--muted);margin-bottom:12px;">Cargá las cuotas tal como figuran en el cuadro de marcha del banco.</div>
+      <div class="grid4 mb16">
+        <div><label>Banco</label><input type="text" id="prBanco" list="bancosList" placeholder="Ej: BBVA"></div>
+        <div><label>Concepto (opcional)</label><input type="text" id="prConcepto" placeholder="Ej: Préstamo prendario"></div>
+        <div><label>Monto total ($)</label><input type="number" id="prTotal" step="0.01" inputmode="decimal" placeholder="0,00" oninput="armarCuotasPrestamo()"></div>
+        <div><label>Cantidad de cuotas</label><input type="number" id="prCantidad" min="1" max="120" value="12" oninput="armarCuotasPrestamo()"></div>
+      </div>
+      <div class="mb16" style="max-width:260px;"><label>Vencimiento 1° cuota</label><input type="date" id="prPrimera" onchange="armarCuotasPrestamo()"></div>
+      <div id="prCuotas" style="max-height:340px;overflow-y:auto;margin-bottom:12px;"></div>
+      <div class="flex" style="gap:8px;">
+        <button class="btn btn-gold" onclick="guardarPrestamo()">💾 Guardar préstamo</button>
+        <button class="btn btn-ghost" onclick="cerrarPrestamoForm()">Cancelar</button>
+      </div>
+    </div>
+
+    <div id="prestamosList" style="overflow-x:auto;"></div>
+
+    <div class="divider" style="margin:18px 0 14px;"></div>
+    <div style="display:flex;flex-wrap:wrap;gap:8px;align-items:flex-end;">
+      <div><label>Marcar pagadas las cuotas que vencen antes del</label><input type="date" id="prMarcarHasta" style="width:auto;"></div>
+      <button class="btn btn-ghost btn-sm" onclick="marcarCuotasPagadasHasta()">✓ Marcar pagadas</button>
+      <button class="btn btn-ghost btn-sm" style="color:var(--red);" onclick="revertirCuotasPendientes()">↺ Volver todas a pendiente</button>
+    </div>
+  </div>
+</div>
+
+<!-- ══════════════════════════════════════════
      PANEL: FINALES (deuda total día a día)
 ══════════════════════════════════════════ -->
 <div class="panel" id="panel-finales">
-  <p class="hint" style="margin-bottom:16px;">Proveedores y cheques se toman solos de las otras pestañas, y los créditos del banco de la solapa Bancos de la app; quedan guardados cada día. El descubierto lo cargás vos.</p>
+  <p class="hint" style="margin-bottom:16px;">Todo se toma solo de las otras pestañas (Deuda Proveedores, Cheques y Bancos) y queda guardado cada día. Para días anteriores podés cargar o corregir créditos y descubierto a mano.</p>
 
   <!-- Resumen del último día -->
   <div id="finalesResumen" class="mb16"></div>
@@ -972,7 +1034,7 @@ tr:hover td { background:var(--surface2); }
         <input type="number" id="finCreditos" placeholder="0,00" step="0.01" inputmode="decimal">
       </div>
       <div>
-        <label>Descubierto ($)</label>
+        <label>Descubierto ($) <span id="finDescubiertoOrigen" style="text-transform:none;letter-spacing:0;"></span></label>
         <input type="number" id="finDescubierto" placeholder="0,00" step="0.01" inputmode="decimal">
       </div>
       <div>
@@ -1243,11 +1305,13 @@ function rerenderAll(){
   if(name==='impuestos') renderImpuestos();
   if(name==='cheques') { renderCheques(); renderChequesBorrador(); }
   if(name==='deuda') renderDeuda();
+  if(name==='bancos') renderBancos();
   if(name==='finales') renderFinales();
   if(name==='ajustes') renderCajeros();
   if(name==='gastos') { updateConceptosDatalist(); renderBusquedaGastos(); }
   updateBadge();
   updateDeudaBadge();
+  updateBancosBadge();
 }
 // Si llegan cambios mientras se está escribiendo en un campo, se
 // redibuja recién al salir del campo (para no borrar lo que se tipea).
@@ -1342,6 +1406,8 @@ function normalizeState(){
   if(!state.chequesBorrador) state.chequesBorrador = [];
   if(!state.facturas) state.facturas = [];
   if(!state.finales || Array.isArray(state.finales)) state.finales = {};
+  if(!state.prestamos || Array.isArray(state.prestamos)) state.prestamos = {};
+  if(!state.descubiertos || Array.isArray(state.descubiertos)) state.descubiertos = {};
   if(!state.cajeros) state.cajeros = ['Gastón','Matías','Gabriel','Emanuel'];
   if(!state.dias) state.dias = {};
   if(!state.updatedAt) state.updatedAt = 0;
@@ -3835,6 +3901,241 @@ function updateDeudaBadge() {
 }
 
 // ============================================================
+// BANCOS — préstamos en cuotas (cuadro de marcha) y descubierto
+// por banco. Se migró desde la solapa Bancos del admin.
+// state.prestamos   = { id: {id, banco, concepto, montoTotal, createdAt, cuotas:[{id,nro,monto,vencimiento,estado}]} }
+// state.descubiertos = { BANCO: {banco, monto, actualizado} }
+// (objetos por id para que la sincronización una por clave)
+// ============================================================
+let prestamoAbiertoId = null;
+
+function nuevoIdBancos(pref) { return pref + Date.now().toString(36) + Math.random().toString(36).slice(2,7); }
+function listaPrestamos() { return Object.values(state.prestamos||{}); }
+function saldoPrestamo(l) { return r2((l.cuotas||[]).filter(c=>c.estado!=='pagado').reduce((s,c)=>s+(+c.monto||0),0)); }
+function proximaCuota(l) { return [...(l.cuotas||[])].filter(c=>c.estado!=='pagado').sort((a,b)=>(a.vencimiento||'').localeCompare(b.vencimiento||''))[0]; }
+function deudaCreditosActual() { return r2(listaPrestamos().reduce((s,l)=>s+saldoPrestamo(l),0)); }
+function deudaDescubiertoActual() { return r2(Object.values(state.descubiertos||{}).reduce((s,d)=>s+(+d.monto||0),0)); }
+function sumarMeses(iso, meses) {
+  const [y,m,d] = iso.split('-').map(Number);
+  const t = (m-1) + meses, ty = y + Math.floor(t/12), tm = ((t%12)+12)%12;
+  const dd = Math.min(d, new Date(ty, tm+1, 0).getDate());
+  return `${ty}-${String(tm+1).padStart(2,'0')}-${String(dd).padStart(2,'0')}`;
+}
+
+// ── Descubierto ──
+function setDescubierto(key, valor) {
+  const d = state.descubiertos[key];
+  if(!d) return;
+  const monto = r2(parseFloat(valor)||0);
+  if(monto === d.monto) return;
+  Object.assign(d, {monto, actualizado: todayStr()});
+  save(); renderBancos();
+}
+function agregarDescubierto() {
+  const banco = document.getElementById('descNuevoBanco').value.trim();
+  const monto = r2(parseFloat(document.getElementById('descNuevoMonto').value)||0);
+  if(!banco) { alert('Escribí el nombre del banco.'); return; }
+  const key = banco.toUpperCase();
+  state.descubiertos[key] = {banco, monto, actualizado: todayStr()};
+  document.getElementById('descNuevoBanco').value = '';
+  document.getElementById('descNuevoMonto').value = '';
+  save(); renderBancos();
+}
+function quitarDescubierto(key) {
+  if(!confirm(`¿Sacar ${state.descubiertos[key].banco} de la lista de descubiertos?`)) return;
+  delete state.descubiertos[key];
+  save(); renderBancos();
+}
+
+// ── Alta de préstamo ──
+function abrirPrestamoForm() {
+  document.getElementById('prestamoForm').style.display = 'block';
+  if(!document.getElementById('prPrimera').value) document.getElementById('prPrimera').value = todayStr();
+  armarCuotasPrestamo();
+  document.getElementById('prBanco').focus();
+}
+function cerrarPrestamoForm() {
+  document.getElementById('prestamoForm').style.display = 'none';
+  ['prBanco','prConcepto','prTotal','prPrimera'].forEach(id=>{ document.getElementById(id).value=''; });
+  document.getElementById('prCantidad').value = 12;
+  document.getElementById('prCuotas').innerHTML = '';
+}
+// Arma las filas de cuotas según total / cantidad / 1° vencimiento, sin pisar lo que ya se tocó a mano.
+function armarCuotasPrestamo() {
+  const cont = document.getElementById('prCuotas');
+  const total = parseFloat(document.getElementById('prTotal').value)||0;
+  const n = Math.max(1, Math.min(120, parseInt(document.getElementById('prCantidad').value,10)||1));
+  const primera = document.getElementById('prPrimera').value || todayStr();
+  const porCuota = r2(total/n);
+  const prev = [...cont.querySelectorAll('[data-cuota]')].map(row=>({
+    monto: row.querySelector('.pr-monto').value, vto: row.querySelector('.pr-vto').value, tocado: row.dataset.tocado==='1'
+  }));
+  let html = '';
+  for(let i=0;i<n;i++) {
+    const p = prev[i] && prev[i].tocado ? prev[i] : null;
+    html += `<div data-cuota data-tocado="${p?'1':'0'}" style="display:flex;gap:8px;align-items:center;margin-bottom:6px;">
+      <div style="width:70px;font-size:12px;color:var(--muted);">Cuota ${i+1}</div>
+      <input class="pr-monto" type="number" step="0.01" value="${p?p.monto:(porCuota||'')}" oninput="this.parentNode.dataset.tocado='1'" style="flex:1;">
+      <input class="pr-vto" type="date" value="${p?p.vto:sumarMeses(primera,i)}" onchange="this.parentNode.dataset.tocado='1'" style="flex:1;">
+    </div>`;
+  }
+  cont.innerHTML = html;
+}
+function guardarPrestamo() {
+  const banco = document.getElementById('prBanco').value.trim();
+  const concepto = document.getElementById('prConcepto').value.trim();
+  if(!banco) { alert('Escribí el banco.'); return; }
+  const cuotas = [...document.querySelectorAll('#prCuotas [data-cuota]')].map(row=>({
+    monto: r2(parseFloat(row.querySelector('.pr-monto').value)||0), vencimiento: row.querySelector('.pr-vto').value
+  })).filter(c=>c.monto>0 && c.vencimiento).map((c,i)=>({id: nuevoIdBancos('bc'), nro: i+1, monto: c.monto, vencimiento: c.vencimiento, estado: 'pendiente'}));
+  if(!cuotas.length) { alert('Completá importe y vencimiento de al menos una cuota.'); return; }
+  const id = nuevoIdBancos('bk');
+  state.prestamos[id] = {id, banco, concepto, montoTotal: r2(cuotas.reduce((s,c)=>s+c.monto,0)), createdAt: todayStr(), cuotas};
+  cerrarPrestamoForm();
+  save(); renderBancos();
+}
+
+// ── Cuotas ──
+function setCuotaEstado(prestamoId, cuotaId, estado) {
+  const l = state.prestamos[prestamoId];
+  const c = l && (l.cuotas||[]).find(x=>x.id===cuotaId);
+  if(!c) return;
+  c.estado = estado;
+  save(); renderBancos();
+}
+function eliminarPrestamo(id) {
+  const l = state.prestamos[id];
+  if(!l || !confirm(`¿Eliminar el préstamo ${l.banco}${l.concepto?' · '+l.concepto:''} y todas sus cuotas?`)) return;
+  delete state.prestamos[id];
+  prestamoAbiertoId = null;
+  save(); renderBancos();
+}
+function togglePrestamo(id) { prestamoAbiertoId = prestamoAbiertoId===id ? null : id; renderBancos(); }
+function marcarCuotasPagadasHasta() {
+  const fecha = document.getElementById('prMarcarHasta').value;
+  if(!fecha) { alert('Elegí la fecha.'); return; }
+  const cuotas = [];
+  listaPrestamos().forEach(l=>(l.cuotas||[]).forEach(c=>{ if(c.estado!=='pagado' && c.vencimiento && c.vencimiento<fecha) cuotas.push(c); }));
+  if(!cuotas.length) { alert('No hay cuotas pendientes que venzan antes de esa fecha.'); return; }
+  if(!confirm(`Se van a marcar ${cuotas.length} cuota(s) como pagadas (${pesos(cuotas.reduce((s,c)=>s+(+c.monto||0),0))}). ¿Seguir?`)) return;
+  cuotas.forEach(c=>{ c.estado='pagado'; });
+  save(); renderBancos();
+}
+function revertirCuotasPendientes() {
+  if(!confirm('Esto vuelve TODAS las cuotas de TODOS los préstamos a "Pendiente". ¿Continuar?')) return;
+  listaPrestamos().forEach(l=>(l.cuotas||[]).forEach(c=>{ c.estado='pendiente'; }));
+  save(); renderBancos();
+}
+
+function cuotaRowHtml(l, c, conBanco) {
+  const hoy = todayStr();
+  const vencida = c.estado!=='pagado' && c.vencimiento < hoy;
+  const col = c.estado==='pagado' ? 'var(--green)' : vencida ? 'var(--red)' : c.vencimiento===hoy ? 'var(--yellow)' : 'var(--text)';
+  return `<tr>
+    <td style="color:${col};">${fmtFecha(c.vencimiento)}${vencida?' <span style="font-size:10px;">VENCIDA</span>':''}</td>
+    ${conBanco?`<td style="font-family:var(--sans);">${escHtml(l.banco)}${l.concepto?` <span style="color:var(--muted);font-size:11px;">· ${escHtml(l.concepto)}</span>`:''}</td>`:''}
+    <td class="num">${c.nro}${conBanco?'/'+(l.cuotas||[]).length:''}</td>
+    <td class="num" style="font-weight:700;">${pesos(c.monto)}</td>
+    <td style="text-align:right;white-space:nowrap;">${c.estado==='pagado'
+      ? `<span style="color:var(--green);font-size:11px;font-weight:700;margin-right:6px;">✓ PAGADA</span><button class="btn btn-ghost btn-sm" onclick="setCuotaEstado('${l.id}','${c.id}','pendiente')">↺</button>`
+      : `<button class="btn btn-green btn-sm" onclick="setCuotaEstado('${l.id}','${c.id}','pagado')">✓ Pagada</button>`}</td>
+  </tr>`;
+}
+
+function renderBancos() {
+  if(!document.getElementById('panel-bancos')) return;
+  const hoy = todayStr();
+  const lim7 = (()=>{ const d=new Date(); d.setDate(d.getDate()+7); return localDateStr(d); })();
+  const lim30 = (()=>{ const d=new Date(); d.setDate(d.getDate()+30); return localDateStr(d); })();
+  const prestamos = listaPrestamos();
+  const pendientes = [];
+  prestamos.forEach(l=>(l.cuotas||[]).forEach(c=>{ if(c.estado!=='pagado') pendientes.push({l,c}); }));
+  const sum = arr => arr.reduce((s,x)=>s+(+x.c.monto||0),0);
+  const vencidas = pendientes.filter(x=>x.c.vencimiento<hoy);
+  const prox7 = pendientes.filter(x=>x.c.vencimiento>=hoy && x.c.vencimiento<=lim7);
+  const saldo = deudaCreditosActual(), desc = deudaDescubiertoActual();
+
+  document.getElementById('bancosResumen').innerHTML = `
+    <div class="stat"><div class="stat-label">Saldo préstamos</div><div class="stat-value red">${pesos(saldo)}</div><div style="font-size:11px;color:var(--muted);margin-top:4px">${prestamos.length} préstamo(s) · ${pendientes.length} cuota(s)</div></div>
+    <div class="stat"><div class="stat-label">Cuotas vencidas sin pagar</div><div class="stat-value" style="color:${vencidas.length?'var(--red)':'var(--text)'}">${pesos(sum(vencidas))}</div><div style="font-size:11px;color:var(--muted);margin-top:4px">${vencidas.length} cuota(s)</div></div>
+    <div class="stat"><div class="stat-label">Vencen en 7 días</div><div class="stat-value" style="color:${prox7.length?'var(--yellow)':'var(--text)'}">${pesos(sum(prox7))}</div><div style="font-size:11px;color:var(--muted);margin-top:4px">${prox7.length} cuota(s)</div></div>
+    <div class="stat"><div class="stat-label">Descubierto total</div><div class="stat-value" style="color:var(--yellow)">${pesos(desc)}</div><div style="font-size:11px;color:var(--muted);margin-top:4px">Total bancos: <b style="color:var(--text)">${pesos(saldo+desc)}</b></div></div>`;
+
+  // Datalist de bancos conocidos
+  const bancos = new Set([...prestamos.map(l=>l.banco), ...Object.values(state.descubiertos).map(d=>d.banco)].filter(Boolean));
+  document.getElementById('bancosList').innerHTML = [...bancos].sort().map(b=>`<option value="${escHtml(b)}">`).join('');
+
+  // Descubiertos
+  const descs = Object.entries(state.descubiertos).sort((a,b)=>a[1].banco.localeCompare(b[1].banco));
+  document.getElementById('bancosDescubiertos').innerHTML = descs.length ? `<table><tbody>${descs.map(([k,d])=>`
+    <tr>
+      <td style="font-family:var(--sans);font-weight:600;">${escHtml(d.banco)}</td>
+      <td style="width:220px;"><input type="number" step="0.01" inputmode="decimal" value="${d.monto||''}" placeholder="0,00" onchange="setDescubierto(this.dataset.k, this.value)" data-k="${escHtml(k)}"></td>
+      <td class="num" style="font-weight:700;">${pesos(d.monto)}</td>
+      <td style="font-size:11px;color:var(--muted);font-family:var(--sans);">${d.actualizado?'act. '+fmtFecha(d.actualizado):''}</td>
+      <td style="text-align:right;"><button class="btn btn-ghost btn-sm" onclick="quitarDescubierto(this.dataset.k)" data-k="${escHtml(k)}">🗑</button></td>
+    </tr>`).join('')}
+    <tr><td style="font-weight:700;font-family:var(--sans);">TOTAL</td><td></td><td class="num" style="font-weight:700;color:var(--yellow);">${pesos(desc)}</td><td colspan="2"></td></tr>
+  </tbody></table>` : '<div style="color:var(--muted);font-size:13px;">Todavía no cargaste ningún banco. Agregalo abajo.</div>';
+
+  // Cuotas a pagar (vencidas + próximos 30 días)
+  const aPagar = pendientes.filter(x=>x.c.vencimiento<=lim30).sort((a,b)=>a.c.vencimiento.localeCompare(b.c.vencimiento));
+  document.getElementById('bancosProximas').innerHTML = aPagar.length ? `<table>
+    <thead><tr><th>Vence</th><th>Préstamo</th><th class="num">Cuota</th><th class="num">Monto</th><th></th></tr></thead>
+    <tbody>${aPagar.map(x=>cuotaRowHtml(x.l, x.c, true)).join('')}</tbody>
+    <tfoot><tr><td colspan="3" style="font-family:var(--sans);font-size:12px;color:var(--muted);">${aPagar.length} cuota(s)</td><td class="num" style="font-weight:700;color:var(--gold);">${pesos(sum(aPagar))}</td><td></td></tr></tfoot>
+  </table>` : '<div style="color:var(--muted);font-size:13px;">No hay cuotas vencidas ni por vencer en los próximos 30 días.</div>';
+
+  // Préstamos: los que tienen saldo primero, por próxima cuota
+  const orden = [...prestamos].sort((a,b)=>{
+    const pa = proximaCuota(a), pb = proximaCuota(b);
+    if(!pa && !pb) return (a.banco||'').localeCompare(b.banco||'');
+    if(!pa) return 1; if(!pb) return -1;
+    return pa.vencimiento.localeCompare(pb.vencimiento);
+  });
+  document.getElementById('prestamosList').innerHTML = orden.length ? `<table>
+    <thead><tr><th>Préstamo</th><th class="num">Cuotas pend.</th><th>Próxima</th><th class="num">Cuota</th><th class="num">Saldo</th><th></th></tr></thead>
+    <tbody>${orden.map(l=>{
+      const prox = proximaCuota(l), saldoL = saldoPrestamo(l);
+      const pend = (l.cuotas||[]).filter(c=>c.estado!=='pagado').length;
+      const abierto = prestamoAbiertoId===l.id;
+      const fila = `<tr style="cursor:pointer;${abierto?'background:var(--surface2);':''}" onclick="togglePrestamo('${l.id}')">
+        <td style="font-family:var(--sans);"><b>${escHtml(l.banco)}</b>${l.concepto?` <span style="color:var(--muted);font-size:11px;">· ${escHtml(l.concepto)}</span>`:''}</td>
+        <td class="num">${pend}/${(l.cuotas||[]).length}</td>
+        <td style="color:${prox&&prox.vencimiento<hoy?'var(--red)':'var(--text)'};">${prox?fmtFecha(prox.vencimiento):'—'}</td>
+        <td class="num">${prox?pesos(prox.monto):'—'}</td>
+        <td class="num" style="font-weight:700;color:${saldoL>0?'var(--red)':'var(--green)'};">${pesos(saldoL)}</td>
+        <td style="text-align:right;color:var(--muted);">${abierto?'▾':'▸'}</td>
+      </tr>`;
+      if(!abierto) return fila;
+      const cuotas = [...(l.cuotas||[])].sort((a,b)=>(a.vencimiento||'').localeCompare(b.vencimiento||''));
+      return fila + `<tr><td colspan="6" style="padding:0 0 12px 18px;background:var(--surface2);">
+        <div style="display:flex;justify-content:space-between;align-items:center;flex-wrap:wrap;gap:8px;padding:10px 12px 6px 0;font-family:var(--sans);font-size:12px;color:var(--muted);">
+          <span>Monto total ${pesos(l.montoTotal)} · cargado el ${fmtFecha(l.createdAt)}</span>
+          <button class="btn btn-red btn-sm" onclick="eliminarPrestamo('${l.id}')">🗑 Eliminar préstamo</button>
+        </div>
+        <table><thead><tr><th>Vence</th><th class="num">N°</th><th class="num">Monto</th><th></th></tr></thead>
+        <tbody>${cuotas.map(c=>cuotaRowHtml(l, c, false)).join('')}</tbody></table>
+      </td></tr>`;
+    }).join('')}</tbody>
+  </table>` : '<div style="color:var(--muted);font-size:13px;">No hay préstamos cargados.</div>';
+
+  updateBancosBadge();
+}
+
+// Globito: cuotas sin pagar vencidas o que vencen en 7 días.
+function updateBancosBadge() {
+  const tab = document.getElementById('tabBancos');
+  if(!tab) return;
+  const d = new Date(); d.setDate(d.getDate()+7); const lim = localDateStr(d);
+  let n = 0;
+  listaPrestamos().forEach(l=>(l.cuotas||[]).forEach(c=>{ if(c.estado!=='pagado' && c.vencimiento && c.vencimiento<=lim) n++; }));
+  const existing = tab.querySelector('.badge');
+  if(existing) existing.remove();
+  if(n>0) tab.innerHTML += `<span class="badge">${n}</span>`;
+}
+
+// ============================================================
 // FINALES — deuda total día a día. Proveedores y cheques se
 // guardan solos (foto del día); créditos y descubierto son manuales.
 // state.finales = { 'AAAA-MM-DD': {proveedores, cheques, creditos, descubierto, nota} }
@@ -3843,23 +4144,8 @@ let finalesRango = 30;
 let finalesChart = null;
 const r2 = n => Math.round((n||0)*100)/100;
 
-// Saldo pendiente de los préstamos de la solapa "Bancos" de la app
-// (app_settings.bank_loans): suma de las cuotas que no están pagadas.
-let creditosBancoActual = null; // null = todavía no se pudo leer
-async function fetchCreditosBanco() {
-  try {
-    const rows = await cajaFetch('/app_settings?setting_key=eq.bank_loans&select=setting_value');
-    if(!rows || !rows[0]) return;
-    const data = JSON.parse(rows[0].setting_value) || {};
-    creditosBancoActual = r2((data.items||[]).reduce((s,l)=>
-      s + (l.cuotas||[]).filter(c=>c.estado!=='pagado').reduce((t,c)=>t+(+c.monto||0),0), 0));
-  } catch(e) {
-    console.warn('No se pudo leer Bancos:', e);
-  }
-}
-// Al abrir la pestaña: trae el saldo de Bancos al día y lo registra.
-async function refrescarFinales() {
-  await fetchCreditosBanco();
+// Al abrir la pestaña: registra la foto de hoy y redibuja.
+function refrescarFinales() {
   if(snapshotFinalesHoy()) save();
   cargarFormFinales();
   renderFinales();
@@ -3874,15 +4160,9 @@ function snapshotFinalesHoy() {
   const hoy = todayStr();
   const r = state.finales[hoy] || {};
   const proveedores = deudaProveedoresActual(), cheques = deudaChequesActual();
-  const creditos = creditosBancoActual;
-  if(r.proveedores === proveedores && r.cheques === cheques && (creditos==null || r.creditos === creditos)) return false;
-  // Lo que no se pudo leer solo arranca con lo último cargado, hasta que se corrija.
-  const prev = finalAnterior(hoy);
-  if(r.creditos === undefined) r.creditos = prev ? (prev.creditos||0) : 0;
-  if(r.descubierto === undefined) r.descubierto = prev ? (prev.descubierto||0) : 0;
-  Object.assign(r, {proveedores, cheques});
-  if(creditos!=null) r.creditos = creditos;
-  state.finales[hoy] = r;
+  const creditos = deudaCreditosActual(), descubierto = deudaDescubiertoActual();
+  if(r.proveedores === proveedores && r.cheques === cheques && r.creditos === creditos && r.descubierto === descubierto) return false;
+  state.finales[hoy] = Object.assign(r, {proveedores, cheques, creditos, descubierto});
   return true;
 }
 function finalAnterior(fecha) {
@@ -3895,20 +4175,23 @@ function cargarFormFinales() {
   const fecha = document.getElementById('finFecha').value || todayStr();
   const r = (state.finales||{})[fecha] || finalAnterior(fecha) || {};
   const propio = !!(state.finales||{})[fecha];
-  const esHoyCred = fecha===todayStr() && creditosBancoActual!=null;
-  const inpCred = document.getElementById('finCreditos');
-  inpCred.value = esHoyCred ? creditosBancoActual : (r.creditos || '');
-  inpCred.readOnly = esHoyCred;
-  inpCred.style.opacity = esHoyCred ? '.75' : '';
-  document.getElementById('finCreditosOrigen').textContent = esHoyCred ? '· automático de Bancos' : '';
-  document.getElementById('finDescubierto').value = r.descubierto || '';
+  // Hoy, créditos y descubierto salen solos de Bancos; para días pasados se pueden corregir.
+  const hoyAuto = fecha===todayStr();
+  [['finCreditos','finCreditosOrigen', hoyAuto ? deudaCreditosActual() : r.creditos],
+   ['finDescubierto','finDescubiertoOrigen', hoyAuto ? deudaDescubiertoActual() : r.descubierto]].forEach(([id, origen, v])=>{
+    const inp = document.getElementById(id);
+    inp.value = v || '';
+    inp.readOnly = hoyAuto;
+    inp.style.opacity = hoyAuto ? '.75' : '';
+    document.getElementById(origen).textContent = hoyAuto ? '· automático de Bancos' : '';
+  });
   document.getElementById('finNota').value = propio ? (r.nota||'') : '';
   const esHoy = fecha===todayStr();
   const prov = esHoy ? deudaProveedoresActual() : (propio ? r.proveedores : null);
   const chq = esHoy ? deudaChequesActual() : (propio ? r.cheques : null);
   document.getElementById('finAutoInfo').innerHTML = prov==null
     ? `Para el ${fmtFecha(fecha)} no hay registro de proveedores y cheques (solo se guardan solos desde que existe esta pestaña).`
-    : `Automático ${esHoy?'(hoy, en vivo)':'(guardado ese día)'}: Proveedores <b style="color:var(--text)">${pesos(prov)}</b> · Cheques <b style="color:var(--text)">${pesos(chq)}</b>${!propio?' · <span style="color:var(--gold)">créditos y descubierto vienen del último día cargado</span>':''}`;
+    : `Automático ${esHoy?'(hoy, en vivo)':'(guardado ese día)'}: Proveedores <b style="color:var(--text)">${pesos(prov)}</b> · Cheques <b style="color:var(--text)">${pesos(chq)}</b>${!propio&&!esHoy?' · <span style="color:var(--gold)">créditos y descubierto vienen del último día cargado</span>':''}`;
 }
 
 function guardarFinales() {
@@ -3921,7 +4204,7 @@ function guardarFinales() {
   if(!state.finales) state.finales = {};
   const r = state.finales[fecha] || {};
   state.finales[fecha] = Object.assign(r, {creditos, descubierto, nota});
-  if(fecha===todayStr()) { r.proveedores = deudaProveedoresActual(); r.cheques = deudaChequesActual(); if(creditosBancoActual!=null) r.creditos = creditosBancoActual; }
+  if(fecha===todayStr()) Object.assign(r, {proveedores: deudaProveedoresActual(), cheques: deudaChequesActual(), creditos: deudaCreditosActual(), descubierto: deudaDescubiertoActual()});
   save();
   renderFinales();
   cargarFormFinales();
@@ -4325,7 +4608,8 @@ function switchTab(name, el) {
   if(name==='impuestos') renderImpuestos();
   if(name==='cheques') { renderCheques(); renderChequesBorrador(); }
   if(name==='deuda') renderDeuda();
-  if(name==='finales') { cargarFormFinales(); renderFinales(); refrescarFinales(); }
+  if(name==='bancos') renderBancos();
+  if(name==='finales') refrescarFinales();
   if(name==='ajustes') renderCajeros();
   if(name==='gastos') { updateConceptosDatalist(); renderBusquedaGastos(); }
 }
@@ -4371,8 +4655,8 @@ async function init() {
   renderDeuda();
   document.getElementById('facFechaIngreso').value = todayStr();
   document.getElementById('finFecha').value = todayStr();
-  await fetchCreditosBanco();
   if(snapshotFinalesHoy()) save();
+  updateBancosBadge();
   document.getElementById('chqFechaEmision').value = todayStr();
   document.getElementById('chqbFechaEmision').value = todayStr();
   updateConceptosDatalist();
