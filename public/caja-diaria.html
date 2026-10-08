@@ -420,6 +420,7 @@ tr:hover td { background:var(--surface2); }
   <div class="tab" onclick="switchTab('gastos',this)">🔍 Gastos</div>
   <div class="tab" onclick="switchTab('impuestos',this)" id="tabImpuestos">🧾 Impuestos</div>
   <div class="tab" onclick="switchTab('cheques',this)" id="tabCheques">💳 Cheques</div>
+  <div class="tab" onclick="switchTab('deuda',this)" id="tabDeuda">📑 Deuda Proveedores</div>
   <div class="tab" onclick="switchTab('ajustes',this)">⚙ Ajustes</div>
 </div>
 
@@ -795,6 +796,124 @@ tr:hover td { background:var(--surface2); }
 </div>
 
 <!-- ══════════════════════════════════════════
+     PANEL: DEUDA PROVEEDORES (facturas a pagar)
+══════════════════════════════════════════ -->
+<div class="panel" id="panel-deuda">
+
+  <!-- Resumen -->
+  <div class="grid4 mb16" id="deudaResumen"></div>
+
+  <!-- Formulario -->
+  <div class="card mb16">
+    <div class="card-title"><div class="dot"></div>NUEVA FACTURA / REMITO</div>
+    <div class="grid4 mb16">
+      <div>
+        <label>Proveedor</label>
+        <input type="text" id="facProveedor" list="chequesProveedoresList" placeholder="Ej: Emporio">
+      </div>
+      <div>
+        <label>Monto ($)</label>
+        <input type="number" id="facMonto" placeholder="0">
+      </div>
+      <div>
+        <label>Fecha de ingreso</label>
+        <div style="display:flex;gap:6px;">
+          <input type="date" id="facFechaIngreso" style="flex:1;">
+          <button type="button" class="btn btn-ghost btn-sm" onclick="document.getElementById('facFechaIngreso').value=todayStr()">Hoy</button>
+        </div>
+      </div>
+      <div>
+        <label>Fecha de vencimiento</label>
+        <input type="date" id="facFechaVence">
+      </div>
+    </div>
+    <div class="grid4 mb16">
+      <div>
+        <label>Comprobante</label>
+        <select id="facTipo">
+          <option value="factura">Factura</option>
+          <option value="remito">Remito</option>
+        </select>
+      </div>
+      <div>
+        <label>N° de comprobante</label>
+        <input type="text" id="facNumero" placeholder="Ej: 0001-00012345">
+      </div>
+      <div>
+        <label>Estado / forma de pago</label>
+        <select id="facFormaPago">
+          <option value="">⏳ Pendiente (sin pagar)</option>
+          <option value="cheque">Pagada con cheque</option>
+          <option value="echeq">Pagada con eCheq</option>
+          <option value="efectivo">Pagada en efectivo</option>
+          <option value="transferencia">Pagada por transferencia</option>
+        </select>
+      </div>
+      <div>
+        <label>Nota (opcional)</label>
+        <input type="text" id="facNota" placeholder="Ej: mercadería del martes">
+      </div>
+    </div>
+    <div class="flex">
+      <button class="btn btn-gold" id="btnGuardarFactura" onclick="guardarFactura()">+ Agregar comprobante</button>
+      <button class="btn btn-ghost" id="btnCancelarEdicionFactura" onclick="cancelarEdicionFactura()" style="display:none;">Cancelar edición</button>
+    </div>
+  </div>
+
+  <!-- Deuda por proveedor -->
+  <div id="deudaPorProveedor"></div>
+
+  <!-- Buscador -->
+  <div style="margin-bottom:12px;">
+    <input type="search" id="deudaBuscar" placeholder="🔍 Buscar por proveedor o N° de comprobante..." oninput="setDeudaBusqueda(this.value)" style="width:100%;background:var(--surface2);border:1px solid var(--border);color:var(--text);border-radius:8px;padding:10px 12px;font-size:13px;font-family:var(--mono);">
+  </div>
+
+  <!-- Filtros -->
+  <div class="ptabs mb16" id="deudaFiltro">
+    <button class="ptab active" onclick="setDeudaFiltro('pendiente',this)">Pendientes</button>
+    <button class="ptab" onclick="setDeudaFiltro('vencida',this)">Vencidas</button>
+    <button class="ptab" onclick="setDeudaFiltro('pagada',this)">Pagadas</button>
+    <button class="ptab" onclick="setDeudaFiltro('todas',this)">Todas</button>
+  </div>
+  <div id="deudaProvFiltroWrap" style="display:none;margin:-10px 0 16px;">
+    <button class="btn btn-ghost btn-sm" onclick="setDeudaProveedor(null)">✕ Ver todos los proveedores — filtrando por <span id="deudaProvFiltroLabel"></span></button>
+  </div>
+
+  <!-- Lista -->
+  <div id="facturasList"></div>
+
+  <!-- Pago agrupado: aparece al seleccionar comprobantes pendientes -->
+  <div id="deudaPagoPanel" class="card" style="display:none;position:sticky;bottom:0;z-index:20;margin-top:16px;border:1px solid var(--gold);box-shadow:0 -6px 20px rgba(0,0,0,.35);">
+    <div class="card-title" style="display:flex;align-items:center;justify-content:space-between;flex-wrap:wrap;row-gap:6px;">
+      <span style="display:flex;align-items:center;gap:8px;"><div class="dot"></div>REGISTRAR PAGO — <span id="deudaPagoProveedor"></span></span>
+      <button class="btn btn-ghost btn-sm" onclick="limpiarSeleccionDeuda()">✕ Cancelar</button>
+    </div>
+    <div id="deudaPagoDetalleSel" style="font-size:12px;color:var(--muted);margin-bottom:12px;"></div>
+    <div class="grid4 mb16">
+      <div>
+        <label>Forma de pago</label>
+        <select id="deudaPagoForma">
+          <option value="">Elegí…</option>
+          <option value="cheque">Cheque</option>
+          <option value="echeq">eCheq</option>
+          <option value="efectivo">Efectivo</option>
+          <option value="transferencia">Transferencia</option>
+        </select>
+      </div>
+      <div>
+        <label>Fecha del pago</label>
+        <input type="date" id="deudaPagoFecha">
+      </div>
+      <div style="grid-column:span 2;">
+        <label>Detalle (opcional)</label>
+        <input type="text" id="deudaPagoDetalle" placeholder="Ej: cheques N° 2037 y 2038">
+      </div>
+    </div>
+    <button class="btn btn-green" onclick="registrarPagoDeuda()">✓ Registrar pago de <span id="deudaPagoTotal"></span></button>
+  </div>
+</div>
+
+<!-- ══════════════════════════════════════════
      PANEL: AJUSTES
 ══════════════════════════════════════════ -->
 <div class="panel" id="panel-ajustes">
@@ -827,7 +946,7 @@ tr:hover td { background:var(--surface2); }
 // ============================================================
 // STATE
 // ============================================================
-let state = { dias:{}, impuestos:[], cheques:[], chequesBorrador:[], cajeros:['Gastón','Matías','Gabriel','Emanuel'] };
+let state = { dias:{}, impuestos:[], cheques:[], chequesBorrador:[], facturas:[], cajeros:['Gastón','Matías','Gabriel','Emanuel'] };
 let currentPeriod = 'dia';
 let currentCajaVista = 'todas'; // 'todas' | 'caja0' | 'caja1' | 'caja3' | 'caja4'
 let charts = {};
@@ -1031,9 +1150,11 @@ function rerenderAll(){
   if(name==='estadisticas') { destroyCharts(); renderStats(); }
   if(name==='impuestos') renderImpuestos();
   if(name==='cheques') { renderCheques(); renderChequesBorrador(); }
+  if(name==='deuda') renderDeuda();
   if(name==='ajustes') renderCajeros();
   if(name==='gastos') { updateConceptosDatalist(); renderBusquedaGastos(); }
   updateBadge();
+  updateDeudaBadge();
 }
 // Si llegan cambios mientras se está escribiendo en un campo, se
 // redibuja recién al salir del campo (para no borrar lo que se tipea).
@@ -1126,6 +1247,7 @@ function normalizeState(){
   if(!state.impuestos) state.impuestos = [];
   if(!state.cheques) state.cheques = [];
   if(!state.chequesBorrador) state.chequesBorrador = [];
+  if(!state.facturas) state.facturas = [];
   if(!state.cajeros) state.cajeros = ['Gastón','Matías','Gabriel','Emanuel'];
   if(!state.dias) state.dias = {};
   if(!state.updatedAt) state.updatedAt = 0;
@@ -3080,6 +3202,311 @@ function updateChequesBadge() {
   if(alertas>0) tab.innerHTML += `<span class="badge">${alertas}</span>`;
 }
 
+// ============================================================
+// DEUDA PROVEEDORES — facturas que entran, con vencimiento y si
+// ya se pagaron. Se guardan en state.facturas (mismo sync que el resto).
+// ============================================================
+const DEUDA_ALERTA_DIAS = 5;
+let deudaFiltro = 'pendiente';
+let deudaBusqueda = '';
+let deudaProveedorSel = null;
+let facturaEditandoId = null;
+let deudaSeleccion = new Set(); // ids de comprobantes pendientes elegidos para pagar juntos
+
+function escHtml(s) {
+  return String(s==null?'':s).replace(/[&<>"']/g, c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
+}
+function fmtFecha(d) { return d ? d.slice(8)+'/'+d.slice(5,7)+'/'+d.slice(0,4) : ''; }
+function diasHasta(fecha) {
+  const today = new Date(); today.setHours(0,0,0,0);
+  return Math.ceil((new Date(fecha+'T00:00:00')-today)/(1000*60*60*24));
+}
+const FORMAS_PAGO = { cheque:'Cheque', echeq:'eCheq', efectivo:'Efectivo', transferencia:'Transferencia' };
+function compLabel(f) { return (f.tipo==='remito'?'Remito':'Factura') + (f.numero?' N° '+f.numero:''); }
+function facturaVencida(f) { return f.estado!=='pagada' && f.fechaVence && diasHasta(f.fechaVence)<0; }
+
+function guardarFactura() {
+  const proveedor = document.getElementById('facProveedor').value.trim();
+  const monto = parseFloat(document.getElementById('facMonto').value)||0;
+  const fechaIngreso = document.getElementById('facFechaIngreso').value;
+  const fechaVence = document.getElementById('facFechaVence').value;
+  const tipo = document.getElementById('facTipo').value;
+  const numero = document.getElementById('facNumero').value.trim();
+  const nota = document.getElementById('facNota').value.trim();
+  const formaPago = document.getElementById('facFormaPago').value;
+  if(!proveedor || !monto || !fechaIngreso || !fechaVence) { alert('Completá proveedor, monto, fecha de ingreso y vencimiento.'); return; }
+  if(fechaVence < fechaIngreso && !confirm('El vencimiento es anterior a la fecha de ingreso. ¿Guardar igual?')) return;
+  // Elegir una forma de pago = la factura queda pagada (hoy, o la fecha que ya tenía).
+  const pago = f => formaPago
+    ? {estado:'pagada', formaPago, fechaPagada: (f && f.fechaPagada) || todayStr()}
+    : {estado:'pendiente', formaPago:'', fechaPagada:'', pagoId:'', pagoDetalle:''};
+  if(facturaEditandoId) {
+    const f = state.facturas.find(x=>x.id===facturaEditandoId);
+    if(f) Object.assign(f, {proveedor, monto, fechaIngreso, fechaVence, tipo, numero, nota}, pago(f));
+  } else {
+    state.facturas.push(Object.assign({id:Date.now(), proveedor, monto, fechaIngreso, fechaVence, tipo, numero, nota}, pago(null)));
+  }
+  save();
+  cancelarEdicionFactura();
+  renderDeuda();
+}
+
+function editarFactura(id) {
+  const f = state.facturas.find(x=>x.id===id);
+  if(!f) return;
+  facturaEditandoId = id;
+  document.getElementById('facProveedor').value = f.proveedor||'';
+  document.getElementById('facMonto').value = f.monto||'';
+  document.getElementById('facFechaIngreso').value = f.fechaIngreso||'';
+  document.getElementById('facFechaVence').value = f.fechaVence||'';
+  document.getElementById('facTipo').value = f.tipo==='remito' ? 'remito' : 'factura';
+  document.getElementById('facNumero').value = f.numero||'';
+  document.getElementById('facNota').value = f.nota||'';
+  document.getElementById('facFormaPago').value = f.estado==='pagada' ? (f.formaPago||'') : '';
+  document.getElementById('btnGuardarFactura').textContent = '💾 Guardar cambios';
+  document.getElementById('btnCancelarEdicionFactura').style.display = 'inline-flex';
+  document.getElementById('facProveedor').scrollIntoView({behavior:'smooth', block:'center'});
+}
+
+function cancelarEdicionFactura() {
+  facturaEditandoId = null;
+  ['facProveedor','facMonto','facFechaVence','facNumero','facNota','facFormaPago'].forEach(id=>{ document.getElementById(id).value=''; });
+  document.getElementById('facTipo').value = 'factura';
+  document.getElementById('facFechaIngreso').value = todayStr();
+  document.getElementById('btnGuardarFactura').textContent = '+ Agregar comprobante';
+  document.getElementById('btnCancelarEdicionFactura').style.display = 'none';
+}
+
+// ── PAGO (uno o varios comprobantes del mismo proveedor juntos) ──
+function toggleSeleccionDeuda(id) {
+  const f = state.facturas.find(x=>x.id===id);
+  if(!f || f.estado==='pagada') return;
+  if(deudaSeleccion.has(id)) { deudaSeleccion.delete(id); renderDeuda(); return; }
+  const otro = state.facturas.find(x=>deudaSeleccion.has(x.id));
+  if(otro && otro.proveedor.trim().toUpperCase()!==f.proveedor.trim().toUpperCase()) {
+    alert(`Solo se pueden juntar en un pago comprobantes del mismo proveedor.\nYa tenés elegidos de ${otro.proveedor}.`);
+    renderDeuda();
+    return;
+  }
+  deudaSeleccion.add(id);
+  renderDeuda();
+}
+// Botón "Pagar" de una tarjeta: arranca un pago solo con ese comprobante.
+function pagarSolo(id) {
+  deudaSeleccion = new Set([id]);
+  renderDeuda();
+  document.getElementById('deudaPagoForma').focus();
+}
+function limpiarSeleccionDeuda() {
+  deudaSeleccion.clear();
+  renderDeuda();
+}
+
+function registrarPagoDeuda() {
+  const items = state.facturas.filter(f=>deudaSeleccion.has(f.id) && f.estado!=='pagada');
+  if(!items.length) { alert('Elegí al menos un comprobante.'); return; }
+  const formaPago = document.getElementById('deudaPagoForma').value;
+  const fechaPagada = document.getElementById('deudaPagoFecha').value || todayStr();
+  const pagoDetalle = document.getElementById('deudaPagoDetalle').value.trim();
+  if(!formaPago) { alert('Elegí cómo se pagó: cheque, eCheq, efectivo o transferencia.'); return; }
+  const pagoId = items.length>1 ? 'P'+Date.now() : '';
+  items.forEach(f=>Object.assign(f, {estado:'pagada', formaPago, fechaPagada, pagoId, pagoDetalle}));
+  deudaSeleccion.clear();
+  document.getElementById('deudaPagoForma').value = '';
+  document.getElementById('deudaPagoDetalle').value = '';
+  document.getElementById('deudaPagoFecha').value = todayStr();
+  save(); renderDeuda();
+}
+
+// Deshace un pago. Si fue un pago agrupado, vuelven a pendiente todos sus comprobantes.
+function volverAPendiente(id) {
+  const f = state.facturas.find(x=>x.id===id);
+  if(!f) return;
+  const grupo = f.pagoId ? state.facturas.filter(x=>x.pagoId===f.pagoId) : [f];
+  const msg = grupo.length>1
+    ? `Este pago incluye ${grupo.length} comprobantes (${pesos(grupo.reduce((s,x)=>s+x.monto,0))}). ¿Volver todos a pendiente?`
+    : '¿Volver este comprobante a pendiente?';
+  if(!confirm(msg)) return;
+  grupo.forEach(x=>Object.assign(x, {estado:'pendiente', formaPago:'', fechaPagada:'', pagoId:'', pagoDetalle:''}));
+  save(); renderDeuda();
+}
+
+function renderDeudaPagoPanel() {
+  const panel = document.getElementById('deudaPagoPanel');
+  if(!panel) return;
+  const items = state.facturas.filter(f=>deudaSeleccion.has(f.id));
+  if(!items.length) { panel.style.display = 'none'; return; }
+  panel.style.display = 'block';
+  const total = items.reduce((s,f)=>s+f.monto,0);
+  const fechaEl = document.getElementById('deudaPagoFecha');
+  if(!fechaEl.value) fechaEl.value = todayStr();
+  document.getElementById('deudaPagoProveedor').textContent = items[0].proveedor;
+  document.getElementById('deudaPagoTotal').textContent = pesos(total);
+  document.getElementById('deudaPagoDetalleSel').innerHTML =
+    `${items.length} comprobante(s): ` + items.map(f=>`${escHtml(compLabel(f))} (${pesos(f.monto)})`).join(' + ') +
+    (items.length>1 ? ` = <b style="color:var(--gold)">${pesos(total)}</b>` : '') +
+    `<br>Tildá "Juntar" en otros comprobantes de ${escHtml(items[0].proveedor)} para sumarlos a este pago.`;
+}
+
+function removeFactura(id) {
+  if(!confirm('¿Eliminar esta factura?')) return;
+  state.facturas = state.facturas.filter(f=>f.id!==id);
+  save(); renderDeuda();
+}
+
+function setDeudaFiltro(f, el) {
+  deudaFiltro = f;
+  document.querySelectorAll('#deudaFiltro .ptab').forEach(t=>t.classList.remove('active'));
+  el.classList.add('active');
+  renderDeuda();
+}
+function setDeudaBusqueda(val) {
+  deudaBusqueda = (val||'').trim().toLowerCase();
+  renderDeuda();
+}
+function setDeudaProveedor(p) {
+  deudaProveedorSel = (deudaProveedorSel===p) ? null : p;
+  renderDeuda();
+  if(deudaProveedorSel) document.getElementById('facturasList').scrollIntoView({behavior:'smooth', block:'start'});
+}
+
+function renderDeudaResumen() {
+  const el = document.getElementById('deudaResumen');
+  if(!el) return;
+  const pendientes = state.facturas.filter(f=>f.estado!=='pagada');
+  const vencidas = pendientes.filter(f=>diasHasta(f.fechaVence)<0);
+  const proximas = pendientes.filter(f=>{ const d=diasHasta(f.fechaVence); return d>=0 && d<=DEUDA_ALERTA_DIAS; });
+  const mes = todayStr().slice(0,7);
+  const pagadasMes = state.facturas.filter(f=>f.estado==='pagada' && (f.fechaPagada||'').slice(0,7)===mes);
+  const suma = arr => arr.reduce((s,f)=>s+f.monto,0);
+  const porForma = Object.entries(FORMAS_PAGO)
+    .map(([k,v])=>({v, total: suma(pagadasMes.filter(f=>f.formaPago===k))}))
+    .filter(x=>x.total>0)
+    .map(x=>`${x.v}: ${pesos(x.total)}`).join('<br>');
+  el.innerHTML = `
+    <div class="stat"><div class="stat-label">Deuda total pendiente</div><div class="stat-value gold">${pesos(suma(pendientes))}</div><div style="font-size:11px;color:var(--muted);margin-top:4px">${pendientes.length} factura(s)</div></div>
+    <div class="stat"><div class="stat-label">Vencidas sin pagar</div><div class="stat-value" style="color:${vencidas.length?'var(--red)':'var(--text)'}">${pesos(suma(vencidas))}</div><div style="font-size:11px;color:var(--muted);margin-top:4px">${vencidas.length} factura(s)</div></div>
+    <div class="stat"><div class="stat-label">Vencen en ${DEUDA_ALERTA_DIAS} días</div><div class="stat-value" style="color:${proximas.length?'var(--yellow)':'var(--text)'}">${pesos(suma(proximas))}</div><div style="font-size:11px;color:var(--muted);margin-top:4px">${proximas.length} factura(s)</div></div>
+    <div class="stat"><div class="stat-label">Pagado este mes</div><div class="stat-value green">${pesos(suma(pagadasMes))}</div><div style="font-size:11px;color:var(--muted);margin-top:4px">${pagadasMes.length} factura(s)${porForma?'<br>'+porForma:''}</div></div>
+  `;
+}
+
+function renderDeudaPorProveedor() {
+  const el = document.getElementById('deudaPorProveedor');
+  if(!el) return;
+  const porProv = {};
+  state.facturas.filter(f=>f.estado!=='pagada').forEach(f=>{
+    const key = f.proveedor.trim().toUpperCase();
+    if(!porProv[key]) porProv[key] = {proveedor:f.proveedor.trim(), cantidad:0, total:0, vencido:0, proxVence:null};
+    const p = porProv[key];
+    p.cantidad++; p.total += f.monto;
+    if(diasHasta(f.fechaVence)<0) p.vencido += f.monto;
+    if(!p.proxVence || f.fechaVence < p.proxVence) p.proxVence = f.fechaVence;
+  });
+  const filas = Object.values(porProv).sort((a,b)=>b.total-a.total);
+  if(!filas.length) { el.innerHTML = ''; return; }
+  el.innerHTML = `<div class="card mb16">
+    <div class="card-title"><div class="dot"></div>DEUDA POR PROVEEDOR <span style="font-weight:400;color:var(--muted);font-size:11px;">(tocá uno para ver sus facturas)</span></div>
+    <div style="overflow-x:auto;">
+      <table>
+        <thead><tr>
+          <th>Proveedor</th>
+          <th class="num">Facturas</th>
+          <th class="num">Próx. vencimiento</th>
+          <th class="num">Vencido</th>
+          <th class="num yellow">Total adeudado</th>
+        </tr></thead>
+        <tbody>${filas.map(f=>`
+          <tr style="cursor:pointer;${deudaProveedorSel===f.proveedor?'background:var(--surface2);':''}" onclick="setDeudaProveedor(this.dataset.p)" data-p="${escHtml(f.proveedor)}">
+            <td>${escHtml(f.proveedor)}</td>
+            <td class="num">${f.cantidad}</td>
+            <td class="num">${fmtFecha(f.proxVence)}</td>
+            <td class="num" style="color:${f.vencido?'var(--red)':'var(--muted)'}">${f.vencido?pesos(f.vencido):'—'}</td>
+            <td class="num yellow" style="font-weight:700;">${pesos(f.total)}</td>
+          </tr>
+        `).join('')}</tbody>
+      </table>
+    </div>
+  </div>`;
+}
+
+function renderDeuda() {
+  deudaSeleccion.forEach(id=>{ const f=state.facturas.find(x=>x.id===id); if(!f || f.estado==='pagada') deudaSeleccion.delete(id); });
+  renderDeudaPagoPanel();
+  renderDeudaResumen();
+  renderDeudaPorProveedor();
+  updateChequesProveedoresDatalist();
+  updateDeudaBadge();
+  const provWrap = document.getElementById('deudaProvFiltroWrap');
+  if(provWrap) provWrap.style.display = deudaProveedorSel ? 'block' : 'none';
+  const provLabel = document.getElementById('deudaProvFiltroLabel');
+  if(provLabel) provLabel.textContent = deudaProveedorSel || '';
+  const container = document.getElementById('facturasList');
+  if(!container) return;
+  let list = state.facturas;
+  if(deudaFiltro==='pendiente') list = list.filter(f=>f.estado!=='pagada');
+  else if(deudaFiltro==='pagada') list = list.filter(f=>f.estado==='pagada');
+  else if(deudaFiltro==='vencida') list = list.filter(facturaVencida);
+  if(deudaProveedorSel) list = list.filter(f=>f.proveedor.trim().toUpperCase()===deudaProveedorSel.toUpperCase());
+  if(deudaBusqueda) list = list.filter(f=>(f.proveedor||'').toLowerCase().includes(deudaBusqueda) || (f.numero||'').toLowerCase().includes(deudaBusqueda) || compLabel(f).toLowerCase().includes(deudaBusqueda));
+  if(!list.length) {
+    const hayFiltro = deudaFiltro!=='todas' || deudaProveedorSel || deudaBusqueda;
+    container.innerHTML = `<div class="card" style="text-align:center;color:var(--muted);padding:40px;">No hay facturas${hayFiltro?' para este filtro':' cargadas'}.</div>`;
+    return;
+  }
+  // Pendientes: la que vence primero arriba. Pagadas: la última pagada arriba.
+  const sorted = [...list].sort((a,b)=>{
+    if((a.estado==='pagada') !== (b.estado==='pagada')) return a.estado==='pagada' ? 1 : -1;
+    if(a.estado==='pagada') return (b.fechaPagada||'').localeCompare(a.fechaPagada||'');
+    return a.fechaVence.localeCompare(b.fechaVence);
+  });
+  const total = list.reduce((s,f)=>s+f.monto,0);
+  container.innerHTML = `<div style="font-size:12px;color:var(--muted);margin-bottom:10px;">${list.length} factura(s) · total ${pesos(total)}</div>
+  <div class="grid3">${sorted.map(f=>{
+    const diff = diasHasta(f.fechaVence);
+    let cls='imp-card', status='', statusColor='var(--muted)';
+    if(f.estado==='pagada'){ cls+=' pagado'; status=`✓ PAGADA${f.formaPago?' con '+FORMAS_PAGO[f.formaPago]:''}${f.fechaPagada?' el '+fmtFecha(f.fechaPagada):''}`;
+      if(f.pagoDetalle) status += `<div style="color:var(--muted);font-weight:400;">${escHtml(f.pagoDetalle)}</div>`;
+      if(f.pagoId) {
+        const grupo = state.facturas.filter(x=>x.pagoId===f.pagoId);
+        status += `<div style="color:var(--muted);font-weight:400;">🔗 Pago conjunto de ${grupo.length} comprobantes: ${pesos(grupo.reduce((s,x)=>s+x.monto,0))}</div>`;
+      } statusColor='var(--green)'; }
+    else if(diff<0){ cls+=' vencido'; status=`⚠ Vencida hace ${Math.abs(diff)} día(s)`; statusColor='var(--red)'; }
+    else if(diff===0){ cls+=' alerta'; status='⏰ Vence HOY'; statusColor='var(--yellow)'; }
+    else if(diff<=DEUDA_ALERTA_DIAS){ cls+=' alerta'; status=`⏰ Vence en ${diff} día(s)`; statusColor='var(--yellow)'; }
+    else { status=`PENDIENTE · faltan ${diff} días`; }
+    const sel = deudaSeleccion.has(f.id);
+    return `<div class="${cls}" style="${sel?'outline:2px solid var(--gold);outline-offset:-2px;':''}">
+      <div style="display:flex;justify-content:space-between;align-items:flex-start;gap:8px;">
+        <div class="imp-nombre">${escHtml(f.proveedor)}</div>
+        ${f.estado!=='pagada' ? `<label style="display:flex;align-items:center;gap:6px;font-size:11px;color:var(--muted);cursor:pointer;margin:0;white-space:nowrap;"><input type="checkbox" ${sel?'checked':''} onchange="toggleSeleccionDeuda(${f.id})" style="width:18px;height:18px;padding:0;">Juntar</label>` : ''}
+      </div>
+      <div style="font-size:12px;font-weight:600;color:${f.tipo==='remito'?'#60a5fa':'var(--gold)'};margin-bottom:2px;">${f.tipo==='remito'?'📦':'🧾'} ${escHtml(compLabel(f))}</div>
+      <div class="imp-monto">${pesos(f.monto)}</div>
+      <div class="imp-vence">Ingresó: ${fmtFecha(f.fechaIngreso)} · Vence: ${fmtFecha(f.fechaVence)}</div>
+      ${f.nota?`<div style="font-size:11px;color:var(--muted);margin-top:4px;">${escHtml(f.nota)}</div>`:''}
+      <div class="imp-status" style="color:${statusColor}">${status}</div>
+      <div class="flex mt16" style="flex-wrap:wrap;gap:6px;">
+        ${f.estado!=='pagada'
+          ? `<button class="btn btn-green btn-sm" onclick="pagarSolo(${f.id})">💰 Pagar</button>`
+          : `<button class="btn btn-ghost btn-sm" onclick="volverAPendiente(${f.id})">↺ Volver a pendiente</button>`}
+        <button class="btn btn-ghost btn-sm" onclick="editarFactura(${f.id})">✎ Editar</button>
+        <button class="btn btn-ghost btn-sm" onclick="removeFactura(${f.id})">🗑 Eliminar</button>
+      </div>
+    </div>`;
+  }).join('')}</div>`;
+}
+
+// Globito en la pestaña: facturas sin pagar vencidas o que vencen pronto.
+function updateDeudaBadge() {
+  const alertas = (state.facturas||[]).filter(f=>f.estado!=='pagada' && diasHasta(f.fechaVence)<=DEUDA_ALERTA_DIAS).length;
+  const tab = document.getElementById('tabDeuda');
+  if(!tab) return;
+  const existing = tab.querySelector('.badge');
+  if(existing) existing.remove();
+  if(alertas>0) tab.innerHTML += `<span class="badge">${alertas}</span>`;
+}
+
 // ── IMPORTAR CHEQUES DESDE EXCEL ──
 // Formato argentino: punto como separador de miles, coma como decimal
 // (ej: "1.726.878,08"). Sin punto/coma de miles, "65175,9" también entra.
@@ -3254,6 +3681,7 @@ function updateChequesProveedoresDatalist() {
   const proveedores = new Set();
   state.cheques.forEach(c => { if(c.proveedor && c.proveedor.trim()) proveedores.add(c.proveedor.trim()); });
   (state.chequesBorrador||[]).forEach(c => { if(c.proveedor && c.proveedor.trim()) proveedores.add(c.proveedor.trim()); });
+  (state.facturas||[]).forEach(f => { if(f.proveedor && f.proveedor.trim()) proveedores.add(f.proveedor.trim()); });
   const dl = document.getElementById('chequesProveedoresList');
   if(dl) dl.innerHTML = [...proveedores].sort().map(p=>`<option value="${p}">`).join('');
 }
@@ -3372,6 +3800,7 @@ function switchTab(name, el) {
   if(name==='estadisticas') { destroyCharts(); renderStats(); }
   if(name==='impuestos') renderImpuestos();
   if(name==='cheques') { renderCheques(); renderChequesBorrador(); }
+  if(name==='deuda') renderDeuda();
   if(name==='ajustes') renderCajeros();
   if(name==='gastos') { updateConceptosDatalist(); renderBusquedaGastos(); }
 }
@@ -3414,6 +3843,8 @@ async function init() {
   renderImpuestos();
   renderCheques();
   renderChequesBorrador();
+  renderDeuda();
+  document.getElementById('facFechaIngreso').value = todayStr();
   document.getElementById('chqFechaEmision').value = todayStr();
   document.getElementById('chqbFechaEmision').value = todayStr();
   updateConceptosDatalist();
