@@ -813,7 +813,7 @@ tr:hover td { background:var(--surface2); }
       </div>
       <div>
         <label>Monto ($)</label>
-        <input type="number" id="facMonto" placeholder="0">
+        <input type="number" id="facMonto" placeholder="0,00" step="0.01" inputmode="decimal">
       </div>
       <div>
         <label>Fecha de ingreso</label>
@@ -3431,7 +3431,7 @@ function volverAPendiente(id) {
   if(!f) return;
   const grupo = f.pagoId ? state.facturas.filter(x=>x.pagoId===f.pagoId) : [f];
   const msg = grupo.length>1
-    ? `Este pago incluye ${grupo.length} comprobantes (${pesos(sumaNeta(grupo))}). ¿Volver todos a pendiente?`
+    ? `Este pago incluye ${grupo.length} comprobantes (${pesos2(sumaNeta(grupo))}). ¿Volver todos a pendiente?`
     : '¿Volver este comprobante a pendiente?';
   if(!confirm(msg)) return;
   grupo.forEach(x=>Object.assign(x, {estado:'pendiente', formaPago:'', fechaPagada:'', pagoId:'', pagoDetalle:'', pagoInformado:''}));
@@ -3448,15 +3448,15 @@ function renderDeudaPagoPanel() {
   const fechaEl = document.getElementById('deudaPagoFecha');
   if(!fechaEl.value) fechaEl.value = todayStr();
   document.getElementById('deudaPagoProveedor').textContent = items[0].proveedor;
-  document.getElementById('deudaPagoTotal').textContent = pesos(total);
+  document.getElementById('deudaPagoTotal').textContent = pesos2(total);
   document.getElementById('deudaPagoDetalleSel').innerHTML =
-    `${items.length} comprobante(s): ` + items.map((f,i)=>`${i?(esNC(f)?' − ':' + '):''}${escHtml(compLabel(f))} (${pesos(f.monto)})`).join('') +
-    (items.length>1 ? ` = <b style="color:var(--gold)">${pesos(total)}</b>` : '') +
+    `${items.length} comprobante(s): ` + items.map((f,i)=>`${i?(esNC(f)?' − ':' + '):''}${escHtml(compLabel(f))} (${pesos2(f.monto)})`).join('') +
+    (items.length>1 ? ` = <b style="color:var(--gold)">${pesos2(total)}</b>` : '') +
     `<br>Tildá "Juntar" en otros comprobantes de ${escHtml(items[0].proveedor)} para sumarlos a este pago.`;
   // Avisa si el proveedor tiene notas de crédito pendientes que no se están usando.
   const ncLibres = state.facturas.filter(f=>esNC(f) && f.estado!=='pagada' && !deudaSeleccion.has(f.id) && provKey(f.proveedor)===provKey(items[0].proveedor));
   if(ncLibres.length) document.getElementById('deudaPagoDetalleSel').innerHTML +=
-    `<br><span style="color:var(--green);">💡 ${escHtml(items[0].proveedor)} tiene ${ncLibres.length} nota(s) de crédito sin aplicar por ${pesos(ncLibres.reduce((s,f)=>s+f.monto,0))}: tildá "Juntar" en ella para descontarla.</span>`;
+    `<br><span style="color:var(--green);">💡 ${escHtml(items[0].proveedor)} tiene ${ncLibres.length} nota(s) de crédito sin aplicar por ${pesos2(ncLibres.reduce((s,f)=>s+f.monto,0))}: tildá "Juntar" en ella para descontarla.</span>`;
 }
 
 function removeFactura(id) {
@@ -3494,12 +3494,12 @@ function renderDeudaResumen() {
   const porForma = Object.entries(FORMAS_PAGO)
     .map(([k,v])=>({v, total: suma(pagadasMes.filter(f=>f.formaPago===k))}))
     .filter(x=>x.total>0)
-    .map(x=>`${x.v}: ${pesos(x.total)}`).join('<br>');
+    .map(x=>`${x.v}: ${pesos2(x.total)}`).join('<br>');
   el.innerHTML = `
-    <div class="stat"><div class="stat-label">Deuda total pendiente</div><div class="stat-value gold">${pesos(suma(pendientes))}</div><div style="font-size:11px;color:var(--muted);margin-top:4px">${pendientes.length-ncPend.length} comprobante(s)${ncPend.length?`<br><span style="color:var(--green)">ya descontadas ${ncPend.length} NC: −${pesos(ncPend.reduce((s,f)=>s+f.monto,0))}</span>`:''}</div></div>
-    <div class="stat"><div class="stat-label">Vencidas sin pagar</div><div class="stat-value" style="color:${vencidas.length?'var(--red)':'var(--text)'}">${pesos(suma(vencidas))}</div><div style="font-size:11px;color:var(--muted);margin-top:4px">${vencidas.length} factura(s)</div></div>
-    <div class="stat"><div class="stat-label">Vencen en ${DEUDA_ALERTA_DIAS} días</div><div class="stat-value" style="color:${proximas.length?'var(--yellow)':'var(--text)'}">${pesos(suma(proximas))}</div><div style="font-size:11px;color:var(--muted);margin-top:4px">${proximas.length} factura(s)</div></div>
-    <div class="stat"><div class="stat-label">Pagado este mes</div><div class="stat-value green">${pesos(suma(pagadasMes))}</div><div style="font-size:11px;color:var(--muted);margin-top:4px">${pagadasMes.filter(f=>!esNC(f)).length} comprobante(s)${porForma?'<br>'+porForma:''}</div></div>
+    <div class="stat"><div class="stat-label">Deuda total pendiente</div><div class="stat-value gold">${pesos2(suma(pendientes))}</div><div style="font-size:11px;color:var(--muted);margin-top:4px">${pendientes.length-ncPend.length} comprobante(s)${ncPend.length?`<br><span style="color:var(--green)">ya descontadas ${ncPend.length} NC: −${pesos2(ncPend.reduce((s,f)=>s+f.monto,0))}</span>`:''}</div></div>
+    <div class="stat"><div class="stat-label">Vencidas sin pagar</div><div class="stat-value" style="color:${vencidas.length?'var(--red)':'var(--text)'}">${pesos2(suma(vencidas))}</div><div style="font-size:11px;color:var(--muted);margin-top:4px">${vencidas.length} factura(s)</div></div>
+    <div class="stat"><div class="stat-label">Vencen en ${DEUDA_ALERTA_DIAS} días</div><div class="stat-value" style="color:${proximas.length?'var(--yellow)':'var(--text)'}">${pesos2(suma(proximas))}</div><div style="font-size:11px;color:var(--muted);margin-top:4px">${proximas.length} factura(s)</div></div>
+    <div class="stat"><div class="stat-label">Pagado este mes</div><div class="stat-value green">${pesos2(suma(pagadasMes))}</div><div style="font-size:11px;color:var(--muted);margin-top:4px">${pagadasMes.filter(f=>!esNC(f)).length} comprobante(s)${porForma?'<br>'+porForma:''}</div></div>
   `;
 }
 
@@ -3534,8 +3534,8 @@ function renderDeudaPorProveedor() {
             <td>${escHtml(f.proveedor)}</td>
             <td class="num">${f.cantidad}</td>
             <td class="num">${fmtFecha(f.proxVence)}</td>
-            <td class="num" style="color:${f.vencido?'var(--red)':'var(--muted)'}">${f.vencido?pesos(f.vencido):'—'}</td>
-            <td class="num yellow" style="font-weight:700;">${pesos(f.total)}</td>
+            <td class="num" style="color:${f.vencido?'var(--red)':'var(--muted)'}">${f.vencido?pesos2(f.vencido):'—'}</td>
+            <td class="num yellow" style="font-weight:700;">${pesos2(f.total)}</td>
           </tr>
         `).join('')}</tbody>
       </table>
@@ -3574,7 +3574,7 @@ function renderDeuda() {
     return a.fechaVence.localeCompare(b.fechaVence);
   });
   const total = sumaNeta(list);
-  container.innerHTML = `<div style="font-size:12px;color:var(--muted);margin-bottom:10px;">${list.length} comprobante(s) · total ${pesos(total)}</div>
+  container.innerHTML = `<div style="font-size:12px;color:var(--muted);margin-bottom:10px;">${list.length} comprobante(s) · total ${pesos2(total)}</div>
   <div class="grid3">${sorted.map(f=>{
     const diff = diasHasta(f.fechaVence);
     let cls='imp-card', status='', statusColor='var(--muted)';
@@ -3583,7 +3583,7 @@ function renderDeuda() {
         : `✓ PAGADA${f.formaPago?' con '+FORMAS_PAGO[f.formaPago]:''}${f.fechaPagada?' el '+fmtFecha(f.fechaPagada):''}`;
       if(f.pagoDetalle) status += `<div style="color:var(--muted);font-weight:400;">${escHtml(f.pagoDetalle)}</div>`;
       const grupo = grupoDePago(f);
-      if(grupo.length>1) status += `<div style="color:var(--muted);font-weight:400;">🔗 Pago conjunto de ${grupo.length} comprobantes: ${pesos(sumaNeta(grupo))}</div>`;
+      if(grupo.length>1) status += `<div style="color:var(--muted);font-weight:400;">🔗 Pago conjunto de ${grupo.length} comprobantes: ${pesos2(sumaNeta(grupo))}</div>`;
       if(f.pagoInformado) status += `<div style="color:var(--muted);font-weight:400;">📤 Informado al proveedor el ${fmtFecha(f.pagoInformado)}</div>`;
       statusColor='var(--green)'; }
     else if(esNC(f)){ status='CRÉDITO A FAVOR · juntala con una factura al pagar'; statusColor='var(--green)'; }
@@ -3598,7 +3598,7 @@ function renderDeuda() {
         ${f.estado!=='pagada' ? `<label style="display:flex;align-items:center;gap:6px;font-size:11px;color:var(--muted);cursor:pointer;margin:0;white-space:nowrap;"><input type="checkbox" ${sel?'checked':''} onchange="toggleSeleccionDeuda(${f.id})" style="width:18px;height:18px;padding:0;">Juntar</label>` : ''}
       </div>
       <div style="font-size:12px;font-weight:600;color:${esNC(f)?'var(--green)':f.tipo==='remito'?'#60a5fa':'var(--gold)'};margin-bottom:2px;">${esNC(f)?'➖':f.tipo==='remito'?'📦':'🧾'} ${escHtml(compLabel(f))}</div>
-      <div class="imp-monto" style="${esNC(f)?'color:var(--green);':''}">${esNC(f)?'−':''}${pesos(f.monto)}</div>
+      <div class="imp-monto" style="${esNC(f)?'color:var(--green);':''}">${esNC(f)?'−':''}${pesos2(f.monto)}</div>
       <div class="imp-vence">${esNC(f)?'Fecha: '+fmtFecha(f.fechaIngreso):`Ingresó: ${fmtFecha(f.fechaIngreso)} · Vence: ${fmtFecha(f.fechaVence)}`}</div>
       ${f.nota?`<div style="font-size:11px;color:var(--muted);margin-top:4px;">${escHtml(f.nota)}</div>`:''}
       <div class="imp-status" style="color:${statusColor}">${status}</div>
@@ -3926,7 +3926,7 @@ function switchTab(name, el) {
 // UTILS
 // ============================================================
 function pesos(n) {
-  return '$' + (n||0).toLocaleString('es-AR',{minimumFractionDigits:0,maximumFractionDigits:0});
+  return '$' + (n||0).toLocaleString('es-AR',{minimumFractionDigits:2,maximumFractionDigits:2});
 }
 
 // ============================================================
