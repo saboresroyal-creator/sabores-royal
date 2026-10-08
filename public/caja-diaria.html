@@ -756,7 +756,7 @@ tr:hover td { background:var(--surface2); }
         </div>
         <div>
           <label>Monto ($)</label>
-          <input type="number" id="chqbMonto" placeholder="0">
+          <input type="number" id="chqbMonto" placeholder="0,00" step="0.01" inputmode="decimal" oninput="renderSumaBorrador()">
         </div>
         <div>
           <label>N° de cheque (si ya lo tenés)</label>
@@ -782,6 +782,7 @@ tr:hover td { background:var(--surface2); }
       </div>
       <div class="flex">
         <button class="btn btn-gold" id="btnGuardarChequeBorrador" onclick="guardarChequeBorrador()">+ Agregar al borrador</button>
+        <div id="chequesBorradorSuma" style="font-family:var(--mono);font-size:13px;align-self:center;"></div>
         <button class="btn btn-ghost" id="btnCancelarEdicionBorrador" onclick="cancelarEdicionChequeBorrador()" style="display:none;">Cancelar edición</button>
       </div>
     </div>
@@ -3014,6 +3015,7 @@ function renderChequesBorrador() {
   const badge = document.getElementById('chequesBorradorBadge');
   if(badge) badge.textContent = state.chequesBorrador.length ? ` (${state.chequesBorrador.length})` : '';
   updateChequesProveedoresDatalist();
+  renderSumaBorrador();
   if(!resumenEl || !listEl) return;
   const total = state.chequesBorrador.reduce((s,c)=>s+c.monto,0);
   resumenEl.innerHTML = `
@@ -3024,21 +3026,48 @@ function renderChequesBorrador() {
     listEl.innerHTML = '<div class="card" style="text-align:center;color:var(--muted);padding:40px;">Cargá acá los cheques que todavía estás por emitir. Cuando los tengas hechos y controlados, confirmalos para que pasen a la lista general.</div>';
     return;
   }
+  // Subtotal por proveedor (sirve para armar el pago de cada uno)
+  const porProv = {};
+  state.chequesBorrador.forEach(c=>{
+    const k = (c.proveedor||'').trim().toUpperCase();
+    if(!porProv[k]) porProv[k] = {nombre:(c.proveedor||'').trim(), n:0, total:0};
+    porProv[k].n++; porProv[k].total += c.monto;
+  });
+  const provs = Object.values(porProv).sort((a,b)=>b.total-a.total);
+  const subtotales = provs.length>1 ? `<div class="card mb16"><div class="card-title"><div class="dot"></div>SUMA POR PROVEEDOR</div>
+    <table><tbody>${provs.map(p=>`<tr><td>${p.nombre}</td><td class="num" style="color:var(--muted)">${p.n} cheque(s)</td><td class="num gold" style="font-weight:700;">${pesos(p.total)}</td></tr>`).join('')}
+    <tr><td style="font-weight:700;">TOTAL</td><td class="num" style="color:var(--muted)">${state.chequesBorrador.length} cheque(s)</td><td class="num gold" style="font-weight:700;">${pesos(total)}</td></tr></tbody></table></div>` : '';
   const sorted = [...state.chequesBorrador].sort((a,b)=>a.fechaPago.localeCompare(b.fechaPago));
-  listEl.innerHTML = `<div class="grid3">${sorted.map(c=>`
+  let acumulado = 0;
+  listEl.innerHTML = subtotales + `<div class="grid3">${sorted.map(c=>{ acumulado += c.monto; return `
     <div class="imp-card" style="border-style:dashed;">
       <div class="imp-nombre">${c.proveedor}</div>
       <div class="imp-monto">${pesos(c.monto)}</div>
       <div class="imp-vence">Vence: ${c.fechaPago}${c.numero?' · N° '+c.numero:''}${c.fechaEmision?' · emitido '+c.fechaEmision:''}</div>
       ${c.nota?`<div style="font-size:11px;color:var(--muted);margin-top:4px;">${c.nota}</div>`:''}
       <div class="imp-status" style="color:var(--gold);">📝 BORRADOR — todavía no emitido</div>
+      <div style="font-size:11px;color:var(--muted);margin-top:4px;font-family:var(--mono);">🧮 Suma acumulada: <b style="color:var(--text)">${pesos(acumulado)}</b></div>
       <div class="flex mt16" style="flex-wrap:wrap;gap:6px;">
         <button class="btn btn-green btn-sm" onclick="confirmarChequeBorrador(${c.id})">✓ Confirmar</button>
         <button class="btn btn-ghost btn-sm" onclick="editarChequeBorrador(${c.id})">✎ Editar</button>
         <button class="btn btn-ghost btn-sm" onclick="removeChequeBorrador(${c.id})">🗑 Eliminar</button>
       </div>
     </div>
-  `).join('')}</div>`;
+  `; }).join('')}</div>`;
+}
+
+// Suma del borrador al lado del botón: lo cargado y, mientras se tipea un monto, cómo quedaría.
+function renderSumaBorrador() {
+  const el = document.getElementById('chequesBorradorSuma');
+  if(!el) return;
+  const n = state.chequesBorrador.length;
+  const total = state.chequesBorrador.reduce((s,c)=>s+c.monto,0);
+  let enEdicion = 0;
+  if(chequeBorradorEditandoId) { const c = state.chequesBorrador.find(x=>x.id===chequeBorradorEditandoId); if(c) enEdicion = c.monto; }
+  const tipeado = parseFloat(document.getElementById('chqbMonto').value)||0;
+  let html = n ? `🧮 Llevás <b>${n}</b> cheque(s) por <b style="color:var(--gold)">${pesos(total)}</b>` : '<span style="color:var(--muted)">🧮 Todavía no hay cheques en el borrador</span>';
+  if(tipeado) html += ` <span style="color:var(--muted)">→ con este quedaría</span> <b style="color:var(--green)">${pesos(total - enEdicion + tipeado)}</b>`;
+  el.innerHTML = html;
 }
 
 function setChequesFiltro(f, el) {
