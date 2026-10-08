@@ -1013,7 +1013,7 @@ tr:hover td { background:var(--surface2); }
      PANEL: FINALES (deuda total día a día)
 ══════════════════════════════════════════ -->
 <div class="panel" id="panel-finales">
-  <p class="hint" style="margin-bottom:16px;">Todo se toma solo de las otras pestañas (Deuda Proveedores, Cheques y Bancos) y queda guardado cada día. Para días anteriores podés cargar o corregir créditos y descubierto a mano.</p>
+  <p class="hint" style="margin-bottom:16px;">Las deudas se toman solas de las otras pestañas (Deuda Proveedores, Cheques y Bancos) y quedan guardadas cada día. El efectivo disponible lo cargás vos y se resta para ver la deuda neta. Para días anteriores podés corregir créditos y descubierto a mano.</p>
 
   <!-- Resumen del último día -->
   <div id="finalesResumen" class="mb16"></div>
@@ -1038,9 +1038,13 @@ tr:hover td { background:var(--surface2); }
         <input type="number" id="finDescubierto" placeholder="0,00" step="0.01" inputmode="decimal">
       </div>
       <div>
-        <label>Nota (opcional)</label>
-        <input type="text" id="finNota" placeholder="Ej: se acreditó préstamo">
+        <label>Efectivo disponible ($) <span style="text-transform:none;letter-spacing:0;">· se resta</span></label>
+        <input type="number" id="finEfectivo" placeholder="0,00" step="0.01" inputmode="decimal">
       </div>
+    </div>
+    <div class="mb16">
+      <label>Nota (opcional)</label>
+      <input type="text" id="finNota" placeholder="Ej: se acreditó préstamo">
     </div>
     <div id="finAutoInfo" style="font-size:12px;color:var(--muted);margin-bottom:12px;"></div>
     <button class="btn btn-gold" onclick="guardarFinales()">💾 Guardar día</button>
@@ -4161,7 +4165,9 @@ function snapshotFinalesHoy() {
   const r = state.finales[hoy] || {};
   const proveedores = deudaProveedoresActual(), cheques = deudaChequesActual();
   const creditos = deudaCreditosActual(), descubierto = deudaDescubiertoActual();
-  if(r.proveedores === proveedores && r.cheques === cheques && r.creditos === creditos && r.descubierto === descubierto) return false;
+  let cambio = false;
+  if(r.efectivo === undefined) { const prev = finalAnterior(hoy); r.efectivo = prev ? (prev.efectivo||0) : 0; state.finales[hoy] = r; cambio = true; }
+  if(r.proveedores === proveedores && r.cheques === cheques && r.creditos === creditos && r.descubierto === descubierto) return cambio;
   state.finales[hoy] = Object.assign(r, {proveedores, cheques, creditos, descubierto});
   return true;
 }
@@ -4170,6 +4176,8 @@ function finalAnterior(fecha) {
   return prev ? state.finales[prev] : null;
 }
 function totalFinal(r) { return r2((r.proveedores||0)+(r.cheques||0)+(r.creditos||0)+(r.descubierto||0)); }
+// Deuda neta: la deuda total menos el efectivo que hay.
+function netoFinal(r) { return r2(totalFinal(r) - (r.efectivo||0)); }
 
 function cargarFormFinales() {
   const fecha = document.getElementById('finFecha').value || todayStr();
@@ -4185,6 +4193,7 @@ function cargarFormFinales() {
     inp.style.opacity = hoyAuto ? '.75' : '';
     document.getElementById(origen).textContent = hoyAuto ? '· automático de Bancos' : '';
   });
+  document.getElementById('finEfectivo').value = r.efectivo || '';
   document.getElementById('finNota').value = propio ? (r.nota||'') : '';
   const esHoy = fecha===todayStr();
   const prov = esHoy ? deudaProveedoresActual() : (propio ? r.proveedores : null);
@@ -4200,10 +4209,11 @@ function guardarFinales() {
   if(fecha > todayStr()) { alert('No se puede cargar un día que todavía no pasó.'); return; }
   const creditos = r2(parseFloat(document.getElementById('finCreditos').value)||0);
   const descubierto = r2(parseFloat(document.getElementById('finDescubierto').value)||0);
+  const efectivo = r2(parseFloat(document.getElementById('finEfectivo').value)||0);
   const nota = document.getElementById('finNota').value.trim();
   if(!state.finales) state.finales = {};
   const r = state.finales[fecha] || {};
-  state.finales[fecha] = Object.assign(r, {creditos, descubierto, nota});
+  state.finales[fecha] = Object.assign(r, {creditos, descubierto, efectivo, nota});
   if(fecha===todayStr()) Object.assign(r, {proveedores: deudaProveedoresActual(), cheques: deudaChequesActual(), creditos: deudaCreditosActual(), descubierto: deudaDescubiertoActual()});
   save();
   renderFinales();
@@ -4227,12 +4237,13 @@ function setFinalesRango(dias, el) {
   renderFinales();
 }
 
-function varHtml(actual, anterior) {
+function varHtml(actual, anterior, masEsBueno) {
   if(anterior==null) return '<span style="color:var(--muted)">—</span>';
   const d = r2(actual - anterior);
   if(d===0) return '<span style="color:var(--muted)">=</span>';
-  // Más deuda es malo (rojo), menos deuda es bueno (verde)
-  return `<span style="color:${d>0?'var(--red)':'var(--green)'}">${d>0?'▲':'▼'} ${pesos(Math.abs(d))}</span>`;
+  // Más deuda es malo (rojo), menos deuda es bueno (verde); con el efectivo es al revés
+  const malo = masEsBueno ? d<0 : d>0;
+  return `<span style="color:${malo?'var(--red)':'var(--green)'}">${d>0?'▲':'▼'} ${pesos(Math.abs(d))}</span>`;
 }
 
 function renderFinales() {
@@ -4255,11 +4266,16 @@ function renderFinales() {
     ['Créditos banco', r.creditos||0, prev&&prev.creditos, 'var(--purple)'],
     ['Descubierto', r.descubierto||0, prev&&prev.descubierto, 'var(--yellow)'],
   ];
+  const ef = r.efectivo||0, efPrev = prev ? (prev.efectivo||0) : null;
   resumenEl.innerHTML = `<div style="font-size:11px;color:var(--muted);letter-spacing:1px;text-transform:uppercase;margin-bottom:8px;">Último registro: ${fmtFecha(ult)}${prev?' · variación contra '+fmtFecha(fechas[fechas.length-2]):''}</div>
     <div class="grid4 mb16">${items.map(([lbl,v,pv,col])=>`
       <div class="stat"><div class="stat-label">${lbl}</div><div class="stat-value" style="color:${col}">${pesos(v)}</div><div style="font-size:11px;margin-top:4px">${varHtml(v, pv==null?null:pv)}</div></div>`).join('')}
     </div>
-    <div class="stat" style="border-color:var(--red);"><div class="stat-label">Deuda total</div><div class="stat-value red" style="font-size:26px;">${pesos(totalFinal(r))}</div><div style="font-size:12px;margin-top:4px">${varHtml(totalFinal(r), prev?totalFinal(prev):null)}</div></div>`;
+    <div class="grid3">
+      <div class="stat"><div class="stat-label">Deuda total</div><div class="stat-value" style="font-size:22px;color:var(--text);">${pesos(totalFinal(r))}</div><div style="font-size:11px;margin-top:4px">${varHtml(totalFinal(r), prev?totalFinal(prev):null)}</div></div>
+      <div class="stat"><div class="stat-label">− Efectivo disponible</div><div class="stat-value green" style="font-size:22px;">${pesos(ef)}</div><div style="font-size:11px;margin-top:4px">${varHtml(ef, efPrev, true)}</div></div>
+      <div class="stat" style="border-color:var(--red);"><div class="stat-label">= Deuda neta</div><div class="stat-value red" style="font-size:26px;">${pesos(netoFinal(r))}</div><div style="font-size:12px;margin-top:4px">${varHtml(netoFinal(r), prev?netoFinal(prev):null)}</div></div>
+    </div>`;
 
   // Tabla: más nuevo arriba
   const filas = [...fechas].reverse().map((d,i,arr)=>{
@@ -4271,13 +4287,15 @@ function renderFinales() {
       <td class="num">${pesos(x.cheques||0)}</td>
       <td class="num">${pesos(x.creditos||0)}</td>
       <td class="num">${pesos(x.descubierto||0)}</td>
-      <td class="num" style="font-weight:700;color:var(--red);">${pesos(totalFinal(x))}</td>
-      <td class="num">${varHtml(totalFinal(x), ant?totalFinal(ant):null)}</td>
+      <td class="num" style="font-weight:700;">${pesos(totalFinal(x))}</td>
+      <td class="num" style="color:var(--green);">${pesos(x.efectivo||0)}</td>
+      <td class="num" style="font-weight:700;color:var(--red);">${pesos(netoFinal(x))}</td>
+      <td class="num">${varHtml(netoFinal(x), ant?netoFinal(ant):null)}</td>
       <td style="white-space:nowrap;"><button class="btn btn-ghost btn-sm" onclick="editarFinal('${d}')">✎</button> <button class="btn btn-ghost btn-sm" onclick="borrarFinal('${d}')">🗑</button></td>
     </tr>`;
   }).join('');
   tablaEl.innerHTML = `<table>
-    <thead><tr><th>Fecha</th><th class="num">Proveedores</th><th class="num">Cheques</th><th class="num">Créditos banco</th><th class="num">Descubierto</th><th class="num">Total</th><th class="num">Vs. día ant.</th><th></th></tr></thead>
+    <thead><tr><th>Fecha</th><th class="num">Proveedores</th><th class="num">Cheques</th><th class="num">Créditos banco</th><th class="num">Descubierto</th><th class="num">Deuda total</th><th class="num">Efectivo</th><th class="num">Deuda neta</th><th class="num">Neta vs. día ant.</th><th></th></tr></thead>
     <tbody>${filas}</tbody></table>`;
 
   // Gráfico
@@ -4292,7 +4310,9 @@ function renderFinales() {
     data:{
       labels: fs.map(d=>d.slice(8)+'/'+d.slice(5,7)),
       datasets:[
-        serie('Total', '#ef4444', totalFinal, {borderWidth:3, fill:true}),
+        serie('Deuda neta', '#ef4444', netoFinal, {borderWidth:3, fill:true}),
+        serie('Deuda total', '#e8e8f0', totalFinal, {borderDash:[6,4], pointRadius:2}),
+        serie('Efectivo', '#22c55e', x=>x.efectivo||0),
         serie('Proveedores', '#c5a028', x=>x.proveedores||0),
         serie('Cheques', '#60a5fa', x=>x.cheques||0),
         serie('Créditos banco', '#a855f7', x=>x.creditos||0),
