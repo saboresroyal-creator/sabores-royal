@@ -451,6 +451,7 @@ tr:hover td { background:var(--surface2); }
   <div class="tab" onclick="switchTab('impuestos',this)" id="tabImpuestos">🧾 Impuestos</div>
   <div class="tab" onclick="switchTab('cheques',this)" id="tabCheques">💳 Cheques</div>
   <div class="tab" onclick="switchTab('deuda',this)" id="tabDeuda">📑 Deuda Proveedores</div>
+  <div class="tab" onclick="switchTab('finales',this)">📈 Finales</div>
   <div class="tab" onclick="switchTab('ajustes',this)">⚙ Ajustes</div>
 </div>
 
@@ -947,6 +948,64 @@ tr:hover td { background:var(--surface2); }
 </div>
 
 <!-- ══════════════════════════════════════════
+     PANEL: FINALES (deuda total día a día)
+══════════════════════════════════════════ -->
+<div class="panel" id="panel-finales">
+  <p class="hint" style="margin-bottom:16px;">La deuda con proveedores y la de cheques se toman solas de las otras pestañas y quedan guardadas cada día. Créditos del banco y descubierto los cargás vos.</p>
+
+  <!-- Resumen del último día -->
+  <div id="finalesResumen" class="mb16"></div>
+
+  <!-- Carga manual -->
+  <div class="card mb16">
+    <div class="card-title"><div class="dot"></div>CARGAR DÍA</div>
+    <div class="grid4 mb16">
+      <div>
+        <label>Fecha</label>
+        <div style="display:flex;gap:6px;">
+          <input type="date" id="finFecha" style="flex:1;" onchange="cargarFormFinales()">
+          <button type="button" class="btn btn-ghost btn-sm" onclick="document.getElementById('finFecha').value=todayStr();cargarFormFinales()">Hoy</button>
+        </div>
+      </div>
+      <div>
+        <label>Deuda créditos banco ($)</label>
+        <input type="number" id="finCreditos" placeholder="0,00" step="0.01" inputmode="decimal">
+      </div>
+      <div>
+        <label>Descubierto ($)</label>
+        <input type="number" id="finDescubierto" placeholder="0,00" step="0.01" inputmode="decimal">
+      </div>
+      <div>
+        <label>Nota (opcional)</label>
+        <input type="text" id="finNota" placeholder="Ej: se acreditó préstamo">
+      </div>
+    </div>
+    <div id="finAutoInfo" style="font-size:12px;color:var(--muted);margin-bottom:12px;"></div>
+    <button class="btn btn-gold" onclick="guardarFinales()">💾 Guardar día</button>
+  </div>
+
+  <!-- Gráfico -->
+  <div class="card mb16">
+    <div class="card-title" style="display:flex;align-items:center;justify-content:space-between;flex-wrap:wrap;row-gap:8px;">
+      <span style="display:flex;align-items:center;gap:8px;"><div class="dot"></div>EVOLUCIÓN DE LA DEUDA</span>
+      <div class="ptabs" id="finalesRango" style="margin:0;">
+        <button class="ptab" onclick="setFinalesRango(7,this)">7 días</button>
+        <button class="ptab active" onclick="setFinalesRango(30,this)">30 días</button>
+        <button class="ptab" onclick="setFinalesRango(90,this)">90 días</button>
+        <button class="ptab" onclick="setFinalesRango(0,this)">Todo</button>
+      </div>
+    </div>
+    <div style="height:300px;position:relative;"><canvas id="chartFinales"></canvas></div>
+  </div>
+
+  <!-- Tabla día a día -->
+  <div class="card">
+    <div class="card-title"><div class="dot"></div>DÍA A DÍA</div>
+    <div id="finalesTabla" style="overflow-x:auto;"></div>
+  </div>
+</div>
+
+<!-- ══════════════════════════════════════════
      PANEL: AJUSTES
 ══════════════════════════════════════════ -->
 <div class="panel" id="panel-ajustes">
@@ -1184,6 +1243,7 @@ function rerenderAll(){
   if(name==='impuestos') renderImpuestos();
   if(name==='cheques') { renderCheques(); renderChequesBorrador(); }
   if(name==='deuda') renderDeuda();
+  if(name==='finales') renderFinales();
   if(name==='ajustes') renderCajeros();
   if(name==='gastos') { updateConceptosDatalist(); renderBusquedaGastos(); }
   updateBadge();
@@ -1281,11 +1341,12 @@ function normalizeState(){
   if(!state.cheques) state.cheques = [];
   if(!state.chequesBorrador) state.chequesBorrador = [];
   if(!state.facturas) state.facturas = [];
+  if(!state.finales || Array.isArray(state.finales)) state.finales = {};
   if(!state.cajeros) state.cajeros = ['Gastón','Matías','Gabriel','Emanuel'];
   if(!state.dias) state.dias = {};
   if(!state.updatedAt) state.updatedAt = 0;
 }
-function save() { state.updatedAt = Date.now(); localStorage.setItem('cajasApp_v2', JSON.stringify(state)); updateBadge(); scheduleRemoteSync(); }
+function save() { snapshotFinalesHoy(); state.updatedAt = Date.now(); localStorage.setItem('cajasApp_v2', JSON.stringify(state)); updateBadge(); scheduleRemoteSync(); }
 function load() {
   const s = localStorage.getItem('cajasApp_v2');
   if(s) { try { state = JSON.parse(s); } catch(e){} }
@@ -3726,6 +3787,171 @@ function updateDeudaBadge() {
   if(alertas>0) tab.innerHTML += `<span class="badge">${alertas}</span>`;
 }
 
+// ============================================================
+// FINALES — deuda total día a día. Proveedores y cheques se
+// guardan solos (foto del día); créditos y descubierto son manuales.
+// state.finales = { 'AAAA-MM-DD': {proveedores, cheques, creditos, descubierto, nota} }
+// ============================================================
+let finalesRango = 30;
+let finalesChart = null;
+const r2 = n => Math.round((n||0)*100)/100;
+
+function deudaProveedoresActual() { return r2(sumaNeta((state.facturas||[]).filter(f=>f.estado!=='pagada'))); }
+function deudaChequesActual() { return r2((state.cheques||[]).filter(c=>c.estado==='pendiente').reduce((s,c)=>s+c.monto,0)); }
+
+// Guarda la deuda de hoy (proveedores y cheques). Devuelve true si cambió algo.
+function snapshotFinalesHoy() {
+  if(!state.finales) state.finales = {};
+  const hoy = todayStr();
+  const r = state.finales[hoy] || {};
+  const proveedores = deudaProveedoresActual(), cheques = deudaChequesActual();
+  if(r.proveedores === proveedores && r.cheques === cheques) return false;
+  // Los manuales arrancan con lo último cargado, hasta que se corrijan.
+  if(r.creditos === undefined) { const prev = finalAnterior(hoy); r.creditos = prev ? (prev.creditos||0) : 0; r.descubierto = prev ? (prev.descubierto||0) : 0; }
+  state.finales[hoy] = Object.assign(r, {proveedores, cheques});
+  return true;
+}
+function finalAnterior(fecha) {
+  const prev = Object.keys(state.finales||{}).filter(d=>d<fecha).sort().pop();
+  return prev ? state.finales[prev] : null;
+}
+function totalFinal(r) { return r2((r.proveedores||0)+(r.cheques||0)+(r.creditos||0)+(r.descubierto||0)); }
+
+function cargarFormFinales() {
+  const fecha = document.getElementById('finFecha').value || todayStr();
+  const r = (state.finales||{})[fecha] || finalAnterior(fecha) || {};
+  const propio = !!(state.finales||{})[fecha];
+  document.getElementById('finCreditos').value = r.creditos || '';
+  document.getElementById('finDescubierto').value = r.descubierto || '';
+  document.getElementById('finNota').value = propio ? (r.nota||'') : '';
+  const esHoy = fecha===todayStr();
+  const prov = esHoy ? deudaProveedoresActual() : (propio ? r.proveedores : null);
+  const chq = esHoy ? deudaChequesActual() : (propio ? r.cheques : null);
+  document.getElementById('finAutoInfo').innerHTML = prov==null
+    ? `Para el ${fmtFecha(fecha)} no hay registro de proveedores y cheques (solo se guardan solos desde que existe esta pestaña).`
+    : `Automático ${esHoy?'(hoy, en vivo)':'(guardado ese día)'}: Proveedores <b style="color:var(--text)">${pesos(prov)}</b> · Cheques <b style="color:var(--text)">${pesos(chq)}</b>${!propio?' · <span style="color:var(--gold)">créditos y descubierto vienen del último día cargado</span>':''}`;
+}
+
+function guardarFinales() {
+  const fecha = document.getElementById('finFecha').value;
+  if(!fecha) { alert('Elegí la fecha.'); return; }
+  if(fecha > todayStr()) { alert('No se puede cargar un día que todavía no pasó.'); return; }
+  const creditos = r2(parseFloat(document.getElementById('finCreditos').value)||0);
+  const descubierto = r2(parseFloat(document.getElementById('finDescubierto').value)||0);
+  const nota = document.getElementById('finNota').value.trim();
+  if(!state.finales) state.finales = {};
+  const r = state.finales[fecha] || {};
+  if(fecha===todayStr()) { r.proveedores = deudaProveedoresActual(); r.cheques = deudaChequesActual(); }
+  state.finales[fecha] = Object.assign(r, {creditos, descubierto, nota});
+  save();
+  renderFinales();
+  cargarFormFinales();
+}
+
+function borrarFinal(fecha) {
+  if(!confirm(`¿Borrar el registro del ${fmtFecha(fecha)}?`)) return;
+  delete state.finales[fecha];
+  save(); renderFinales(); cargarFormFinales();
+}
+function editarFinal(fecha) {
+  document.getElementById('finFecha').value = fecha;
+  cargarFormFinales();
+  document.getElementById('finFecha').scrollIntoView({behavior:'smooth', block:'center'});
+}
+function setFinalesRango(dias, el) {
+  finalesRango = dias;
+  document.querySelectorAll('#finalesRango .ptab').forEach(t=>t.classList.remove('active'));
+  el.classList.add('active');
+  renderFinales();
+}
+
+function varHtml(actual, anterior) {
+  if(anterior==null) return '<span style="color:var(--muted)">—</span>';
+  const d = r2(actual - anterior);
+  if(d===0) return '<span style="color:var(--muted)">=</span>';
+  // Más deuda es malo (rojo), menos deuda es bueno (verde)
+  return `<span style="color:${d>0?'var(--red)':'var(--green)'}">${d>0?'▲':'▼'} ${pesos(Math.abs(d))}</span>`;
+}
+
+function renderFinales() {
+  const panel = document.getElementById('panel-finales');
+  if(!panel) return;
+  const fechas = Object.keys(state.finales||{}).sort();
+  const resumenEl = document.getElementById('finalesResumen');
+  const tablaEl = document.getElementById('finalesTabla');
+  if(!fechas.length) {
+    resumenEl.innerHTML = '';
+    tablaEl.innerHTML = '<div style="text-align:center;color:var(--muted);padding:30px;">Todavía no hay días registrados.</div>';
+    if(finalesChart) { finalesChart.destroy(); finalesChart = null; }
+    return;
+  }
+  const ult = fechas[fechas.length-1], r = state.finales[ult];
+  const prev = fechas.length>1 ? state.finales[fechas[fechas.length-2]] : null;
+  const items = [
+    ['Proveedores', r.proveedores||0, prev&&prev.proveedores, 'var(--gold)'],
+    ['Cheques', r.cheques||0, prev&&prev.cheques, '#60a5fa'],
+    ['Créditos banco', r.creditos||0, prev&&prev.creditos, 'var(--purple)'],
+    ['Descubierto', r.descubierto||0, prev&&prev.descubierto, 'var(--yellow)'],
+  ];
+  resumenEl.innerHTML = `<div style="font-size:11px;color:var(--muted);letter-spacing:1px;text-transform:uppercase;margin-bottom:8px;">Último registro: ${fmtFecha(ult)}${prev?' · variación contra '+fmtFecha(fechas[fechas.length-2]):''}</div>
+    <div class="grid4 mb16">${items.map(([lbl,v,pv,col])=>`
+      <div class="stat"><div class="stat-label">${lbl}</div><div class="stat-value" style="color:${col}">${pesos(v)}</div><div style="font-size:11px;margin-top:4px">${varHtml(v, pv==null?null:pv)}</div></div>`).join('')}
+    </div>
+    <div class="stat" style="border-color:var(--red);"><div class="stat-label">Deuda total</div><div class="stat-value red" style="font-size:26px;">${pesos(totalFinal(r))}</div><div style="font-size:12px;margin-top:4px">${varHtml(totalFinal(r), prev?totalFinal(prev):null)}</div></div>`;
+
+  // Tabla: más nuevo arriba
+  const filas = [...fechas].reverse().map((d,i,arr)=>{
+    const x = state.finales[d];
+    const ant = arr[i+1] ? state.finales[arr[i+1]] : null;
+    return `<tr>
+      <td>${fmtFecha(d)}${x.nota?`<div style="font-size:10px;color:var(--muted);font-family:var(--sans);">${escHtml(x.nota)}</div>`:''}</td>
+      <td class="num">${pesos(x.proveedores||0)}</td>
+      <td class="num">${pesos(x.cheques||0)}</td>
+      <td class="num">${pesos(x.creditos||0)}</td>
+      <td class="num">${pesos(x.descubierto||0)}</td>
+      <td class="num" style="font-weight:700;color:var(--red);">${pesos(totalFinal(x))}</td>
+      <td class="num">${varHtml(totalFinal(x), ant?totalFinal(ant):null)}</td>
+      <td style="white-space:nowrap;"><button class="btn btn-ghost btn-sm" onclick="editarFinal('${d}')">✎</button> <button class="btn btn-ghost btn-sm" onclick="borrarFinal('${d}')">🗑</button></td>
+    </tr>`;
+  }).join('');
+  tablaEl.innerHTML = `<table>
+    <thead><tr><th>Fecha</th><th class="num">Proveedores</th><th class="num">Cheques</th><th class="num">Créditos banco</th><th class="num">Descubierto</th><th class="num">Total</th><th class="num">Vs. día ant.</th><th></th></tr></thead>
+    <tbody>${filas}</tbody></table>`;
+
+  // Gráfico
+  let fs = fechas;
+  if(finalesRango) { const d = new Date(); d.setDate(d.getDate()-finalesRango+1); const desde = localDateStr(d); fs = fechas.filter(x=>x>=desde); }
+  const ctx = document.getElementById('chartFinales');
+  if(finalesChart) { finalesChart.destroy(); finalesChart = null; }
+  if(!ctx || typeof Chart==='undefined') return;
+  const serie = (label, color, get, extra) => Object.assign({label, data: fs.map(d=>get(state.finales[d])), borderColor:color, backgroundColor:color+'22', borderWidth:2, pointRadius:3, tension:.3, fill:false}, extra||{});
+  finalesChart = new Chart(ctx, {
+    type:'line',
+    data:{
+      labels: fs.map(d=>d.slice(8)+'/'+d.slice(5,7)),
+      datasets:[
+        serie('Total', '#ef4444', totalFinal, {borderWidth:3, fill:true}),
+        serie('Proveedores', '#c5a028', x=>x.proveedores||0),
+        serie('Cheques', '#60a5fa', x=>x.cheques||0),
+        serie('Créditos banco', '#a855f7', x=>x.creditos||0),
+        serie('Descubierto', '#f59e0b', x=>x.descubierto||0),
+      ]
+    },
+    options:{
+      responsive:true, maintainAspectRatio:false,
+      interaction:{mode:'index', intersect:false},
+      plugins:{
+        legend:{labels:{color:'#6b6b7e',font:{size:11}}},
+        tooltip:{callbacks:{label:c=>c.dataset.label+': '+pesos(c.parsed.y)}}
+      },
+      scales:{
+        x:{ticks:{color:'#6b6b7e',font:{size:10}},grid:{color:'#2a2a32'}},
+        y:{ticks:{color:'#6b6b7e',font:{size:10},callback:v=>pesos(v)},grid:{color:'#2a2a32'}}
+      }
+    }
+  });
+}
+
 // ── IMPORTAR CHEQUES DESDE EXCEL ──
 // Formato argentino: punto como separador de miles, coma como decimal
 // (ej: "1.726.878,08"). Sin punto/coma de miles, "65175,9" también entra.
@@ -4020,6 +4246,7 @@ function switchTab(name, el) {
   if(name==='impuestos') renderImpuestos();
   if(name==='cheques') { renderCheques(); renderChequesBorrador(); }
   if(name==='deuda') renderDeuda();
+  if(name==='finales') { cargarFormFinales(); renderFinales(); }
   if(name==='ajustes') renderCajeros();
   if(name==='gastos') { updateConceptosDatalist(); renderBusquedaGastos(); }
 }
@@ -4064,6 +4291,8 @@ async function init() {
   renderChequesBorrador();
   renderDeuda();
   document.getElementById('facFechaIngreso').value = todayStr();
+  document.getElementById('finFecha').value = todayStr();
+  if(snapshotFinalesHoy()) save();
   document.getElementById('chqFechaEmision').value = todayStr();
   document.getElementById('chqbFechaEmision').value = todayStr();
   updateConceptosDatalist();
