@@ -352,6 +352,36 @@ tr:hover td { background:var(--surface2); }
 }
 .ptab.active, .ptab:hover { border-color:var(--gold); color:var(--gold); }
 
+/* ── CHEQUES: versión clara ──
+   Solo la pestaña Cheques usa colores claros. Se redefinen las variables
+   dentro del panel, así todo lo que ya usa var(--…) se aclara solo. Los
+   tonos (dorado, verde, rojo, ámbar) se oscurecen para que se lean sobre blanco. */
+#panel-cheques {
+  --bg: #f4f2ec;
+  --surface: #ffffff;
+  --surface2: #f7f6f2;
+  --border: #dedad0;
+  --gold: #9a7612;
+  --gold-light: #b38a17;
+  --gold-dim: rgba(154,118,18,0.10);
+  --green: #15803d;
+  --green-dim: rgba(21,128,61,0.10);
+  --red: #c62828;
+  --red-dim: rgba(198,40,40,0.08);
+  --yellow: #b45309;
+  --yellow-dim: rgba(180,83,9,0.09);
+  --text: #1c1c24;
+  --muted: #6a6878;
+  background: var(--bg);
+  color: var(--text);
+  color-scheme: light;
+  border-radius: 14px;
+  margin-top: 16px;
+}
+#panel-cheques .btn-gold { color:#fff; }
+#panel-cheques .btn-green:hover, #panel-cheques .btn-red:hover { color:#fff; }
+#panel-cheques .card, #panel-cheques .stat { box-shadow: 0 1px 2px rgba(0,0,0,.05); }
+
 /* ── CAJA HEADER ── */
 .caja-header {
   display:flex;
