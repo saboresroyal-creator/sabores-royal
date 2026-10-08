@@ -951,7 +951,7 @@ tr:hover td { background:var(--surface2); }
      PANEL: FINALES (deuda total día a día)
 ══════════════════════════════════════════ -->
 <div class="panel" id="panel-finales">
-  <p class="hint" style="margin-bottom:16px;">La deuda con proveedores y la de cheques se toman solas de las otras pestañas y quedan guardadas cada día. Créditos del banco y descubierto los cargás vos.</p>
+  <p class="hint" style="margin-bottom:16px;">Proveedores y cheques se toman solos de las otras pestañas, y los créditos del banco de la solapa Bancos de la app; quedan guardados cada día. El descubierto lo cargás vos.</p>
 
   <!-- Resumen del último día -->
   <div id="finalesResumen" class="mb16"></div>
@@ -968,7 +968,7 @@ tr:hover td { background:var(--surface2); }
         </div>
       </div>
       <div>
-        <label>Deuda créditos banco ($)</label>
+        <label>Deuda créditos banco ($) <span id="finCreditosOrigen" style="text-transform:none;letter-spacing:0;"></span></label>
         <input type="number" id="finCreditos" placeholder="0,00" step="0.01" inputmode="decimal">
       </div>
       <div>
@@ -3843,6 +3843,28 @@ let finalesRango = 30;
 let finalesChart = null;
 const r2 = n => Math.round((n||0)*100)/100;
 
+// Saldo pendiente de los préstamos de la solapa "Bancos" de la app
+// (app_settings.bank_loans): suma de las cuotas que no están pagadas.
+let creditosBancoActual = null; // null = todavía no se pudo leer
+async function fetchCreditosBanco() {
+  try {
+    const rows = await cajaFetch('/app_settings?setting_key=eq.bank_loans&select=setting_value');
+    if(!rows || !rows[0]) return;
+    const data = JSON.parse(rows[0].setting_value) || {};
+    creditosBancoActual = r2((data.items||[]).reduce((s,l)=>
+      s + (l.cuotas||[]).filter(c=>c.estado!=='pagado').reduce((t,c)=>t+(+c.monto||0),0), 0));
+  } catch(e) {
+    console.warn('No se pudo leer Bancos:', e);
+  }
+}
+// Al abrir la pestaña: trae el saldo de Bancos al día y lo registra.
+async function refrescarFinales() {
+  await fetchCreditosBanco();
+  if(snapshotFinalesHoy()) save();
+  cargarFormFinales();
+  renderFinales();
+}
+
 function deudaProveedoresActual() { return r2(sumaNeta((state.facturas||[]).filter(f=>f.estado!=='pagada'))); }
 function deudaChequesActual() { return r2((state.cheques||[]).filter(c=>c.estado==='pendiente').reduce((s,c)=>s+c.monto,0)); }
 
@@ -3852,10 +3874,15 @@ function snapshotFinalesHoy() {
   const hoy = todayStr();
   const r = state.finales[hoy] || {};
   const proveedores = deudaProveedoresActual(), cheques = deudaChequesActual();
-  if(r.proveedores === proveedores && r.cheques === cheques) return false;
-  // Los manuales arrancan con lo último cargado, hasta que se corrijan.
-  if(r.creditos === undefined) { const prev = finalAnterior(hoy); r.creditos = prev ? (prev.creditos||0) : 0; r.descubierto = prev ? (prev.descubierto||0) : 0; }
-  state.finales[hoy] = Object.assign(r, {proveedores, cheques});
+  const creditos = creditosBancoActual;
+  if(r.proveedores === proveedores && r.cheques === cheques && (creditos==null || r.creditos === creditos)) return false;
+  // Lo que no se pudo leer solo arranca con lo último cargado, hasta que se corrija.
+  const prev = finalAnterior(hoy);
+  if(r.creditos === undefined) r.creditos = prev ? (prev.creditos||0) : 0;
+  if(r.descubierto === undefined) r.descubierto = prev ? (prev.descubierto||0) : 0;
+  Object.assign(r, {proveedores, cheques});
+  if(creditos!=null) r.creditos = creditos;
+  state.finales[hoy] = r;
   return true;
 }
 function finalAnterior(fecha) {
@@ -3868,7 +3895,12 @@ function cargarFormFinales() {
   const fecha = document.getElementById('finFecha').value || todayStr();
   const r = (state.finales||{})[fecha] || finalAnterior(fecha) || {};
   const propio = !!(state.finales||{})[fecha];
-  document.getElementById('finCreditos').value = r.creditos || '';
+  const esHoyCred = fecha===todayStr() && creditosBancoActual!=null;
+  const inpCred = document.getElementById('finCreditos');
+  inpCred.value = esHoyCred ? creditosBancoActual : (r.creditos || '');
+  inpCred.readOnly = esHoyCred;
+  inpCred.style.opacity = esHoyCred ? '.75' : '';
+  document.getElementById('finCreditosOrigen').textContent = esHoyCred ? '· automático de Bancos' : '';
   document.getElementById('finDescubierto').value = r.descubierto || '';
   document.getElementById('finNota').value = propio ? (r.nota||'') : '';
   const esHoy = fecha===todayStr();
@@ -3888,8 +3920,8 @@ function guardarFinales() {
   const nota = document.getElementById('finNota').value.trim();
   if(!state.finales) state.finales = {};
   const r = state.finales[fecha] || {};
-  if(fecha===todayStr()) { r.proveedores = deudaProveedoresActual(); r.cheques = deudaChequesActual(); }
   state.finales[fecha] = Object.assign(r, {creditos, descubierto, nota});
+  if(fecha===todayStr()) { r.proveedores = deudaProveedoresActual(); r.cheques = deudaChequesActual(); if(creditosBancoActual!=null) r.creditos = creditosBancoActual; }
   save();
   renderFinales();
   cargarFormFinales();
@@ -4293,7 +4325,7 @@ function switchTab(name, el) {
   if(name==='impuestos') renderImpuestos();
   if(name==='cheques') { renderCheques(); renderChequesBorrador(); }
   if(name==='deuda') renderDeuda();
-  if(name==='finales') { cargarFormFinales(); renderFinales(); }
+  if(name==='finales') { cargarFormFinales(); renderFinales(); refrescarFinales(); }
   if(name==='ajustes') renderCajeros();
   if(name==='gastos') { updateConceptosDatalist(); renderBusquedaGastos(); }
 }
@@ -4339,6 +4371,7 @@ async function init() {
   renderDeuda();
   document.getElementById('facFechaIngreso').value = todayStr();
   document.getElementById('finFecha').value = todayStr();
+  await fetchCreditosBanco();
   if(snapshotFinalesHoy()) save();
   document.getElementById('chqFechaEmision').value = todayStr();
   document.getElementById('chqbFechaEmision').value = todayStr();
