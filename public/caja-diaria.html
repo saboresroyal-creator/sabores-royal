@@ -2609,7 +2609,7 @@ function makeLineChart(id, labels, datasets, color) {
       plugins:{legend:{labels:{color:'#6b6b7e',font:{size:11}}}},
       scales:{
         x:{ticks:{color:'#6b6b7e',font:{size:10}},grid:{color:'#2a2a32'}},
-        y:{ticks:{color:'#6b6b7e',font:{size:10},callback:v=>'$'+v.toLocaleString('es-AR')},grid:{color:'#2a2a32'}}
+        y:{ticks:{color:'#6b6b7e',font:{size:10},callback:v=>pesos(v)},grid:{color:'#2a2a32'}}
       }
     }
   });
