@@ -734,6 +734,7 @@ tr:hover td { background:var(--surface2); }
     <button class="ptab" onclick="setChequesFiltro('rechazado',this)">Rechazados</button>
     <button class="ptab" onclick="setChequesFiltro('vencido',this)">Vencidos</button>
   </div>
+  <div id="chequesHastaHoy"></div>
   <div id="chequesDiaFiltroWrap" style="display:none;margin:-10px 0 16px;">
     <button class="btn btn-ghost btn-sm" onclick="chequesCalSeleccionarDia(null)">✕ Ver todos los días — filtrando por <span id="chequesDiaFiltroLabel"></span></button>
   </div>
@@ -2729,6 +2730,7 @@ function updateBadge() {
 let chequesFiltro = 'todos';
 let chequesBusqueda = '';
 let chequesCalDiaSel = null;
+let chequesSoloHastaHoy = false; // ver solo los pendientes que vencen hasta hoy
 const CHEQUE_ALERTA_DIAS = 5;
 (function(){ const n=new Date(); window._chequesCalYear=n.getFullYear(); window._chequesCalMonthIdx=n.getMonth(); })();
 
@@ -3181,14 +3183,16 @@ function renderCheques() {
   const diaLabel = document.getElementById('chequesDiaFiltroLabel');
   if(diaWrap) diaWrap.style.display = chequesCalDiaSel ? 'block' : 'none';
   if(diaLabel && chequesCalDiaSel) diaLabel.textContent = chequesCalDiaSel.slice(8)+'/'+chequesCalDiaSel.slice(5,7)+'/'+chequesCalDiaSel.slice(0,4);
+  renderChequesHastaHoy();
   const container = document.getElementById('chequesList');
   if(!container) return;
   let list = state.cheques;
+  if(chequesSoloHastaHoy) list = list.filter(c=>c.estado==='pendiente' && c.fechaPago<=todayStr());
   if(chequesFiltro !== 'todos') list = list.filter(c=>c.estado===chequesFiltro);
   if(chequesCalDiaSel) list = list.filter(c=>c.fechaPago===chequesCalDiaSel);
   if(chequesBusqueda) list = list.filter(c=>(c.numero||'').toLowerCase().includes(chequesBusqueda));
   if(!list.length) {
-    const hayFiltro = chequesFiltro!=='todos' || chequesCalDiaSel || chequesBusqueda;
+    const hayFiltro = chequesFiltro!=='todos' || chequesCalDiaSel || chequesBusqueda || chequesSoloHastaHoy;
     container.innerHTML = `<div class="card" style="text-align:center;color:var(--muted);padding:40px;">No hay cheques${hayFiltro?' para este filtro':' cargados'}${chequesBusqueda?` (buscando N° "${chequesBusqueda}")`:''}.</div>`;
     updateChequesBadge();
     return;
@@ -3223,6 +3227,27 @@ function renderCheques() {
     </div>`;
   }).join('')}</div>`;
   updateChequesBadge();
+}
+
+// Total de cheques pendientes (sin cobrar) con vencimiento hasta hoy inclusive.
+function renderChequesHastaHoy() {
+  const el = document.getElementById('chequesHastaHoy');
+  if(!el) return;
+  const hoy = todayStr();
+  const lista = state.cheques.filter(c=>c.estado==='pendiente' && c.fechaPago && c.fechaPago<=hoy);
+  const total = lista.reduce((s,c)=>s+c.monto,0);
+  const deHoy = lista.filter(c=>c.fechaPago===hoy);
+  el.innerHTML = `<div class="card mb16" onclick="toggleChequesHastaHoy()" style="cursor:pointer;display:flex;align-items:center;justify-content:space-between;flex-wrap:wrap;gap:8px;padding:14px 18px;${chequesSoloHastaHoy?'border-color:var(--gold);':''}" title="Tocá para ver solo estos cheques">
+    <div>
+      <div style="font-size:11px;letter-spacing:1px;text-transform:uppercase;color:var(--muted);">Sin cobrar con vencimiento hasta hoy (${fmtFecha(hoy)})</div>
+      <div style="font-size:12px;color:var(--muted);margin-top:4px;">${lista.length} cheque(s)${deHoy.length?` · ${deHoy.length} vencen hoy (${pesos(deHoy.reduce((s,c)=>s+c.monto,0))})`:''} · ${chequesSoloHastaHoy?'<b style="color:var(--gold)">mostrando solo estos — tocá para ver todos</b>':'tocá para ver solo estos'}</div>
+    </div>
+    <div style="font-family:var(--mono);font-size:22px;font-weight:600;color:${lista.length?'var(--red)':'var(--green)'};">${pesos(total)}</div>
+  </div>`;
+}
+function toggleChequesHastaHoy() {
+  chequesSoloHastaHoy = !chequesSoloHastaHoy;
+  renderCheques();
 }
 
 function setChequeEstado(id, estado) {
