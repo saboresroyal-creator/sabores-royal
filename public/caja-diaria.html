@@ -3024,6 +3024,7 @@ function renderChequesBorrador() {
   if(badge) badge.textContent = state.chequesBorrador.length ? ` (${state.chequesBorrador.length})` : '';
   updateChequesProveedoresDatalist();
   renderSumaBorrador();
+  renderChequesResumen();
   if(!resumenEl || !listEl) return;
   const total = state.chequesBorrador.reduce((s,c)=>s+c.monto,0);
   resumenEl.innerHTML = `
@@ -3104,8 +3105,14 @@ function renderChequesResumen() {
   const rechazados = state.cheques.filter(c=>c.estado==='rechazado').length;
   const vencidos = state.cheques.filter(c=>c.estado==='vencido').length;
   const cobrados = state.cheques.filter(c=>c.estado==='cobrado').length;
+  const borrador = state.chequesBorrador||[];
+  const totalBorrador = borrador.reduce((s,c)=>s+c.monto,0);
   el.innerHTML = `
     <div class="stat"><div class="stat-label">Pendiente total</div><div class="stat-value gold">${pesos(totalPendiente)}</div><div style="font-size:11px;color:var(--muted);margin-top:4px">${pendientes.length} cheque(s)</div></div>
+    <div class="stat" style="border-style:dashed;cursor:pointer;" onclick="setChequesVista('borrador', document.querySelectorAll('#chequesVistaTabs .ptab')[1])" title="Ver el borrador">
+      <div class="stat-label">📝 En borrador</div><div class="stat-value gold">${pesos(totalBorrador)}</div>
+      <div style="font-size:11px;color:var(--muted);margin-top:4px">${borrador.length} cheque(s)${borrador.length?`<br>Pendiente + borrador: <b style="color:var(--text)">${pesos(totalPendiente+totalBorrador)}</b>`:''}</div>
+    </div>
     <div class="stat"><div class="stat-label">Próximos ${CHEQUE_ALERTA_DIAS} días</div><div class="stat-value" style="color:${proximos.length?'var(--yellow)':'var(--text)'}">${pesos(totalProximos)}</div><div style="font-size:11px;color:var(--muted);margin-top:4px">${proximos.length} cheque(s)</div></div>
     <div class="stat"><div class="stat-label">Rechazados</div><div class="stat-value" style="color:${rechazados?'var(--red)':'var(--text)'}">${rechazados}</div></div>
     <div class="stat"><div class="stat-label">Vencidos (no sirven)</div><div class="stat-value" style="color:${vencidos?'var(--red)':'var(--text)'}">${vencidos}</div></div>
