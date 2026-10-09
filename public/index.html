@@ -5266,15 +5266,18 @@ async function cmpDiagFix(provId){
 function cmpHtmlComparar(){
   const noData=!cmpDB.listas.length;
   if(!noData) setTimeout(cmpRenderDiag,50);
+  // Al volver de otra pestaña (ej. Pedidos, después de agregar algo al
+  // pedido) se repite la última búsqueda en vez de arrancar en blanco.
+  if(!noData&&_cmpLastQ.length>=2) setTimeout(cmpDoSearch,0);
   return `<div id="cmp-diag" style="padding-top:10px;"></div>
   <div class="cmp-search-wrap">
-    <input id="cmp-q" placeholder="Buscar producto..." oninput="cmpSearch()" autocomplete="off">
+    <input id="cmp-q" placeholder="Buscar producto..." value="${cmpEsc(_cmpLastQ)}" oninput="_cmpLastQ=this.value;cmpSearch()" autocomplete="off">
   </div>
   ${noData?`<div style="padding:40px 20px;text-align:center;color:rgba(255,255,255,0.4);">Importá listas de precios primero en <b>Importar</b>.</div>`:`<div style="padding:0 16px 8px;font-size:12px;color:rgba(255,255,255,0.35);">Escribí al menos 2 letras para buscar</div>`}
   <div id="cmp-results"></div>`;
 }
 
-let _cmpSt, _cmpSearchGen=0;
+let _cmpSt, _cmpSearchGen=0, _cmpLastQ='';
 function cmpSearch(){ clearTimeout(_cmpSt); _cmpSt=setTimeout(cmpDoSearch,220); }
 function cmpDoSearch(){
   const el=document.getElementById('cmp-results'); if(!el) return;
