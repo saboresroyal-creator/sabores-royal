@@ -4304,6 +4304,15 @@ function cmpHtmlProveedores(){
       <button class="btn-primary" style="font-size:12px;padding:6px 12px;" onclick="cmpModalProv(null)">+ Nuevo</button>
     </div>
   </div>`;
+  if(cmpDB.listas.filter(l=>l.rows.length).length>=2){
+    h+=`<div style="margin:0 16px 12px;background:var(--glass);border:1px solid var(--glass-bd);border-radius:14px;padding:14px;display:flex;align-items:center;gap:12px;">
+      <div style="flex:1;">
+        <div style="font-weight:700;">Asociar productos con IA</div>
+        <div style="font-size:12px;color:rgba(255,255,255,0.45);margin-top:2px;">Para que el comparador sepa qué producto de un proveedor es el mismo en otro (entiende marcas y abreviaturas).</div>
+      </div>
+      <button class="btn-primary" style="font-size:12px;padding:6px 12px;flex:none;" onclick="cmpAiMatchModal()">${ic('sparkle')} Asociar</button>
+    </div>`;
+  }
   if(!cmpDB.proveedores.length){
     h+=`<div style="padding:40px 20px;text-align:center;color:rgba(255,255,255,0.4);">No hay proveedores.<br>Toca <b>+ Nuevo</b> para agregar.</div>`;
   } else {
@@ -5472,6 +5481,202 @@ async function cmpRejectMatch(i){
     toast('Error: '+e.message,'err');
   }
   cmpDoSearch();
+}
+// ── ASOCIAR CON IA ──────────────────────────────────────
+// El matching por texto no distingue marcas ("Dulce Batata Lc" =
+// La Campagnola vs "NOEL DULCE BATATA") ni entiende abreviaturas ("Bom Bob"
+// = Bon o Bon). Para un par de proveedores: por cada producto de la lista
+// más chica se buscan acá (gratis) los 5 candidatos más parecidos de la
+// otra, y la IA (api/comparador-match.js) elige cuál es el mismo o
+// ninguno. Lo que elige queda como vínculo (cmp_links, igual que el 🔗) y
+// lo que descarta como rechazo (mapping.rejects) para que el matching
+// automático no lo vuelva a juntar. Los productos ya revisados se anotan en
+// mapping.aiDone del proveedor para no pagar dos veces por lo mismo.
+let _cmpAiMatchStop=false;
+function cmpAiMatchModal(){
+  const provs=cmpDB.proveedores.filter(p=>cmpCountProds(p.id)>0);
+  const opts=sel=>provs.map(p=>`<option value="${cmpEsc(p.id)}"${p.id===sel?' selected':''}>${cmpEsc(p.name)} (${cmpCountProds(p.id)})</option>`).join('');
+  cmpOpenModal(`<div class="cmp-modal-title">Asociar productos con IA</div>
+    <p style="color:rgba(255,255,255,0.55);font-size:13px;margin-bottom:12px;">Elegí dos proveedores. La IA revisa cada producto de la lista más chica contra la otra y deja asociados los que son el mismo (misma marca, sabor y tamaño).</p>
+    <div class="cmp-field"><label>Proveedor</label><select class="cmp-inp" id="cmp-aim-a" onchange="cmpAiMatchEstimate()">${opts(provs[0]&&provs[0].id)}</select></div>
+    <div class="cmp-field"><label>Contra</label><select class="cmp-inp" id="cmp-aim-b" onchange="cmpAiMatchEstimate()">${opts(provs[1]&&provs[1].id)}</select></div>
+    <div id="cmp-aim-info" class="cmp-note" style="margin-bottom:12px;"></div>
+    <div style="display:flex;gap:10px;">
+      <button class="btn-secondary" style="flex:1;" onclick="_cmpAiMatchStop=true;cmpCloseModal()">Cerrar</button>
+      <button class="btn-primary" style="flex:1;" id="cmp-aim-go" onclick="cmpAiMatchRun()">Empezar</button>
+    </div>`);
+  cmpAiMatchEstimate();
+}
+function cmpAiMatchSides(){
+  const a=(document.getElementById('cmp-aim-a')||{}).value, b=(document.getElementById('cmp-aim-b')||{}).value;
+  if(!a||!b||a===b) return null;
+  const la=cmpDB.listas.find(l=>l.provId===a), lb=cmpDB.listas.find(l=>l.provId===b);
+  if(!la||!lb) return null;
+  // Se recorre la lista más chica (menos llamadas) contra la más grande.
+  return la.rows.length<=lb.rows.length?{src:la,dst:lb}:{src:lb,dst:la};
+}
+function cmpAiDoneSet(srcProvId,dstProvId){
+  const p=cmpDB.proveedores.find(x=>x.id===srcProvId);
+  return new Set((p&&p.mapping&&p.mapping.aiDone&&p.mapping.aiDone[dstProvId])||[]);
+}
+function cmpLinkedPair(provA,normA,provB){
+  const l=(cmpDB.links||[]).find(x=>x.provId===provA&&x.norm===normA);
+  return !!(l&&(cmpDB.links||[]).some(x=>x.groupId===l.groupId&&x.provId===provB));
+}
+function cmpAiMatchPending(s){
+  const done=cmpAiDoneSet(s.src.provId,s.dst.provId);
+  return s.src.rows.filter(r=>!done.has(r.norm)&&!cmpLinkedPair(s.src.provId,r.norm,s.dst.provId));
+}
+function cmpAiMatchEstimate(){
+  const el=document.getElementById('cmp-aim-info'); if(!el) return;
+  const s=cmpAiMatchSides();
+  const btn=document.getElementById('cmp-aim-go');
+  if(!s){ el.innerHTML='Elegí dos proveedores distintos.'; if(btn) btn.disabled=true; return; }
+  const n=cmpAiMatchPending(s).length;
+  if(btn) btn.disabled=!n;
+  el.innerHTML=n
+    ?`Hay <b>${n}</b> producto(s) para revisar. Tiene costo de IA: aprox. US$ 1 a 2 cada 1.000 productos. Lo ya revisado no se vuelve a cobrar.`
+    :'Ya está todo revisado entre estos dos proveedores. Cuando importes una lista nueva, se revisan solo los productos nuevos.';
+}
+// Índice por prefijo de palabra (3 letras) de la lista destino, para no
+// comparar cada producto contra miles de filas.
+function cmpBuildTokIndex(rows){
+  const idx=new Map();
+  rows.forEach((r,i)=>{ cmpRowTokens(r).forEach(t=>{ const k=t.slice(0,3); if(!idx.has(k)) idx.set(k,[]); idx.get(k).push(i); }); });
+  return idx;
+}
+function cmpAiCandidates(row,dstRows,idx,rejected,srcProvId,dstProvId){
+  const ta=cmpRowTokens(row); if(!ta.length) return [];
+  const pool=new Set();
+  ta.forEach(t=>{ const b=idx.get(t.slice(0,3)); if(b&&b.length<4000) b.forEach(i=>pool.add(i)); });
+  const sizeA=cmpRowSize(row);
+  const scored=[];
+  pool.forEach(i=>{
+    const r2=dstRows[i];
+    if(rejected.has(cmpRejId(srcProvId,row.norm,dstProvId,r2.norm))) return;
+    const sizeB=cmpRowSize(r2);
+    if(sizeA!==null&&sizeB!==null&&Math.abs(sizeA-sizeB)/Math.max(sizeA,sizeB)>0.08) return;
+    const tb=cmpRowTokens(r2); if(!tb.length) return;
+    let m=0; ta.forEach(w=>{ let best=0; tb.forEach(v=>{ const s=cmpTokSim(w,v); if(s>best) best=s; }); if(best>=0.75) m+=best; });
+    if(!m) return;
+    scored.push({r:r2,sc:m/Math.min(ta.length,tb.length)+m/Math.max(ta.length,tb.length)+(sizeA!==null&&sizeB!==null?0.3:0)});
+  });
+  scored.sort((x,y)=>y.sc-x.sc);
+  return scored.slice(0,5).map(x=>x.r);
+}
+async function cmpAiMatchRun(){
+  const s=cmpAiMatchSides(); if(!s) return;
+  _cmpAiMatchStop=false;
+  const srcProv=cmpDB.proveedores.find(p=>p.id===s.src.provId), dstProv=cmpDB.proveedores.find(p=>p.id===s.dst.provId);
+  const pending=cmpAiMatchPending(s);
+  const el=document.getElementById('cmp-aim-info');
+  const btn=document.getElementById('cmp-aim-go'); if(btn) btn.disabled=true;
+  if(el) el.innerHTML='Buscando candidatos&hellip;';
+  await new Promise(r=>setTimeout(r,30));
+  const idx=cmpBuildTokIndex(s.dst.rows);
+  const rejected=cmpRejectedSet();
+  const work=[];
+  const doneNow=[];
+  pending.forEach(r=>{
+    const cands=cmpAiCandidates(r,s.dst.rows,idx,rejected,s.src.provId,s.dst.provId);
+    if(cands.length) work.push({row:r,cands}); else doneNow.push(r.norm);
+  });
+  let matched=0,none=0,processed=0,failed=0;
+  const newLinks=[], newRejects=[];
+  const progress=()=>{ if(el) el.innerHTML=`Revisando con IA: <b>${processed}</b> de ${work.length}&hellip; &middot; asociados <b style="color:var(--ok)">${matched}</b> &middot; sin pareja ${none}${failed?` &middot; <span style="color:var(--warn)">${failed} con error</span>`:''}`; };
+  progress();
+  const BATCH=25;
+  const batches=[]; for(let i=0;i<work.length;i+=BATCH) batches.push(work.slice(i,i+BATCH));
+  let next=0;
+  const applyResult=(w,pick)=>{
+    if(pick>=0){
+      const r2=w.cands[pick];
+      if(cmpAiLinkPair(s.src.provId,w.row,s.dst.provId,r2,newLinks)) matched++; else none++;
+    } else {
+      none++;
+      // Lo que el matching automático juntaría por texto queda rechazado.
+      w.cands.forEach(r2=>{ if(cmpProdSimRows(w.row,r2)>=0.7) newRejects.push([s.src.provId,w.row.norm,s.dst.provId,r2.norm]); });
+    }
+    doneNow.push(w.row.norm);
+  };
+  const worker=async()=>{
+    while(next<batches.length&&!_cmpAiMatchStop){
+      const batch=batches[next++];
+      const items=batch.map((w,i)=>({id:String(i),name:w.row.name,provA:srcProv.name,provB:dstProv.name,cands:w.cands.map(c=>c.name)}));
+      let results=null;
+      for(let attempt=0;attempt<2&&!results;attempt++){
+        try{
+          const res=await fetch('/api/comparador-match',{
+            method:'POST',
+            headers:{'Content-Type':'application/json','Authorization':'Bearer '+((adminSession&&adminSession.access_token)||'')},
+            body:JSON.stringify({items})
+          });
+          const data=await res.json().catch(()=>({}));
+          if(!res.ok) throw new Error(data.error||('Error '+res.status));
+          results=data.results||[];
+        }catch(e){ if(attempt===1){ failed+=batch.length; console.warn('comparador-match',e); } }
+      }
+      if(results){
+        const byId={}; results.forEach(r=>{ byId[r.id]=r.match; });
+        batch.forEach((w,i)=>applyResult(w,byId[String(i)]!==undefined?byId[String(i)]:-1));
+      }
+      processed+=batch.length;
+      progress();
+    }
+  };
+  await Promise.all(Array.from({length:Math.min(3,batches.length)},worker));
+  if(el) el.innerHTML+=`<br>Guardando&hellip;`;
+  try{
+    await cmpAiMatchSave(s.src.provId,s.dst.provId,doneNow,newLinks,newRejects);
+    if(el) el.innerHTML=`Listo${_cmpAiMatchStop?' (cortado a mitad)':''}: <b style="color:var(--ok)">${matched} asociados</b>, ${none} sin pareja en ${cmpEsc(dstProv.name)}${failed?`, <span style="color:var(--warn)">${failed} no se pudieron revisar (volvé a tocar Empezar para reintentar)</span>`:''}.`;
+  }catch(e){
+    if(el) el.innerHTML=`<span style="color:var(--danger)">Error guardando: ${cmpEsc(e.message)}</span>`;
+  }
+  if(btn){ btn.disabled=false; btn.textContent='Revisar de nuevo'; }
+}
+// Agrega a newLinks el vínculo entre las dos filas, reusando el grupo si
+// alguna ya pertenece a uno. No pisa vínculos existentes: si las dos ya
+// están en grupos distintos, o el grupo ya tiene otra fila del mismo
+// proveedor, no se toca.
+function cmpAiLinkPair(provA,rowA,provB,rowB,newLinks){
+  const all=(cmpDB.links||[]);
+  const la=all.find(l=>l.provId===provA&&l.norm===rowA.norm);
+  const lb=all.find(l=>l.provId===provB&&l.norm===rowB.norm);
+  if(la&&lb) return la.groupId===lb.groupId;
+  const groupId=(la||lb)?(la||lb).groupId:cmpLinkId();
+  const members=all.filter(l=>l.groupId===groupId);
+  if(!la&&members.some(m=>m.provId===provA)) return false;
+  if(!lb&&members.some(m=>m.provId===provB)) return false;
+  const add=[];
+  if(!la) add.push({id:cmpLinkId(),groupId,provId:provA,norm:rowA.norm,name:rowA.name});
+  if(!lb) add.push({id:cmpLinkId(),groupId,provId:provB,norm:rowB.norm,name:rowB.name});
+  cmpDB.links=all.concat(add);
+  newLinks.push(...add);
+  return true;
+}
+async function cmpAiMatchSave(srcProvId,dstProvId,doneNorms,newLinks,newRejects){
+  if(newLinks.length){
+    for(let i=0;i<newLinks.length;i+=500){
+      await cmpFetch('/cmp_links','POST',newLinks.slice(i,i+500).map(l=>({id:l.id,group_id:l.groupId,prov_id:l.provId,norm:l.norm,name:l.name})),'resolution=merge-duplicates');
+    }
+  }
+  const touched=new Map();
+  const getProv=id=>{ if(!touched.has(id)){ const p=cmpDB.proveedores.find(x=>x.id===id); if(p){ p.mapping=Object.assign({},p.mapping); touched.set(id,p); } } return touched.get(id); };
+  newRejects.forEach(([pA,nA,pB,nB])=>{
+    const [cA,cnA,cB,cnB]=cmpRejOrder(pA,nA,pB,nB);
+    const p=getProv(cA); if(!p) return;
+    const key=cnA+'|'+cB+'|'+cnB;
+    const arr=(p.mapping.rejects||[]).slice();
+    if(!arr.includes(key)) arr.push(key);
+    p.mapping.rejects=arr;
+  });
+  const src=getProv(srcProvId);
+  if(src){
+    const aiDone=Object.assign({},src.mapping.aiDone);
+    aiDone[dstProvId]=[...new Set((aiDone[dstProvId]||[]).concat(doneNorms))];
+    src.mapping.aiDone=aiDone;
+  }
+  await Promise.all([...touched.values()].map(cmpSaveProvSupa));
 }
 async function cmpUnlinkRow(provId,norm){
   const link=(cmpDB.links||[]).find(l=>l.provId===provId&&l.norm===norm);
