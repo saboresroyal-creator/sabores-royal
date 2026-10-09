@@ -4305,6 +4305,8 @@ function cmpHtmlProveedores(){
     </div>
   </div>`;
   if(cmpDB.listas.filter(l=>l.rows.length).length>=2){
+    setTimeout(cmpRenderDiag,50);
+    h+=`<div id="cmp-diag"></div>`;
     h+=`<div style="margin:0 16px 12px;background:var(--glass);border:1px solid var(--glass-bd);border-radius:14px;padding:14px;display:flex;align-items:center;gap:12px;">
       <div style="flex:1;">
         <div style="font-weight:700;">Asociar productos con IA</div>
@@ -4674,7 +4676,7 @@ function cmpGuessMap(rows,perUnit){
     if(/producto|descrip|denomin|art[ií]culo|detalle|nombre/i.test(lab(c))) score*=1.5;
     if(score>bestName){ bestName=score; name=c; }
   }
-  const NOT_PRICE=/c[oó]d|sku|ean|barra|uxb|uxd|bxp|u\.?x\.?[bd]|unidades|cant|camada|peso|desc|%|novedad/i;
+  const NOT_PRICE=/c[oó]d|sku|ean|barra|uxb|uxd|bxp|u\.?x\.?[bd]|unidades|cant|camada|peso|\bkgs?\b|kilos|desc|%|novedad/i;
   const kwScore=c=>/final/i.test(lab(c))?4:/neto|neta/i.test(lab(c))?3:/precio|costo|importe|pxb/i.test(lab(c))?2:/lista/i.test(lab(c))?1:0;
   const cand=[];
   for(let c=0;c<nCols;c++){
@@ -4700,7 +4702,7 @@ function cmpGuessMap(rows,perUnit){
     // Si hay precio por unidad y por bulto (ej. Tyna: "NETO UNIDAD" /
     // "NETO BULTO"), se elige según cómo está configurado el proveedor.
     const pref=pool.filter(c=>perUnit?/unid|unit|x ?u\b/i.test(lab(c)):/bulto|pxb|caja/i.test(lab(c)));
-    if(pref.length) pool=pref;
+    if(top>0&&pref.length) pool=pref;
     price=top>0?pool[0]:pool[pool.length-1];
   }
   // Columna de uds por bulto: por encabezado, y solo si de verdad trae
@@ -4799,7 +4801,14 @@ function cmpRowItem(r,map){
 // celda no tiene pinta de código de barras.
 function cmpCellEan(v){
   const d=String(v==null?'':(typeof v==='number'?Math.round(v):v)).replace(/\s/g,'');
-  if(!/^\d{8,14}$/.test(d)) return '';
+  // Solo largos de código de barras reales (EAN-8, UPC-12, EAN-13, DUN-14)
+  // y con dígito verificador válido: un código interno de 10 dígitos (ej.
+  // Tyna "1020120748") no es un EAN y podría coincidir de casualidad con
+  // el de otro proveedor.
+  if(!/^(\d{8}|\d{12,14})$/.test(d)) return '';
+  let sum=0;
+  for(let i=d.length-2,w=3;i>=0;i--,w=4-w) sum+=parseInt(d[i],10)*w;
+  if((10-sum%10)%10!==parseInt(d[d.length-1],10)) return '';
   const t=d.replace(/^0+/,'');
   return t.length>=8?t:'';
 }
@@ -5148,9 +5157,117 @@ async function cmpDoAiImport(){
 }
 
 // ── COMPARAR ────────────────────────────────────────────
+// ── DIAGNÓSTICO DE PRECIOS ──────────────────────────────
+// Detecta proveedores configurados al revés (precio por unidad vs por
+// bulto): se toman productos que son el mismo en dos proveedores (vínculos
+// + coincidencias por texto muy seguras) y se mira cuánto da la relación
+// de precios por unidad. Si con la configuración actual da sistemáticamente
+// ~N veces distinto y con la otra interpretación da parejo, la
+// configuración está al revés (ej. Cuneo: la lista trae el precio por
+// estuche pero estaba como "por bulto", y el comparador lo dividía por 12).
+let _cmpDiag={key:'',res:null,running:false};
+function cmpDiagKey(){
+  return cmpDB.proveedores.map(p=>p.id+':'+(p.mapping&&p.mapping.pricePerUnit?1:0)).join(',')
+    +'|'+cmpDB.listas.map(l=>l.provId+':'+l.at+':'+l.rows.length).join(',')
+    +'|'+(cmpDB.links||[]).length;
+}
+function cmpProvUPrice(row,prov,flip){
+  const perU=!!(prov.mapping&&prov.mapping.pricePerUnit)!==!!flip;
+  return perU?row.price:row.price/(row.unitQty||1);
+}
+function cmpMedian(a){ if(!a.length) return null; const s=a.slice().sort((x,y)=>x-y); return s[Math.floor(s.length/2)]; }
+async function cmpRunDiag(){
+  const key=cmpDiagKey();
+  if(_cmpDiag.key===key&&_cmpDiag.res) return _cmpDiag.res;
+  if(_cmpDiag.running) return null;
+  _cmpDiag.running=true;
+  try{
+    const provs=cmpDB.proveedores.filter(p=>cmpCountProds(p.id)>0);
+    const lists={}; cmpDB.listas.forEach(l=>{ lists[l.provId]=l.rows; });
+    const pairs={}; // "p|o" -> [[rowP,rowO]]
+    const add=(p,o,ra,rb)=>{ const k=p+'|'+o; (pairs[k]=pairs[k]||[]).push([ra,rb]); };
+    const rowBy={};
+    provs.forEach(p=>{ const m=new Map(); (lists[p.id]||[]).forEach(r=>{ if(!m.has(r.norm)) m.set(r.norm,r); }); rowBy[p.id]=m; });
+    const byGroup={};
+    (cmpDB.links||[]).forEach(l=>{ (byGroup[l.groupId]=byGroup[l.groupId]||[]).push(l); });
+    Object.values(byGroup).forEach(ms=>ms.forEach(a=>ms.forEach(b=>{
+      if(a.provId===b.provId) return;
+      const ra=rowBy[a.provId]&&rowBy[a.provId].get(a.norm), rb=rowBy[b.provId]&&rowBy[b.provId].get(b.norm);
+      if(ra&&rb) add(a.provId,b.provId,ra,rb);
+    })));
+    // Coincidencias por texto muy seguras (mismo tamaño y nombre casi
+    // igual), sobre una muestra de productos con bulto > 1.
+    const idx={};
+    for(const p of provs){
+      const sample=(lists[p.id]||[]).filter(r=>(r.unitQty||1)>1);
+      const step=Math.max(1,Math.floor(sample.length/60));
+      for(const o of provs){
+        if(o.id===p.id||(pairs[p.id+'|'+o.id]||[]).length>=15) continue;
+        if(!idx[o.id]) idx[o.id]=cmpBuildTokIndex(lists[o.id]||[]);
+        for(let i=0;i<sample.length;i+=step){
+          const r=sample[i];
+          const c=cmpAiCandidates(r,lists[o.id],idx[o.id],new Set(),p.id,o.id)[0];
+          if(c&&cmpRowSize(r)!==null&&cmpRowSize(c)!==null&&cmpProdSimRows(r,c)>=0.85) add(p.id,o.id,r,c);
+        }
+        await new Promise(res=>setTimeout(res,0));
+      }
+    }
+    const res=[];
+    provs.forEach(p=>{
+      let nFix=0,nAgree=0; const evid=[];
+      provs.forEach(o=>{
+        if(o.id===p.id) return;
+        const ps=(pairs[p.id+'|'+o.id]||[]).filter(([ra])=>(ra.unitQty||1)>1);
+        if(ps.length<5) return;
+        const cur=cmpMedian(ps.map(([ra,rb])=>cmpProvUPrice(ra,p)/cmpProvUPrice(rb,o)));
+        const alt=cmpMedian(ps.map(([ra,rb])=>cmpProvUPrice(ra,p,true)/cmpProvUPrice(rb,o)));
+        const ok=x=>x>=0.6&&x<=1.6;
+        if(ok(cur)) nAgree++;
+        else if(ok(alt)){ nFix++; evid.push({o,n:ps.length,cur,examples:ps.slice(0,3)}); }
+      });
+      if(nFix>0&&nFix>nAgree) res.push({prov:p,evid});
+    });
+    _cmpDiag={key,res,running:false};
+    return res;
+  }catch(e){
+    console.warn('diagnóstico comparador',e);
+    _cmpDiag.running=false;
+    return null;
+  }
+}
+async function cmpRenderDiag(){
+  const el=document.getElementById('cmp-diag'); if(!el) return;
+  const res=await cmpRunDiag();
+  const el2=document.getElementById('cmp-diag'); if(!el2||!res) return;
+  el2.innerHTML=res.map(d=>{
+    const perU=!!(d.prov.mapping&&d.prov.mapping.pricePerUnit);
+    const e=d.evid[0];
+    const factor=e.cur<1?1/e.cur:e.cur;
+    const ex=e.examples.map(([ra,rb])=>`<div>&middot; ${cmpEsc(ra.name)}: ${cmpMoney(ra.price)} &rarr; ${cmpEsc(e.o.name)}: ${cmpEsc(rb.name)} ${cmpMoney(rb.price)}</div>`).join('');
+    return `<div class="cmp-note" style="margin:0 16px 10px;border-color:var(--warn);">
+      <div>&#9888; <b>${cmpEsc(d.prov.name)}</b>: sus precios por unidad dan unas <b>${Math.round(factor)} veces ${e.cur<1?'más baratos':'más caros'}</b> que en ${d.evid.map(x=>cmpEsc(x.o.name)).join(', ')} (en ${e.n} productos iguales). Parece que la lista trae el precio <b>${perU?'por bulto':'por unidad'}</b>, pero el proveedor está configurado <b>${perU?'por unidad':'por bulto'}</b>.</div>
+      <details style="margin-top:6px;font-size:11px;color:rgba(255,255,255,0.5);"><summary style="cursor:pointer;">Ver ejemplos</summary>${ex}</details>
+      <button class="btn-primary" style="margin-top:8px;font-size:12px;padding:6px 12px;" onclick="cmpDiagFix('${cmpEsc(d.prov.id)}')">Corregir: precio ${perU?'por bulto':'por unidad'}</button>
+    </div>`;
+  }).join('');
+}
+async function cmpDiagFix(provId){
+  const prov=cmpDB.proveedores.find(p=>p.id===provId); if(!prov) return;
+  const prev=prov.mapping;
+  prov.mapping=Object.assign({},prev,{pricePerUnit:!(prev&&prev.pricePerUnit)});
+  try{
+    await cmpSaveProvSupa(prov);
+    toast(prov.name+': corregido');
+  }catch(e){ prov.mapping=prev; toast('Error: '+e.message,'err'); return; }
+  render();
+  setTimeout(()=>{ const q=document.getElementById('cmp-q'); if(q&&q.value) cmpDoSearch(); },0);
+}
+
 function cmpHtmlComparar(){
   const noData=!cmpDB.listas.length;
-  return `<div class="cmp-search-wrap">
+  if(!noData) setTimeout(cmpRenderDiag,50);
+  return `<div id="cmp-diag" style="padding-top:10px;"></div>
+  <div class="cmp-search-wrap">
     <input id="cmp-q" placeholder="Buscar producto..." oninput="cmpSearch()" autocomplete="off">
   </div>
   ${noData?`<div style="padding:40px 20px;text-align:center;color:rgba(255,255,255,0.4);">Importá listas de precios primero en <b>Importar</b>.</div>`:`<div style="padding:0 16px 8px;font-size:12px;color:rgba(255,255,255,0.35);">Escribí al menos 2 letras para buscar</div>`}
@@ -5330,9 +5447,22 @@ function cmpRenderResults(el,groups,provs,SHOW_MAX){
         provQtys[pl.prov.id]={qty:r.unitQty||1, pricePerUnit};
       }
     });
-    const unitPrices=[];
-    provs.forEach(pl=>{ if(g.byProv[pl.prov.id]){ const r=g.byProv[pl.prov.id].row; const qInfo=provQtys[pl.prov.id]; unitPrices.push(qInfo.pricePerUnit?r.price:r.price/qInfo.qty); } });
-    const minU=unitPrices.length?Math.min(...unitPrices):null;
+    const unitPrices=[], uByProv={};
+    provs.forEach(pl=>{ if(g.byProv[pl.prov.id]){ const r=g.byProv[pl.prov.id].row; const qInfo=provQtys[pl.prov.id]; const u=qInfo.pricePerUnit?r.price:r.price/qInfo.qty; unitPrices.push(u); uByProv[pl.prov.id]=u; } });
+    // Un precio por unidad 3 veces más alto o más bajo que la mediana de
+    // los demás casi nunca es una oferta real: suele ser un proveedor
+    // configurado al revés (por unidad vs por bulto) o una presentación
+    // distinta. Se marca con ⚠ y no compite por "mejor precio".
+    const outlier={};
+    Object.keys(uByProv).forEach(pid=>{
+      const others=Object.keys(uByProv).filter(k=>k!==pid).map(k=>uByProv[k]).sort((a,b)=>a-b);
+      if(!others.length) return;
+      const med=others[Math.floor(others.length/2)];
+      const u=uByProv[pid];
+      if(med>0&&u>0&&(u/med>3||med/u>3)) outlier[pid]=u<med?'low':'high';
+    });
+    const fair=Object.keys(uByProv).filter(k=>!outlier[k]).map(k=>uByProv[k]);
+    const minU=fair.length?Math.min(...fair):null;
     const hasBulto=provs.some(pl=>g.byProv[pl.prov.id]&&provQtys[pl.prov.id]&&provQtys[pl.prov.id].qty>1);
     html+=`<tr><td>${cmpEsc(g.name)}</td>`;
     provs.forEach(pl=>{
@@ -5344,8 +5474,9 @@ function cmpRenderResults(el,groups,provs,SHOW_MAX){
       }
       const r=entry.row;
       const qInfo=provQtys[pl.prov.id],qty=qInfo.qty,uPrice=qInfo.pricePerUnit?r.price:r.price/qty;
-      const isBest=minU!==null&&Math.abs(uPrice-minU)<0.01&&unitPrices.length>1;
-      const diffPct=(minU&&uPrice>minU)?Math.round((uPrice-minU)/minU*100):0;
+      const isOut=outlier[pl.prov.id];
+      const isBest=!isOut&&minU!==null&&Math.abs(uPrice-minU)<0.01&&fair.length>1;
+      const diffPct=(!isOut&&minU&&uPrice>minU)?Math.round((uPrice-minU)/minU*100):0;
       const rowIdx=_cmpRowIdx.push({provId:pl.prov.id,name:r.name,price:r.price,unit:r.unit,unitQty:qty,code:r.code,pricePerUnit:qInfo.pricePerUnit})-1;
       html+=`<td${isBest?' class="cmp-cell-best"':''}>`;
       if(hasBulto){
@@ -5356,7 +5487,8 @@ function cmpRenderResults(el,groups,provs,SHOW_MAX){
         html+=`<span class="cmp-cell-price">${cmpMoney(r.price)}</span>`;
         if(r.unit) html+=`<span class="cmp-cell-unit">${cmpEsc(r.unit)}</span>`;
       }
-      if(isBest&&unitPrices.length>1) html+=`<span class="cmp-best-tag">MEJOR PRECIO</span>`;
+      if(isOut) html+=`<span class="cmp-cell-diff" style="color:var(--warn)" title="Más de 3 veces distinto a los demás proveedores: revisá si el proveedor está configurado por unidad o por bulto, o si es otra presentación">&#9888; precio dudoso (${isOut==='low'?'muy bajo':'muy alto'})</span>`;
+      else if(isBest) html+=`<span class="cmp-best-tag">MEJOR PRECIO</span>`;
       else if(diffPct>0) html+=`<span class="cmp-cell-diff" style="color:var(--warn)">+${diffPct}% m&aacute;s caro</span>`;
       html+=`<button class="cmp-add-btn" onclick="cmpCartAdd(${rowIdx})" title="Agregar al pedido">+</button>`;
       if(entry.linked) html+=`<button class="cmp-link-btn cmp-link-btn-active" onclick="cmpUnlinkRow('${pl.prov.id}','${r.norm}')" title="Vinculado a mano — click para desvincular">&#128279;</button>`;
