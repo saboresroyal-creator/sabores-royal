@@ -882,6 +882,7 @@ tr:hover td { background:var(--surface2); }
           <option value="echeq">Pagada con eCheq</option>
           <option value="efectivo">Pagada en efectivo</option>
           <option value="transferencia">Pagada por transferencia</option>
+          <option value="combinado">Pagada combinando medios</option>
         </select>
       </div>
       <div>
@@ -924,27 +925,17 @@ tr:hover td { background:var(--surface2); }
       <button class="btn btn-ghost btn-sm" onclick="limpiarSeleccionDeuda()">✕ Cancelar</button>
     </div>
     <div id="deudaPagoDetalleSel" style="font-size:12px;color:var(--muted);margin-bottom:12px;"></div>
-    <div class="grid4 mb16">
-      <div>
-        <label>Forma de pago</label>
-        <select id="deudaPagoForma">
-          <option value="">Elegí…</option>
-          <option value="cheque">Cheque</option>
-          <option value="echeq">eCheq</option>
-          <option value="efectivo">Efectivo</option>
-          <option value="transferencia">Transferencia</option>
-        </select>
-      </div>
-      <div>
-        <label>Fecha del pago</label>
-        <input type="date" id="deudaPagoFecha">
-      </div>
-      <div style="grid-column:span 2;">
-        <label>Detalle (opcional)</label>
-        <input type="text" id="deudaPagoDetalle" placeholder="Ej: cheques N° 2037 y 2038">
-      </div>
+    <div class="mb16" style="max-width:240px;">
+      <label>Fecha del pago</label>
+      <input type="date" id="deudaPagoFecha">
     </div>
-    <button class="btn btn-green" onclick="registrarPagoDeuda()">✓ Registrar pago de <span id="deudaPagoTotal"></span></button>
+    <label>Cómo se paga (podés combinar varios medios)</label>
+    <div id="deudaPagoMedios"></div>
+    <div style="display:flex;align-items:center;justify-content:space-between;flex-wrap:wrap;gap:8px;margin:8px 0 14px;">
+      <button class="btn btn-ghost btn-sm" onclick="agregarMedioPago()">+ Agregar otro medio de pago</button>
+      <div id="deudaPagoAsignado" style="font-family:var(--mono);font-size:13px;"></div>
+    </div>
+    <button class="btn btn-green" id="btnRegistrarPago" onclick="registrarPagoDeuda()">✓ Registrar pago de <span id="deudaPagoTotal"></span></button>
   </div>
 </div>
 
@@ -3505,6 +3496,14 @@ function diasHasta(fecha) {
   return Math.ceil((new Date(fecha+'T00:00:00')-today)/(1000*60*60*24));
 }
 const FORMAS_PAGO = { cheque:'Cheque', echeq:'eCheq', efectivo:'Efectivo', transferencia:'Transferencia' };
+const FORMAS_PAGO_TODAS = Object.assign({}, FORMAS_PAGO, { combinado:'varios medios' });
+// Medios de un pago: los nuevos guardan pagoMedios; los viejos tenían una sola forma.
+function mediosDePago(grupo) {
+  const f0 = grupo[0];
+  if(f0.pagoMedios && f0.pagoMedios.length) return f0.pagoMedios;
+  return f0.formaPago && f0.formaPago!=='combinado' ? [{forma: f0.formaPago, monto: sumaNeta(grupo), detalle: f0.pagoDetalle||''}] : [];
+}
+function textoMedio(m) { return `${FORMAS_PAGO[m.forma]||m.forma} ${pesos2(m.monto)}${m.detalle?' ('+m.detalle+')':''}`; }
 const TIPOS_COMP = { factura:'Factura', remito:'Remito', nc:'Nota de crédito' };
 function compLabel(f) { return (TIPOS_COMP[f.tipo]||'Factura') + (f.numero?' N° '+f.numero:''); }
 // Las notas de crédito restan: se guardan en positivo y el signo lo pone el tipo.
@@ -3529,7 +3528,7 @@ function guardarFactura() {
   // Elegir una forma de pago = la factura queda pagada (hoy, o la fecha que ya tenía).
   const pago = f => formaPago
     ? {estado:'pagada', formaPago, fechaPagada: (f && f.fechaPagada) || todayStr()}
-    : {estado:'pendiente', formaPago:'', fechaPagada:'', pagoId:'', pagoDetalle:''};
+    : {estado:'pendiente', formaPago:'', fechaPagada:'', pagoId:'', pagoDetalle:'', pagoMedios:[]};
   if(facturaEditandoId) {
     const f = state.facturas.find(x=>x.id===facturaEditandoId);
     if(f) Object.assign(f, {proveedor, monto, fechaIngreso, fechaVence, tipo, numero, nota}, pago(f));
@@ -3584,8 +3583,10 @@ function toggleSeleccionDeuda(id) {
 // Botón "Pagar" de una tarjeta: arranca un pago solo con ese comprobante.
 function pagarSolo(id) {
   deudaSeleccion = new Set([id]);
+  limpiarMediosPago();
   renderDeuda();
-  document.getElementById('deudaPagoForma').focus();
+  const sel = document.querySelector('#deudaPagoMedios .mp-forma');
+  if(sel) sel.focus();
 }
 function limpiarSeleccionDeuda() {
   deudaSeleccion.clear();
@@ -3595,17 +3596,21 @@ function limpiarSeleccionDeuda() {
 function registrarPagoDeuda() {
   const items = state.facturas.filter(f=>deudaSeleccion.has(f.id) && f.estado!=='pagada');
   if(!items.length) { alert('Elegí al menos un comprobante.'); return; }
-  const formaPago = document.getElementById('deudaPagoForma').value;
   const fechaPagada = document.getElementById('deudaPagoFecha').value || todayStr();
-  const pagoDetalle = document.getElementById('deudaPagoDetalle').value.trim();
   if(!items.some(f=>!esNC(f))) { alert('Una nota de crédito sola no se paga: juntala con una factura o remito del mismo proveedor.'); return; }
-  if(sumaNeta(items)<=0) { alert('Las notas de crédito superan a las facturas elegidas: el total a pagar tiene que ser mayor a cero.'); return; }
-  if(!formaPago) { alert('Elegí cómo se pagó: cheque, eCheq, efectivo o transferencia.'); return; }
+  const total = r2(sumaNeta(items));
+  if(total<=0) { alert('Las notas de crédito superan a las facturas elegidas: el total a pagar tiene que ser mayor a cero.'); return; }
+  const medios = leerMediosPago().filter(m=>m.forma || m.monto);
+  if(!medios.length || medios.some(m=>!m.forma)) { alert('Elegí el medio de pago de cada fila: cheque, eCheq, efectivo o transferencia.'); return; }
+  if(medios.some(m=>m.monto<=0)) { alert('Cada medio de pago tiene que tener un monto mayor a cero.'); return; }
+  const asignado = r2(medios.reduce((s,m)=>s+m.monto,0));
+  if(asignado!==total) { alert(`Los medios de pago suman ${pesos2(asignado)} y el pago es de ${pesos2(total)}. Tienen que coincidir.`); return; }
+  const formaPago = medios.length===1 ? medios[0].forma : 'combinado';
+  const pagoDetalle = medios.length===1 ? medios[0].detalle : medios.map(textoMedio).join(' + ');
   const pagoId = 'P'+Date.now();
-  items.forEach(f=>Object.assign(f, {estado:'pagada', formaPago, fechaPagada, pagoId, pagoDetalle}));
+  items.forEach(f=>Object.assign(f, {estado:'pagada', formaPago, fechaPagada, pagoId, pagoDetalle, pagoMedios: medios.map(m=>Object.assign({}, m))}));
   deudaSeleccion.clear();
-  document.getElementById('deudaPagoForma').value = '';
-  document.getElementById('deudaPagoDetalle').value = '';
+  limpiarMediosPago();
   document.getElementById('deudaPagoFecha').value = todayStr();
   save(); renderDeuda();
   informarPago(items[0].id);
@@ -3636,8 +3641,10 @@ function textoInformePago(grupo) {
     `Hola! Les informamos un pago de Sabores Royal a ${f0.proveedor}.`,
     ``,
     `Fecha de pago: ${fmtFecha(f0.fechaPagada)}`,
-    `Forma de pago: ${FORMAS_PAGO[f0.formaPago]||f0.formaPago||'-'}`,
-    ...(f0.pagoDetalle ? [`Detalle: ${f0.pagoDetalle}`] : []),
+    ...(()=>{ const ms = mediosDePago(grupo);
+      if(ms.length>1) return [`Formas de pago:`, ...ms.map(m=>`• ${textoMedio(m)}`)];
+      return [`Forma de pago: ${FORMAS_PAGO_TODAS[f0.formaPago]||f0.formaPago||'-'}`, ...(f0.pagoDetalle ? [`Detalle: ${f0.pagoDetalle}`] : [])];
+    })(),
     ``,
     `Comprobantes que cancela:`,
     ...lineas,
@@ -3698,8 +3705,10 @@ function informarPagoImprimir() {
     <h1>Comprobante de pago — Sabores Royal</h1>
     <div class="sub">Proveedor: <b>${escHtml(f.proveedor)}</b></div>
     <div class="dato">Fecha de pago: <b>${fmtFecha(f.fechaPagada)}</b></div>
-    <div class="dato">Forma de pago: <b>${escHtml(FORMAS_PAGO[f.formaPago]||f.formaPago||'-')}</b></div>
-    ${f.pagoDetalle?`<div class="dato">Detalle: <b>${escHtml(f.pagoDetalle)}</b></div>`:''}
+    ${(()=>{ const ms = mediosDePago(grupo);
+      if(ms.length>1) return `<div class="dato">Formas de pago:</div><ul style="margin:4px 0 0 18px;font-size:13px;">${ms.map(m=>`<li>${escHtml(textoMedio(m))}</li>`).join('')}</ul>`;
+      return `<div class="dato">Forma de pago: <b>${escHtml(FORMAS_PAGO_TODAS[f.formaPago]||f.formaPago||'-')}</b></div>${f.pagoDetalle?`<div class="dato">Detalle: <b>${escHtml(f.pagoDetalle)}</b></div>`:''}`;
+    })()}
     <table><thead><tr><th>Comprobante</th><th>Fecha</th><th style="text-align:right;">Importe</th></tr></thead><tbody>${filas}</tbody></table>
     <div class="tot">TOTAL PAGADO: ${pesos2(sumaNeta(grupo))}</div>
     <script>window.onload=()=>window.print();<\/script></body></html>`);
@@ -3716,17 +3725,72 @@ function volverAPendiente(id) {
     ? `Este pago incluye ${grupo.length} comprobantes (${pesos2(sumaNeta(grupo))}). ¿Volver todos a pendiente?`
     : '¿Volver este comprobante a pendiente?';
   if(!confirm(msg)) return;
-  grupo.forEach(x=>Object.assign(x, {estado:'pendiente', formaPago:'', fechaPagada:'', pagoId:'', pagoDetalle:'', pagoInformado:''}));
+  grupo.forEach(x=>Object.assign(x, {estado:'pendiente', formaPago:'', fechaPagada:'', pagoId:'', pagoDetalle:'', pagoInformado:'', pagoMedios:[]}));
   save(); renderDeuda();
+}
+
+// Filas de medios de pago del panel. Se arman una vez y se conservan entre redibujos.
+function filaMedioHtml(monto) {
+  return `<div data-medio style="display:flex;gap:8px;align-items:center;flex-wrap:wrap;margin-bottom:6px;">
+    <select class="mp-forma" style="flex:1;min-width:130px;">
+      <option value="">Elegí…</option>
+      ${Object.entries(FORMAS_PAGO).map(([k,v])=>`<option value="${k}">${v}</option>`).join('')}
+    </select>
+    <input class="mp-monto" type="number" step="0.01" inputmode="decimal" placeholder="Monto" value="${monto||''}" oninput="this.closest('[data-medio]').dataset.tocado='1';actualizarAsignadoPago()" style="flex:1;min-width:130px;">
+    <input class="mp-detalle" type="text" placeholder="Detalle (ej: cheques N° 2037 y 2038)" style="flex:2;min-width:180px;">
+    <button class="btn btn-ghost btn-sm" onclick="quitarMedioPago(this)" title="Quitar">🗑</button>
+  </div>`;
+}
+function totalPagoSeleccion() { return r2(sumaNeta(state.facturas.filter(f=>deudaSeleccion.has(f.id)))); }
+function leerMediosPago() {
+  return [...document.querySelectorAll('#deudaPagoMedios [data-medio]')].map(row=>({
+    forma: row.querySelector('.mp-forma').value,
+    monto: r2(parseFloat(row.querySelector('.mp-monto').value)||0),
+    detalle: row.querySelector('.mp-detalle').value.trim(),
+  }));
+}
+function agregarMedioPago() {
+  const falta = r2(totalPagoSeleccion() - leerMediosPago().reduce((s,m)=>s+m.monto,0));
+  document.getElementById('deudaPagoMedios').insertAdjacentHTML('beforeend', filaMedioHtml(falta>0?falta:''));
+  const filas = document.querySelectorAll('#deudaPagoMedios [data-medio]');
+  filas.forEach(r=>{ r.dataset.tocado='1'; });
+  filas[filas.length-1].querySelector('.mp-forma').focus();
+  actualizarAsignadoPago();
+}
+function quitarMedioPago(btn) {
+  const cont = document.getElementById('deudaPagoMedios');
+  if(cont.querySelectorAll('[data-medio]').length<=1) { btn.closest('[data-medio]').querySelector('.mp-monto').value = totalPagoSeleccion(); actualizarAsignadoPago(); return; }
+  btn.closest('[data-medio]').remove();
+  actualizarAsignadoPago();
+}
+function actualizarAsignadoPago() {
+  const el = document.getElementById('deudaPagoAsignado');
+  if(!el) return;
+  const total = totalPagoSeleccion();
+  const asignado = r2(leerMediosPago().reduce((s,m)=>s+m.monto,0));
+  const dif = r2(total - asignado);
+  el.innerHTML = dif===0
+    ? `<span style="color:var(--green);">✓ Asignado ${pesos2(asignado)} de ${pesos2(total)}</span>`
+    : dif>0 ? `<span style="color:var(--yellow);">Asignado ${pesos2(asignado)} · falta ${pesos2(dif)}</span>`
+            : `<span style="color:var(--red);">Asignado ${pesos2(asignado)} · sobra ${pesos2(-dif)}</span>`;
+}
+function limpiarMediosPago() {
+  document.getElementById('deudaPagoMedios').innerHTML = '';
 }
 
 function renderDeudaPagoPanel() {
   const panel = document.getElementById('deudaPagoPanel');
   if(!panel) return;
   const items = state.facturas.filter(f=>deudaSeleccion.has(f.id));
-  if(!items.length) { panel.style.display = 'none'; return; }
+  if(!items.length) { panel.style.display = 'none'; limpiarMediosPago(); return; }
   panel.style.display = 'block';
   const total = sumaNeta(items);
+  // Primera vez: una fila con el total. Si hay una sola fila sin tocar, sigue al total.
+  const cont = document.getElementById('deudaPagoMedios');
+  const filas = cont.querySelectorAll('[data-medio]');
+  if(!filas.length) cont.innerHTML = filaMedioHtml(r2(total));
+  else if(filas.length===1 && filas[0].dataset.tocado!=='1') filas[0].querySelector('.mp-monto').value = r2(total);
+  actualizarAsignadoPago();
   const fechaEl = document.getElementById('deudaPagoFecha');
   if(!fechaEl.value) fechaEl.value = todayStr();
   document.getElementById('deudaPagoProveedor').textContent = items[0].proveedor;
@@ -3773,8 +3837,12 @@ function renderDeudaResumen() {
   const pagadasMes = state.facturas.filter(f=>f.estado==='pagada' && (f.fechaPagada||'').slice(0,7)===mes);
   const suma = sumaNeta;
   const ncPend = pendientes.filter(esNC);
+  const totForma = {};
+  const grupos = {};
+  pagadasMes.forEach(f=>{ const k = f.pagoId || ('f'+f.id); (grupos[k] = grupos[k] || []).push(f); });
+  Object.values(grupos).forEach(g=>mediosDePago(g).forEach(m=>{ totForma[m.forma] = (totForma[m.forma]||0) + m.monto; }));
   const porForma = Object.entries(FORMAS_PAGO)
-    .map(([k,v])=>({v, total: suma(pagadasMes.filter(f=>f.formaPago===k))}))
+    .map(([k,v])=>({v, total: totForma[k]||0}))
     .filter(x=>x.total>0)
     .map(x=>`${x.v}: ${pesos2(x.total)}`).join('<br>');
   el.innerHTML = `
@@ -3862,7 +3930,7 @@ function renderDeuda() {
     let cls='imp-card', status='', statusColor='var(--muted)';
     if(f.estado==='pagada'){ cls+=' pagado'; status = esNC(f)
         ? `✓ DESCONTADA en el pago del ${fmtFecha(f.fechaPagada)}`
-        : `✓ PAGADA${f.formaPago?' con '+FORMAS_PAGO[f.formaPago]:''}${f.fechaPagada?' el '+fmtFecha(f.fechaPagada):''}`;
+        : `✓ PAGADA${f.formaPago?' con '+FORMAS_PAGO_TODAS[f.formaPago]:''}${f.fechaPagada?' el '+fmtFecha(f.fechaPagada):''}`;
       if(f.pagoDetalle) status += `<div style="color:var(--muted);font-weight:400;">${escHtml(f.pagoDetalle)}</div>`;
       const grupo = grupoDePago(f);
       if(grupo.length>1) status += `<div style="color:var(--muted);font-weight:400;">🔗 Pago conjunto de ${grupo.length} comprobantes: ${pesos2(sumaNeta(grupo))}</div>`;
