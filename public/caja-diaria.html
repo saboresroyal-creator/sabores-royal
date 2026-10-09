@@ -7,7 +7,7 @@
 <title>Sabores Royal — Dashboard de Cajas</title>
 <!-- Instalable en el celu ("Agregar a pantalla de inicio") -->
 <link rel="manifest" href="manifest-caja.json">
-<meta name="theme-color" content="#16161a">
+<meta name="theme-color" content="#0f1c45">
 <link rel="apple-touch-icon" href="apple-touch-icon-caja.png">
 <link rel="icon" type="image/png" href="icon-caja-192.png">
 <meta name="apple-mobile-web-app-capable" content="yes">
@@ -22,24 +22,25 @@
 @import url('https://fonts.googleapis.com/css2?family=DM+Mono:wght@400;500&family=Syne:wght@700;800&family=DM+Sans:wght@300;400;500;600&display=swap');
 
 :root {
-  --bg: #0d0d0f;
-  --surface: #16161a;
-  --surface2: #1e1e24;
-  --border: #2a2a32;
+  /* Mismos colores que la app admin (azul marino + dorado) */
+  --bg: #0f1c45;
+  --surface: #172659;
+  --surface2: #1f3068;
+  --border: #2c3d78;
   --gold: #c5a028;
-  --gold-light: #e8be3a;
-  --gold-dim: rgba(197,160,40,0.12);
+  --gold-light: #e0bb4a;
+  --gold-dim: rgba(197,160,40,0.14);
   --blue: #1a2a5e;
-  --green: #22c55e;
-  --green-dim: rgba(34,197,94,0.12);
-  --red: #ef4444;
-  --red-dim: rgba(239,68,68,0.12);
-  --yellow: #f59e0b;
-  --yellow-dim: rgba(245,158,11,0.12);
+  --green: #3ecf8e;
+  --green-dim: rgba(62,207,142,0.12);
+  --red: #e5566d;
+  --red-dim: rgba(229,86,109,0.12);
+  --yellow: #e0a83c;
+  --yellow-dim: rgba(224,168,60,0.12);
   --purple: #a855f7;
   --purple-dim: rgba(168,85,247,0.12);
-  --text: #e8e8f0;
-  --muted: #6b6b7e;
+  --text: #f8f5ec;
+  --muted: #95a1c6;
   --mono: 'DM Mono', monospace;
   --sans: 'DM Sans', sans-serif;
   --display: 'Syne', sans-serif;
@@ -139,8 +140,8 @@ body {
   box-sizing: border-box;
   min-width: 0;
 }
-.caja-card.central { border-color: var(--gold)44; }
-.caja-card.opcional { border-color: var(--purple)44; border-style: dashed; }
+.caja-card.central { border-color: color-mix(in srgb, var(--gold) 30%, transparent); }
+.caja-card.opcional { border-color: color-mix(in srgb, var(--purple) 30%, transparent); border-style: dashed; }
 .card-title {
   font-family: var(--mono);
   font-size: 10px;
@@ -208,14 +209,14 @@ select option { background: var(--surface2); }
   letter-spacing: .5px;
   transition: all .15s;
 }
-.btn-gold { background:var(--gold); color:#0d0d0f; }
+.btn-gold { background:var(--gold); color:#0f1c45; font-weight:700; }
 .btn-gold:hover { background:var(--gold-light); }
 .btn-ghost { background:var(--surface2); color:var(--text); border:1px solid var(--border); }
 .btn-ghost:hover { border-color:var(--gold); color:var(--gold); }
 .btn-red { background:var(--red-dim); color:var(--red); border:1px solid var(--red); }
 .btn-red:hover { background:var(--red); color:#fff; }
 .btn-green { background:var(--green-dim); color:var(--green); border:1px solid var(--green); }
-.btn-green:hover { background:var(--green); color:#0d0d0f; }
+.btn-green:hover { background:var(--green); color:#0f1c45; }
 .btn-sm { padding:5px 10px; font-size:11px; }
 
 /* ── DIVIDER ── */
@@ -223,7 +224,7 @@ select option { background: var(--surface2); }
 
 /* ── MODAL EXPORTAR ── */
 .modal-bg {
-  position: fixed; inset: 0; background: rgba(5,5,8,.75); z-index: 200;
+  position: fixed; inset: 0; background: rgba(8,14,38,.78); z-index: 200;
   display: flex; align-items: center; justify-content: center; padding: 20px;
 }
 .modal {
@@ -308,12 +309,12 @@ tr:hover td { background:var(--surface2); }
 .cal-day.empty { cursor:default; }
 .cal-day.qa-open { box-shadow:0 0 0 2px var(--gold) inset; }
 .cal-num { font-size:11px; color:var(--muted); }
-.cal-monto { font-size:13px; font-weight:700; color:#60a5fa; margin-top:4px; line-height:1.2; }
+.cal-monto { font-size:13px; font-weight:700; color:#8ab8ff; margin-top:4px; line-height:1.2; }
 /* Montos del calendario: azul lo normal, ámbar lo que vence pronto, rojo lo vencido */
-.cal-day.alerta .cal-monto { color:#fbbf24; }
-.cal-day.vencido .cal-monto { color:#f87171; }
-.cal-day.alerta { background:rgba(245,158,11,0.06); }
-.cal-day.vencido { background:rgba(239,68,68,0.07); }
+.cal-day.alerta .cal-monto { color:#f0bf5a; }
+.cal-day.vencido .cal-monto { color:#ff8a9b; }
+.cal-day.alerta { background:rgba(224,168,60,0.08); }
+.cal-day.vencido { background:rgba(229,86,109,0.09); }
 .cal-count { font-size:10px; color:var(--muted); margin-top:2px; }
 @media(max-width:600px){ .cal-day{min-height:48px;padding:4px;} .cal-monto{font-size:11px;} .cal-count{display:none;} }
 
@@ -503,7 +504,7 @@ tr:hover td { background:var(--surface2); }
   </div>
 
   <!-- POZO DE EFECTIVO -->
-  <div class="card mt16" style="border-color:var(--gold);background:linear-gradient(135deg,#16161a,#1e1a0a);">
+  <div class="card mt16" style="border-color:var(--gold);background:linear-gradient(135deg,#172659,#2a3160);">
     <div class="card-title"><div class="dot" style="background:var(--gold)"></div>POZO DE EFECTIVO — CAJA CENTRAL</div>
     <div style="display:flex;flex-wrap:wrap;gap:12px;margin-bottom:12px;">
       <div class="stat" style="flex:1;min-width:120px;">
@@ -526,7 +527,7 @@ tr:hover td { background:var(--surface2); }
         <div class="stat-label">Efectivo Central</div>
         <div class="stat-value green" id="pozoCentral">$0</div>
       </div>
-      <div class="stat" style="flex:1;min-width:120px;border:1px solid var(--green)44;background:var(--green-dim);">
+      <div class="stat" style="flex:1;min-width:120px;border:1px solid color-mix(in srgb, var(--green) 30%, transparent);background:var(--green-dim);">
         <div class="stat-label" style="color:var(--green)">Saldo días anteriores</div>
         <div class="stat-value" id="pozoPrevio" style="color:var(--green)">$0</div>
       </div>
@@ -1059,7 +1060,7 @@ tr:hover td { background:var(--surface2); }
       <p style="color:var(--muted);font-size:12px;margin-bottom:16px;">Los datos se guardan automáticamente en tu navegador.</p>
       <div style="display:flex;flex-direction:column;gap:8px;">
         <button class="btn btn-green" onclick="exportData()">⬇ Exportar backup JSON</button>
-        <button class="btn btn-green" onclick="exportarExcelCompleto()" style="background:rgba(34,197,94,0.15);border:1px solid #22c55e;">📥 Exportar backup Excel</button>
+        <button class="btn btn-green" onclick="exportarExcelCompleto()" style="background:var(--green-dim);border:1px solid var(--green);">📥 Exportar backup Excel</button>
         <button class="btn btn-ghost" onclick="importData()">⬆ Importar backup JSON</button>
         <div class="divider"></div>
         <button class="btn btn-red" onclick="resetData()">🗑 Borrar todos los datos</button>
@@ -1621,7 +1622,7 @@ function renderCajas(day, d) {
     const esOpcional = i >= 3;
     const div = document.createElement('div');
     div.className = esOpcional ? 'caja-card opcional' : (esCentral ? 'caja-card central' : 'caja-card');
-    if(esCentral) div.style.borderColor = 'var(--gold)44';
+    if(esCentral) div.style.borderColor = 'color-mix(in srgb, var(--gold) 30%, transparent)';
 
     // selector de cajero: Caja Central tiene su opción fija + las demás
     const optionsCajero = esCentral
@@ -1652,7 +1653,7 @@ function renderCajas(day, d) {
       <div style="display:flex;flex-wrap:wrap;gap:10px;margin-bottom:8px;align-items:flex-end;">
         <div style="flex:1;min-width:140px;">
           <label>Ajuste efectivo ($) <span style="font-size:9px;color:var(--muted)">+ o −</span></label>
-          <input type="number" placeholder="Ej: -500 o 200" value="${caja.ajusteEfectivo||''}" oninput="setCajaField('${d}',${i},'ajusteEfectivo',this.value)" style="border-color:${(parseFloat(caja.ajusteEfectivo||0))<0?'var(--red)44':(parseFloat(caja.ajusteEfectivo||0))>0?'var(--green)44':'var(--border)'}">
+          <input type="number" placeholder="Ej: -500 o 200" value="${caja.ajusteEfectivo||''}" oninput="setCajaField('${d}',${i},'ajusteEfectivo',this.value)" style="border-color:${(parseFloat(caja.ajusteEfectivo||0))<0?'color-mix(in srgb, var(--red) 30%, transparent)':(parseFloat(caja.ajusteEfectivo||0))>0?'color-mix(in srgb, var(--green) 30%, transparent)':'var(--border)'}">
         </div>
         <div style="flex:1;min-width:140px;">
           <label>Motivo del ajuste</label>
@@ -1678,7 +1679,7 @@ function renderCajas(day, d) {
       <div class="mb8">
         <label style="color:var(--purple)">Venta Negro ($)</label>
         <div style="display:flex;align-items:center;gap:8px;">
-          <input type="number" placeholder="0" value="${caja.negro||''}" oninput="setCajaField('${d}',${i},'negro',this.value)" style="border-color:var(--purple)44;flex:1;">
+          <input type="number" placeholder="0" value="${caja.negro||''}" oninput="setCajaField('${d}',${i},'negro',this.value)" style="border-color:color-mix(in srgb, var(--purple) 30%, transparent);flex:1;">
           <div id="pctNegroCaja_${i}" style="font-family:var(--mono);font-size:13px;color:var(--purple);white-space:nowrap;min-width:52px;text-align:right;">${(()=>{const tot=(parseFloat(caja.efectivo)||0)+(parseFloat(caja.ajusteEfectivo)||0)+(parseFloat(caja.tarjetas)||0);const neg=parseFloat(caja.negro)||0;return tot>0?Math.round(neg/tot*100)+'%':'0%';})()}</div>
         </div>
       </div>
@@ -1697,7 +1698,7 @@ function renderCajas(day, d) {
           <div class="stat-label">Salidas</div>
           <div class="stat-value red" id="gastosCajaTotal_${i}">$0</div>
         </div>
-        <div class="stat" style="flex:2;min-width:180px;border:1px solid var(--gold)44;background:var(--gold-dim);">
+        <div class="stat" style="flex:2;min-width:180px;border:1px solid color-mix(in srgb, var(--gold) 30%, transparent);background:var(--gold-dim);">
           <div class="stat-label" style="color:var(--gold)">Saldo disponible (acumulado)</div>
           <div class="stat-value gold" id="netoCaja_${i}">${pesos((parseFloat(caja.efectivo)||0)+(parseFloat(caja.ajusteEfectivo)||0))}</div>
           <div id="saldoDesglose"></div>
@@ -2737,10 +2738,10 @@ function makeLineChart(id, labels, datasets, color) {
     },
     options:{
       responsive:true, maintainAspectRatio:false,
-      plugins:{legend:{labels:{color:'#6b6b7e',font:{size:11}}}},
+      plugins:{legend:{labels:{color:'#95a1c6',font:{size:11}}}},
       scales:{
-        x:{ticks:{color:'#6b6b7e',font:{size:10}},grid:{color:'#2a2a32'}},
-        y:{ticks:{color:'#6b6b7e',font:{size:10},callback:v=>pesos(v)},grid:{color:'#2a2a32'}}
+        x:{ticks:{color:'#95a1c6',font:{size:10}},grid:{color:'rgba(255,255,255,0.08)'}},
+        y:{ticks:{color:'#95a1c6',font:{size:10},callback:v=>pesos(v)},grid:{color:'rgba(255,255,255,0.08)'}}
       }
     }
   });
@@ -2756,8 +2757,8 @@ function makeBarChart(id, labels, data, color) {
       responsive:true, maintainAspectRatio:false,
       plugins:{legend:{display:false}},
       scales:{
-        x:{ticks:{color:'#6b6b7e',font:{size:10}},grid:{color:'#2a2a32'}},
-        y:{ticks:{color:'#6b6b7e',font:{size:10}},grid:{color:'#2a2a32'}}
+        x:{ticks:{color:'#95a1c6',font:{size:10}},grid:{color:'rgba(255,255,255,0.08)'}},
+        y:{ticks:{color:'#95a1c6',font:{size:10}},grid:{color:'rgba(255,255,255,0.08)'}}
       }
     }
   });
@@ -4392,12 +4393,12 @@ function renderFinales() {
       responsive:true, maintainAspectRatio:false,
       interaction:{mode:'index', intersect:false},
       plugins:{
-        legend:{labels:{color:'#6b6b7e',font:{size:11}}},
+        legend:{labels:{color:'#95a1c6',font:{size:11}}},
         tooltip:{callbacks:{label:c=>c.dataset.label+': '+pesos(c.parsed.y)}}
       },
       scales:{
-        x:{ticks:{color:'#6b6b7e',font:{size:10}},grid:{color:'#2a2a32'}},
-        y:{ticks:{color:'#6b6b7e',font:{size:10},callback:v=>pesos(v)},grid:{color:'#2a2a32'}}
+        x:{ticks:{color:'#95a1c6',font:{size:10}},grid:{color:'rgba(255,255,255,0.08)'}},
+        y:{ticks:{color:'#95a1c6',font:{size:10},callback:v=>pesos(v)},grid:{color:'rgba(255,255,255,0.08)'}}
       }
     }
   });
