@@ -308,7 +308,12 @@ tr:hover td { background:var(--surface2); }
 .cal-day.empty { cursor:default; }
 .cal-day.qa-open { box-shadow:0 0 0 2px var(--gold) inset; }
 .cal-num { font-size:11px; color:var(--muted); }
-.cal-monto { font-size:13px; font-weight:700; color:var(--gold); margin-top:4px; line-height:1.2; }
+.cal-monto { font-size:13px; font-weight:700; color:#60a5fa; margin-top:4px; line-height:1.2; }
+/* Montos del calendario: azul lo normal, ámbar lo que vence pronto, rojo lo vencido */
+.cal-day.alerta .cal-monto { color:#fbbf24; }
+.cal-day.vencido .cal-monto { color:#f87171; }
+.cal-day.alerta { background:rgba(245,158,11,0.06); }
+.cal-day.vencido { background:rgba(239,68,68,0.07); }
 .cal-count { font-size:10px; color:var(--muted); margin-top:2px; }
 @media(max-width:600px){ .cal-day{min-height:48px;padding:4px;} .cal-monto{font-size:11px;} .cal-count{display:none;} }
 
@@ -352,35 +357,6 @@ tr:hover td { background:var(--surface2); }
 }
 .ptab.active, .ptab:hover { border-color:var(--gold); color:var(--gold); }
 
-/* ── CHEQUES: versión clara ──
-   Solo la pestaña Cheques usa colores claros. Se redefinen las variables
-   dentro del panel, así todo lo que ya usa var(--…) se aclara solo. Los
-   tonos (dorado, verde, rojo, ámbar) se oscurecen para que se lean sobre blanco. */
-#panel-cheques {
-  --bg: #f4f2ec;
-  --surface: #ffffff;
-  --surface2: #f7f6f2;
-  --border: #dedad0;
-  --gold: #9a7612;
-  --gold-light: #b38a17;
-  --gold-dim: rgba(154,118,18,0.10);
-  --green: #15803d;
-  --green-dim: rgba(21,128,61,0.10);
-  --red: #c62828;
-  --red-dim: rgba(198,40,40,0.08);
-  --yellow: #b45309;
-  --yellow-dim: rgba(180,83,9,0.09);
-  --text: #1c1c24;
-  --muted: #6a6878;
-  background: var(--bg);
-  color: var(--text);
-  color-scheme: light;
-  border-radius: 14px;
-  margin-top: 16px;
-}
-#panel-cheques .btn-gold { color:#fff; }
-#panel-cheques .btn-green:hover, #panel-cheques .btn-red:hover { color:#fff; }
-#panel-cheques .card, #panel-cheques .stat { box-shadow: 0 1px 2px rgba(0,0,0,.05); }
 
 /* ── CAJA HEADER ── */
 .caja-header {
