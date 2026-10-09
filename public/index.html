@@ -599,6 +599,7 @@ img{display:block; max-width:100%;}
 .cmp-link-btn{margin-top:4px;border:none;background:none;color:rgba(255,255,255,0.35);font-size:12px;cursor:pointer;display:inline-flex;align-items:center;justify-content:center;padding:2px;}
 .cmp-link-btn:hover{color:var(--gold2);}
 .cmp-link-btn-active{color:var(--ok);margin-top:2px;margin-left:4px;}
+.cmp-cell-name{display:-webkit-box;-webkit-line-clamp:2;-webkit-box-orient:vertical;overflow:hidden;font-size:10.5px;line-height:1.3;color:rgba(255,255,255,0.55);margin-bottom:4px;max-width:180px;}
 .cmp-sug{display:flex;align-items:center;gap:6px;margin-top:6px;font-size:10px;color:rgba(255,255,255,0.4);}
 .cmp-sug button{width:22px;height:22px;border-radius:50%;background:none;font-size:11px;font-weight:700;line-height:1;cursor:pointer;display:inline-flex;align-items:center;justify-content:center;}
 .cmp-sug-ok{border:1px solid var(--ok);color:var(--ok);}
@@ -4083,6 +4084,27 @@ function cmpNegWords(s){
 // "sin TACC"/"sin gluten" es una certificación que algunos proveedores
 // escriben y otros no para el mismo producto: no alcanza para separarlos.
 const CMP_NEG_OPTIONAL = /^(tacc|tac|gluten)$/;
+// Sabores / variedades: si un nombre dice "chocolate" y el otro no lo
+// menciona, son productos distintos aunque el resto coincida ("ARCOR DULCE
+// BATATA C/CHOCOLATE" vs "Dulce Batata Lc Estuch", que es el común). Se
+// aceptan abreviaturas de 4+ letras ("choc", "vain").
+const CMP_VARIETY = ['chocolate','vainilla','frutilla','limon','naranja','durazno','manzana','menta','cereza','frambuesa','arandano','mango','anana','banana','coco','mani','avellana','almendra','membrillo','light','diet','zero','integral','picante','uva','sandia','pomelo','mandarina','maracuya','multifruta','cafe','caramelo'];
+// Sabor "por defecto" que muchos proveedores no escriben ("Dulce Batata
+// Arcor Estuche" es el de vainilla): solo separa si el otro nombre dice
+// otro sabor.
+const CMP_VARIETY_SOFT = new Set(['vainilla']);
+function cmpVarietyOf(t){
+  if(t.length<4) return null;
+  return CMP_VARIETY.find(v=>v===t||v.startsWith(t))||null;
+}
+function cmpVarietyConflict(ta,tb){
+  return ta.some(t=>{
+    const v=cmpVarietyOf(t); if(!v) return false;
+    if(tb.some(u=>cmpTokSim(t,u)>=0.75||(u.length>=3&&v.startsWith(u)))) return false;
+    if(CMP_VARIETY_SOFT.has(v)) return tb.some(u=>{ const w=cmpVarietyOf(u); return w&&w!==v; });
+    return true;
+  });
+}
 function cmpNegConflict(negA,tokB,negB){
   return negA.some(w=>{
     if(negB.some(v=>cmpTokSim(w,v)>=0.75)) return false;
@@ -4180,6 +4202,7 @@ function cmpProdSimRows(rowA,rowB){
   if(!ta.length||!tb.length) return 0;
   const na=cmpRowNeg(rowA),nb=cmpRowNeg(rowB);
   if(cmpNegConflict(na,tb,nb)||cmpNegConflict(nb,ta,na)) return 0;
+  if(cmpVarietyConflict(ta,tb)||cmpVarietyConflict(tb,ta)) return 0;
   let matched=0; const usedB={};
   ta.forEach(wa=>{
     let best=0,bestI=-1;
@@ -5482,6 +5505,10 @@ function cmpRenderResults(el,groups,provs,SHOW_MAX){
       const diffPct=(!isOut&&minU&&uPrice>minU)?Math.round((uPrice-minU)/minU*100):0;
       const rowIdx=_cmpRowIdx.push({provId:pl.prov.id,name:r.name,price:r.price,unit:r.unit,unitQty:qty,code:r.code,pricePerUnit:qInfo.pricePerUnit})-1;
       html+=`<td${isBest?' class="cmp-cell-best"':''}>`;
+      // Qué producto es en ESTE proveedor: sin esto solo se veía el
+      // precio y una asociación equivocada recién se notaba al cargar el
+      // pedido.
+      if(r.name!==g.name) html+=`<span class="cmp-cell-name" title="${cmpEsc(r.name)}">${cmpEsc(r.name)}</span>`;
       if(hasBulto){
         html+=`<span class="cmp-cell-price">${cmpMoney(uPrice)}<span style="font-size:10px;font-weight:400;color:rgba(255,255,255,0.4)">/u</span></span>`;
         if(qty>1) html+=`<span class="cmp-cell-unit">${qInfo.pricePerUnit?'bulto de '+qty+'u ('+cmpMoney(r.price*qty)+')':cmpMoney(r.price)+' &times; '+qty+'u'}${r.unit?' &middot; '+cmpEsc(r.unit):''}</span>`;
