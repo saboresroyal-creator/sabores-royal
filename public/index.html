@@ -599,6 +599,10 @@ img{display:block; max-width:100%;}
 .cmp-link-btn{margin-top:4px;border:none;background:none;color:rgba(255,255,255,0.35);font-size:12px;cursor:pointer;display:inline-flex;align-items:center;justify-content:center;padding:2px;}
 .cmp-link-btn:hover{color:var(--gold2);}
 .cmp-link-btn-active{color:var(--ok);margin-top:2px;margin-left:4px;}
+.cmp-sug{display:flex;align-items:center;gap:6px;margin-top:6px;font-size:10px;color:rgba(255,255,255,0.4);}
+.cmp-sug button{width:22px;height:22px;border-radius:50%;background:none;font-size:11px;font-weight:700;line-height:1;cursor:pointer;display:inline-flex;align-items:center;justify-content:center;}
+.cmp-sug-ok{border:1px solid var(--ok);color:var(--ok);}
+.cmp-sug-no{border:1px solid var(--danger);color:var(--danger);}
 .cmp-qty-btn{width:24px;height:24px;border-radius:50%;border:1px solid var(--glass-bd);background:var(--glass);color:var(--white);font-size:15px;font-weight:700;cursor:pointer;line-height:1;}
 .cmp-status-badge{font-size:10px;font-weight:700;border-radius:6px;padding:2px 7px;display:inline-block;margin-top:3px;text-transform:uppercase;letter-spacing:.3px;}
 .cmp-status-pendiente{background:rgba(197,160,40,0.15);color:var(--gold2);}
@@ -4061,8 +4065,30 @@ const CMP_SYNONYMS = {blanco:'simple', blanca:'simple', negro:'chocolate', negra
 // (con relleno descriptivo) contra nombres cortos que en realidad son el
 // mismo producto. Por eso se filtran los de 1 letra y se deduplica.
 function cmpMatchTokens(s){
-  const toks=cmpTokenize(s).filter(t=>!cmpIsNoiseToken(t)&&t.length>=2).map(t=>CMP_SYNONYMS[t]||t);
+  const neg=new Set(cmpNegWords(s));
+  const toks=cmpTokenize(s).filter(t=>!cmpIsNoiseToken(t)&&t.length>=2&&!neg.has(t)&&!CMP_STOPWORDS.has(t)).map(t=>CMP_SYNONYMS[t]||t);
   return [...new Set(toks)];
+}
+// Palabras negadas con "sin"/"s/" ("S/Azuc", "SIN AZUCAR", "S/TACC"): no
+// cuentan como palabra del producto — "Mermelada Arcor S/Azuc" se
+// emparejaba con "ARCOR AZUCAR 10*1 KG." porque "azuc" matcheaba con
+// "azucar". Se devuelven aparte para exigir que ambos nombres nieguen lo
+// mismo (ver cmpNegConflict).
+const CMP_STOPWORDS = new Set(['de','del','la','el','los','las','con','sin','y','en','para','al']);
+function cmpNegWords(s){
+  const out=[]; const re=/(?:^|[^a-z])(?:s\/|sin[\s.]+)\s*([a-záéíóúñ]{3,})/gi; let m;
+  while((m=re.exec(String(s||'')))) out.push(cmpNorm(m[1]));
+  return out;
+}
+// "sin TACC"/"sin gluten" es una certificación que algunos proveedores
+// escriben y otros no para el mismo producto: no alcanza para separarlos.
+const CMP_NEG_OPTIONAL = /^(tacc|tac|gluten)$/;
+function cmpNegConflict(negA,tokB,negB){
+  return negA.some(w=>{
+    if(negB.some(v=>cmpTokSim(w,v)>=0.75)) return false;
+    if(CMP_NEG_OPTIONAL.test(w)) return false;
+    return true; // "sin azúcar" contra un nombre que no lo niega: otro producto
+  });
 }
 // Intenta sacar el tamaño individual del producto (900ml, 1.5l, 38grs...),
 // normalizado a una unidad base (ml o gramos) — para no confundir
@@ -4084,6 +4110,13 @@ function cmpExtractSize(name){
     if(/^(l|lt|lts|litros)$/.test(m[2])) val*=1000;
     else if(/^(kg|kgs|kilos|kilo)$/.test(m[2])) val*=1000;
     if(best===null||val>best) best=val;
+  }
+  // Sin unidad escrita: "12X390" / "4X6X473" — el último número de la
+  // cadena es el tamaño (gramos o ml). Antes devolvía null y entonces no
+  // se podía separar "Mermelada 12X390" de "Azúcar 10*1 KG".
+  if(best===null){
+    const m2=s.match(/\d+(?:\s*[x*]\s*\d+)*\s*[x*]\s*(\d+(?:[.,]\d+)?)(?![\d.,])/);
+    if(m2){ const v=parseFloat(m2[1].replace(',','.')); if(v>=20) best=v; }
   }
   return best;
 }
@@ -4124,7 +4157,11 @@ function cmpProdSim(a,b){
 // así que la misma fila se compara muchas veces por búsqueda; sin cachear
 // se recalculaba tamaño y tokens desde cero en cada comparación y con
 // listas de varios miles de filas (ej: Tyna) eso trababa el navegador.
-const _cmpSizeCache=new WeakMap(), _cmpTokCache=new WeakMap();
+const _cmpSizeCache=new WeakMap(), _cmpTokCache=new WeakMap(), _cmpNegCache=new WeakMap();
+function cmpRowNeg(row){
+  if(_cmpNegCache.has(row)) return _cmpNegCache.get(row);
+  const v=cmpNegWords(row.name); _cmpNegCache.set(row,v); return v;
+}
 function cmpRowSize(row){
   if(_cmpSizeCache.has(row)) return _cmpSizeCache.get(row);
   const v=cmpExtractSize(row.name); _cmpSizeCache.set(row,v); return v;
@@ -4141,12 +4178,23 @@ function cmpProdSimRows(rowA,rowB){
   }
   const ta=cmpRowTokens(rowA),tb=cmpRowTokens(rowB);
   if(!ta.length||!tb.length) return 0;
+  const na=cmpRowNeg(rowA),nb=cmpRowNeg(rowB);
+  if(cmpNegConflict(na,tb,nb)||cmpNegConflict(nb,ta,na)) return 0;
   let matched=0; const usedB={};
   ta.forEach(wa=>{
     let best=0,bestI=-1;
     tb.forEach((wb,i)=>{ if(usedB[i]) return; const s=cmpTokSim(wa,wb); if(s>best){best=s;bestI=i;} });
     if(best>=0.75){matched+=best;if(bestI>=0)usedB[bestI]=1;}
   });
+  // El solapamiento sobre el nombre más corto deja que un nombre de 2
+  // palabras ("ARCOR AZUCAR") quede "contenido" en cualquier nombre largo
+  // que las mencione ("Merm Fruti ARCOR S/AZUC") — se exige además que
+  // coincida al menos la mitad de las palabras del nombre más largo. Si
+  // los dos traen el mismo tamaño (ya pasó el gate de arriba) alcanza con
+  // menos: un proveedor que omite la marca ("Mix Cristales 6X810 G" vs
+  // "ARCOR MIX FRUIT CRISTAL 6*810 GR") sigue siendo el mismo producto.
+  const sameSize=sizeA!==null&&sizeB!==null;
+  if(matched/Math.max(ta.length,tb.length)<(sameSize?0.35:0.5)) return 0;
   return matched/Math.min(ta.length,tb.length);
 }
 function cmpQScore(norm,qt){
@@ -4592,14 +4640,15 @@ function cmpGridHeader(rows){
 function cmpGuessMap(rows,perUnit){
   const {labels,nCols}=cmpGridHeader(rows);
   const st=[];
-  for(let c=0;c<nCols;c++) st.push({text:0,textLen:0,num:0,frac:0,small:0,big:0});
+  for(let c=0;c<nCols;c++) st.push({text:0,textLen:0,num:0,frac:0,small:0,big:0,ean:0,uniq:new Set()});
   rows.slice(0,3000).forEach(r=>{
     for(let c=0;c<nCols;c++){
       const v=r[c]; if(v===''||v==null) continue;
       const n=cmpCellNum(v);
       if(!isNaN(n)){
         if(n>0){ st[c].num++; if(n<1) st[c].frac++; if(Number.isInteger(n)&&n<=500) st[c].small++; if(Number.isInteger(n)&&n>=1e7) st[c].big++; }
-      } else if(/[a-záéíóúñ]/i.test(v)){ st[c].text++; st[c].textLen+=String(v).length; }
+        if(cmpCellEan(v)) st[c].ean++;
+      } else if(/[a-záéíóúñ]/i.test(v)){ st[c].text++; st[c].textLen+=String(v).length; if(st[c].uniq.size<2000) st[c].uniq.add(v); }
     }
   });
   const lab=c=>labels[c]||'';
@@ -4607,7 +4656,12 @@ function cmpGuessMap(rows,perUnit){
   for(let c=0;c<nCols;c++){
     if(!st[c].text) continue;
     const avg=st[c].textLen/st[c].text;
-    let score=st[c].textLen*(avg>=8?1:0.3);
+    // Una columna con el mismo texto repetido ("No Informado", el rubro)
+    // no es el nombre del producto: se pondera por cuántos valores distintos
+    // tiene.
+    const uniqRatio=st[c].uniq.size/Math.min(st[c].text,2000);
+    if(uniqRatio<0.3) continue;
+    let score=st[c].textLen*(avg>=8?1:0.3)*uniqRatio;
     if(/producto|descrip|denomin|art[ií]culo|detalle|nombre/i.test(lab(c))) score*=1.5;
     if(score>bestName){ bestName=score; name=c; }
   }
@@ -4664,10 +4718,18 @@ function cmpGuessMap(rows,perUnit){
     const withQty=sample.filter(s=>cmpQtyFromText(s)>1).length;
     if(withQty>=sample.length*0.2) qty='name';
   }
+  // Código de barras: la columna con más EAN válidos (8 a 14 dígitos). Es
+  // lo que permite emparejar el mismo producto entre proveedores sin
+  // depender de cómo escribe cada uno el nombre.
+  let ean='',bestEan=0;
+  for(let c=0;c<nCols;c++){
+    if(c===name||c===price) continue;
+    const sc=st[c].ean*(/ean|barra|dun|upc/i.test(lab(c))?2:1);
+    if(st[c].ean>=Math.max(3,st[name>=0?name:0].text*0.3)&&sc>bestEan){ bestEan=sc; ean=c; }
+  }
   let code='';
-  for(let c=0;c<nCols;c++){ if(c!==name&&c!==price&&/c[oó]d|sku|art\.?$/i.test(lab(c))&&!/barra|ean/i.test(lab(c))){ code=c; break; } }
-  if(code===''){ for(let c=0;c<nCols;c++){ if(c!==name&&c!==price&&/barra|ean/i.test(lab(c))){ code=c; break; } } }
-  return {name:name>=0?name:'longest',price:price>=0?price:'last',qty,code};
+  for(let c=0;c<nCols;c++){ if(c!==name&&c!==price&&c!==ean&&/c[oó]d|sku|art\.?$/i.test(lab(c))&&!/barra|ean|dun/i.test(lab(c))){ code=c; break; } }
+  return {name:name>=0?name:'longest',price:price>=0?price:'last',qty,code,ean};
 }
 // Si el proveedor ya tiene columnas guardadas (y la hoja/columnas existen
 // en este archivo) se usan esas; si no, se adivinan.
@@ -4676,9 +4738,16 @@ function cmpApplyMapFor(g){
   const saved=prov&&prov.mapping&&prov.mapping.cols;
   let idx=-1;
   if(saved&&saved.sheet) idx=g.sheets.findIndex(s=>s.name===saved.sheet);
+  // Sin hoja guardada: la que más productos válidos da (no la que más
+  // filas tiene — hay archivos con una hoja auxiliar de códigos más larga
+  // que la lista de precios en sí).
   if(idx<0){
     let best=-1;
-    g.sheets.forEach((s,i)=>{ if(s.rows.length>best){ best=s.rows.length; idx=i; } });
+    g.sheets.forEach((s,i)=>{
+      const map=cmpGuessMap(s.rows,false);
+      const names=new Set(); s.rows.forEach(r=>{ const it=cmpRowItem(r,map); if(it) names.add(it.name); });
+      if(names.size>best){ best=names.size; idx=i; }
+    });
   }
   g.sheetIdx=idx;
   cmpApplyMapForSheet(g,saved);
@@ -4687,8 +4756,8 @@ function cmpApplyMapForSheet(g,saved){
   const rows=g.sheets[g.sheetIdx].rows;
   const nCols=Math.max(0,...rows.map(r=>r.length));
   const ok=v=>v===''||v==='name'||v==='last'||v==='longest'||(typeof v==='number'&&v<nCols);
-  if(saved&&ok(saved.name)&&ok(saved.price)&&ok(saved.qty)&&ok(saved.code)){
-    g.map={name:saved.name,price:saved.price,qty:saved.qty,code:saved.code};
+  if(saved&&ok(saved.name)&&ok(saved.price)&&ok(saved.qty)&&ok(saved.code)&&ok(saved.ean||'')){
+    g.map={name:saved.name,price:saved.price,qty:saved.qty,code:saved.code,ean:saved.ean||''};
     g.fromSaved=true;
   } else {
     const prov=cmpDB.proveedores.find(p=>p.id===_cmpImpProvId);
@@ -4713,7 +4782,17 @@ function cmpRowItem(r,map){
     qty=!isNaN(n)?(Number.isInteger(n)&&n>0&&n<10000?n:1):cmpQtyFromText(v);
   }
   const code=map.code===''?'':cmpCellStr(r[map.code]);
-  return {name,price:Math.round(price*100)/100,unit:'',unitQty:qty,code};
+  const ean=map.ean===''||map.ean==null?'':cmpCellEan(r[map.ean]);
+  return {name,price:Math.round(price*100)/100,unit:'',unitQty:qty,code,ean};
+}
+// EAN/código de barras normalizado (solo dígitos, sin ceros a la izquierda
+// para que "07790580127534" y "7790580127534" sean el mismo), o '' si la
+// celda no tiene pinta de código de barras.
+function cmpCellEan(v){
+  const d=String(v==null?'':(typeof v==='number'?Math.round(v):v)).replace(/\s/g,'');
+  if(!/^\d{8,14}$/.test(d)) return '';
+  const t=d.replace(/^0+/,'');
+  return t.length>=8?t:'';
 }
 function cmpGridItems(g){
   const items=[];
@@ -4724,6 +4803,16 @@ function cmpMapSet(key,v){
   _cmpGrid.map[key]=/^\d+$/.test(v)?parseInt(v,10):v;
   _cmpGrid.fromSaved=false;
   cmpRenderMapper();
+}
+// La tilde "precio por unidad" del proveedor, a mano en el paso de
+// columnas: es donde se ve qué dice el encabezado de la columna de precio.
+async function cmpMapPerUnit(on){
+  const prov=cmpDB.proveedores.find(p=>p.id===_cmpImpProvId); if(!prov) return;
+  const prev=prov.mapping;
+  prov.mapping=Object.assign({},prev,{pricePerUnit:!!on});
+  cmpRenderMapper();
+  try{ await cmpSaveProvSupa(prov); }
+  catch(e){ prov.mapping=prev; cmpRenderMapper(); toast('Error: '+e.message,'err'); }
 }
 function cmpMapSheet(i){
   _cmpGrid.sheetIdx=parseInt(i,10)||0;
@@ -4751,6 +4840,7 @@ function cmpRenderMapper(){
   if(typeof g.map.price==='number') roleOf[g.map.price]='Precio';
   if(typeof g.map.qty==='number') roleOf[g.map.qty]='Uds';
   if(typeof g.map.code==='number') roleOf[g.map.code]='Código';
+  if(typeof g.map.ean==='number') roleOf[g.map.ean]='EAN';
   const shown=rows.slice(0,40);
   const tbl=`<div class="cmp-tbl-wrap" style="max-height:360px;overflow:auto;"><table>
     <tr><th></th>${Array.from({length:nCols},(_,c)=>`<th style="${roleOf[c]?'background:var(--gold);color:var(--navy);':''}">${cmpColLetter(c)}${roleOf[c]?' · '+roleOf[c]:''}</th>`).join('')}</tr>
@@ -4775,8 +4865,13 @@ function cmpRenderMapper(){
       ${sel('name','Producto',[['longest','(texto más largo de la fila)']])}
       ${sel('price','Precio',[['last','(último número de la fila)']])}
       ${sel('qty','Uds por bulto',[['','(no hay / 1)'],['name','(sacar del nombre: 6X1000, 12u…)']])}
-      ${sel('code','Código',[['','(no hay)']])}
+      ${sel('code','Código interno',[['','(no hay)']])}
+      ${sel('ean','Código de barras',[['','(no hay)']])}
     </div>
+    <label style="display:flex;align-items:center;gap:8px;font-size:12.5px;margin-bottom:12px;cursor:pointer;">
+      <input type="checkbox" style="width:18px;height:18px;" ${prov&&prov.mapping&&prov.mapping.pricePerUnit?'checked':''} onchange="cmpMapPerUnit(this.checked)">
+      El precio de esta columna ya es <b>por unidad</b> (no por bulto)
+    </label>${(()=>{ const perU=!!(prov&&prov.mapping&&prov.mapping.pricePerUnit); const lp=typeof g.map.price==='number'?(labels[g.map.price]||''):''; return (!perU&&/unit|unid/i.test(lp)&&g.map.qty!=='')?`<div class="cmp-note" style="margin-bottom:12px;border-color:var(--warn);color:var(--warn);">La columna de precio dice "${cmpEsc(lp)}" pero el proveedor está como precio por <b>bulto</b>: el comparador lo va a dividir por las uds del bulto. Si es precio por unidad, tildá la opción de arriba.</div>`:''; })()}
     <div class="cmp-note" style="margin-bottom:12px;">Se van a tomar <b>${items.length}</b> producto(s) de ${rows.length} filas. Las filas sin nombre o sin precio (títulos, rubros, encabezados) se saltean solas.${items[0]?` Ej: <b>${cmpEsc(items[0].name)}</b> → ${cmpMoney(items[0].price)}${items[0].unitQty>1?' ('+items[0].unitQty+' uds)':''}`:''}</div>
     <div style="display:flex;gap:10px;margin-bottom:12px;flex-wrap:wrap;">
       <button class="btn-primary" style="flex:1;min-width:160px;" onclick="cmpMapContinue()"${items.length?'':' disabled'}>Continuar con ${items.length} producto(s)</button>
@@ -4795,7 +4890,7 @@ function cmpMapContinue(){
   const prov=cmpDB.proveedores.find(p=>p.id===_cmpImpProvId);
   _cmpImportAdjustStr=cmpProvAdjustPcts(prov).join(', ');
   _cmpAiFilename=g.filename;
-  _cmpPendingCols={sheet:g.sheets[g.sheetIdx].name,name:g.map.name,price:g.map.price,qty:g.map.qty,code:g.map.code};
+  _cmpPendingCols={sheet:g.sheets[g.sheetIdx].name,name:g.map.name,price:g.map.price,qty:g.map.qty,code:g.map.code,ean:g.map.ean||''};
   _cmpAiItems=items;
   cmpRenderAiPreview();
 }
@@ -5021,7 +5116,7 @@ async function cmpDoAiImport(){
   const adjPcts=cmpImportAdjustPcts();
   const items=_cmpAiItems||[];
   const rows=items.filter(it=>it.name&&it.price>0).map(it=>({
-    name:it.name, price:cmpApplyAdjustPcts(it.price,adjPcts), priceRaw:it.price, unit:it.unit||'', unitQty:it.unitQty||1, code:it.code||'', norm:cmpNorm(it.name)
+    name:it.name, price:cmpApplyAdjustPcts(it.price,adjPcts), priceRaw:it.price, unit:it.unit||'', unitQty:it.unitQty||1, code:it.code||'', ean:it.ean||'', norm:cmpNorm(it.name)
   }));
   if(!rows.length){ toast('No hay productos para importar','err'); return; }
   const now=new Date().toISOString();
@@ -5103,6 +5198,7 @@ function cmpDoSearch(){
     groupIdByKey[l.provId+'|'+l.norm]=l.groupId;
   });
   const usedGroups={};
+  const rejected=cmpRejectedSet();
 
   // Pasada 1: vínculos manuales. Corre ANTES del auto-match para que un
   // vínculo confirmado por el usuario siempre gane — si el auto-match
@@ -5147,7 +5243,7 @@ function cmpDoSearch(){
       const h=capped[idx];
       const key=h.prov.id+'|'+h.row.norm;
       if(used[key]) continue;
-      const g={name:h.row.name,byProv:{}}; g.byProv[h.prov.id]={row:h.row,prov:h.prov}; used[key]=1;
+      const g={name:h.row.name,byProv:{},seed:{provId:h.prov.id,norm:h.row.norm,name:h.row.name}}; g.byProv[h.prov.id]={row:h.row,prov:h.prov}; used[key]=1;
       const seedUPrice=cmpRowUPrice(h.row,h.prov);
       // Por cada proveedor nos quedamos con el candidato de MAYOR similitud
       // de TODA su lista, no con el primero que supere el umbral — antes, si
@@ -5161,6 +5257,17 @@ function cmpDoSearch(){
         pl2.lista.rows.forEach(row2=>{
           const k2=pl2.prov.id+'|'+row2.norm;
           if(used[k2]) return;
+          // Una fila ya vinculada a mano pertenece a su grupo: no se la
+          // ofrece como sugerencia para otro producto.
+          if(groupIdByKey[k2]) return;
+          // El usuario ya dijo que estos dos no son el mismo producto.
+          if(rejected.has(cmpRejId(h.prov.id,h.row.norm,pl2.prov.id,row2.norm))) return;
+          // Mismo código de barras: es el mismo producto, gane a cualquier
+          // parecido por nombre.
+          if(h.row.ean&&row2.ean===h.row.ean){
+            if(!best||best.sim<2) best={row:row2,prov:pl2.prov,sim:2,key:k2};
+            return;
+          }
           // 0.55 emparejaba variantes de un mismo producto que en realidad son
           // presentaciones distintas (ej: "Cofler Block 24x300g" con "Cofler
           // Block 40grs 36u Simple") porque comparten marca+línea y las
@@ -5183,7 +5290,7 @@ function cmpDoSearch(){
           }
           if(!best||sim>best.sim) best={row:row2,prov:pl2.prov,sim,key:k2};
         });
-        if(best){ g.byProv[best.prov.id]={row:best.row,prov:best.prov}; used[best.key]=1; }
+        if(best){ g.byProv[best.prov.id]={row:best.row,prov:best.prov,auto:true}; used[best.key]=1; }
       });
       groups.push(g);
     }
@@ -5244,6 +5351,10 @@ function cmpRenderResults(el,groups,provs,SHOW_MAX){
       else if(diffPct>0) html+=`<span class="cmp-cell-diff" style="color:var(--warn)">+${diffPct}% m&aacute;s caro</span>`;
       html+=`<button class="cmp-add-btn" onclick="cmpCartAdd(${rowIdx})" title="Agregar al pedido">+</button>`;
       if(entry.linked) html+=`<button class="cmp-link-btn cmp-link-btn-active" onclick="cmpUnlinkRow('${pl.prov.id}','${r.norm}')" title="Vinculado a mano — click para desvincular">&#128279;</button>`;
+      if(entry.auto&&g.seed){
+        const ctxIdx=_cmpLinkCtx.push({provId:pl.prov.id,row:{norm:r.norm,name:r.name},members:[g.seed]})-1;
+        html+=`<div class="cmp-sug"><span>sugerido</span><button class="cmp-sug-ok" onclick="cmpConfirmMatch(${ctxIdx})" title="Es el mismo producto — dejarlo vinculado">&#10003;</button><button class="cmp-sug-no" onclick="cmpRejectMatch(${ctxIdx})" title="No es el mismo producto — no volver a sugerirlo">&#10005;</button></div>`;
+      }
       html+=`</td>`;
     });
     html+=`</tr>`;
@@ -5325,6 +5436,40 @@ async function cmpCreateLink(members,provId,row){
   }catch(e){
     cmpDB.links=cmpDB.links.filter(l=>!toSave.includes(l));
     toast('Error al vincular: '+e.message,'err');
+  }
+  cmpDoSearch();
+}
+// Confirmar / rechazar una sugerencia del matching automático. Confirmar
+// crea un vínculo manual (igual que el 🔗) entre la fila de referencia del
+// renglón y esta. Rechazar guarda el par como "no es el mismo producto"
+// para que no se vuelva a sugerir; se guarda en mapping.rejects del
+// proveedor con id menor (el par es simétrico) para no necesitar otra
+// tabla — cmp_links admite un solo vínculo por fila.
+function cmpConfirmMatch(i){
+  const ctx=_cmpLinkCtx[i]; if(!ctx) return;
+  cmpCreateLink(ctx.members,ctx.provId,ctx.row);
+}
+function cmpRejOrder(pA,nA,pB,nB){ return pA<=pB?[pA,nA,pB,nB]:[pB,nB,pA,nA]; }
+function cmpRejId(pA,nA,pB,nB){ return cmpRejOrder(pA,nA,pB,nB).join('|'); }
+function cmpRejectedSet(){
+  const set=new Set();
+  cmpDB.proveedores.forEach(p=>{ ((p.mapping&&p.mapping.rejects)||[]).forEach(e=>set.add(p.id+'|'+e)); });
+  return set;
+}
+async function cmpRejectMatch(i){
+  const ctx=_cmpLinkCtx[i]; if(!ctx||!ctx.members[0]) return;
+  const seed=ctx.members[0];
+  const [pA,nA,pB,nB]=cmpRejOrder(seed.provId,seed.norm,ctx.provId,ctx.row.norm);
+  const prov=cmpDB.proveedores.find(p=>p.id===pA); if(!prov) return;
+  const prev=prov.mapping;
+  const rejects=((prev&&prev.rejects)||[]).concat([nA+'|'+pB+'|'+nB]);
+  prov.mapping=Object.assign({},prev,{rejects});
+  try{
+    await cmpSaveProvSupa(prov);
+    toast('Listo, no se vuelve a sugerir');
+  }catch(e){
+    prov.mapping=prev;
+    toast('Error: '+e.message,'err');
   }
   cmpDoSearch();
 }
