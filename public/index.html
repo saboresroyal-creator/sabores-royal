@@ -4033,7 +4033,10 @@ function cmpBigrams(s){ const r=[]; for(let i=0;i<s.length-1;i++) r.push(s[i]+s[
 function cmpTokSim(a,b){
   if(a===b) return 1;
   if(a.length<2||b.length<2) return 0;
-  if(b.startsWith(a)||a.startsWith(b)) return 0.85;
+  // Abreviatura de 3+ letras que es el comienzo exacto de la otra palabra
+  // ("Bat" = batata, "Arc" = arcor, "Choc" = chocolate): casi seguro es la
+  // misma palabra.
+  if(b.startsWith(a)||a.startsWith(b)) return Math.min(a.length,b.length)>=3?0.95:0.85;
   const ba=cmpBigrams(a),bb=cmpBigrams(b);
   if(!ba.length||!bb.length) return 0;
   let inter=0; const used={};
@@ -4075,7 +4078,11 @@ function cmpMatchTokens(s){
 // emparejaba con "ARCOR AZUCAR 10*1 KG." porque "azuc" matcheaba con
 // "azucar". Se devuelven aparte para exigir que ambos nombres nieguen lo
 // mismo (ver cmpNegConflict).
-const CMP_STOPWORDS = new Set(['de','del','la','el','los','las','con','sin','y','en','para','al']);
+// Además de palabras vacías, las de envase/relleno que un proveedor escribe
+// y otro no ("(ESTUCHE)", "Sab" de sabor): el tamaño ya separa las
+// presentaciones distintas.
+const CMP_STOPWORDS = new Set(['de','del','la','el','los','las','con','sin','y','en','para','al',
+  'estuche','estuch','est','doypack','dpack','lata','latas','bolsa','pote','frasco','botella','sobre','sobres','tetra','tubo','balde','cajon','blister','bandeja','paquete','sabor','sab']);
 function cmpNegWords(s){
   const out=[]; const re=/(?:^|[^a-z])(?:s\/|sin[\s.]+)\s*([a-záéíóúñ]{3,})/gi; let m;
   while((m=re.exec(String(s||'')))) out.push(cmpNorm(m[1]));
@@ -4097,13 +4104,51 @@ function cmpVarietyOf(t){
   if(t.length<4) return null;
   return CMP_VARIETY.find(v=>v===t||v.startsWith(t))||null;
 }
-function cmpVarietyConflict(ta,tb){
+// "Chocolate", "maní", etc. también son el producto en sí ("TABLETA
+// CHOCOLATE MARMOLADO", "AGUILA CHOC. NARANJITAS"): solo cuentan como
+// sabor cuando el nombre lo marca ("C/CHOCOLATE", "Sab/Choc",
+// "BATATA/CHOCOLATE", "con maní").
+const CMP_VARIETY_MARKED = new Set(['chocolate','mani','coco','cafe','caramelo','almendra','avellana']);
+function cmpMarkedWords(name){
+  const out=new Set(); const re=/(?:c\/|con\s+|sab(?:or)?[\s.\/]*|\/)\s*([a-záéíóúñ]{3,})/gi; let m;
+  while((m=re.exec(String(name||'')))) out.add(cmpNorm(m[1]));
+  return out;
+}
+function cmpVarietyConflict(ta,tb,markedA){
   return ta.some(t=>{
     const v=cmpVarietyOf(t); if(!v) return false;
+    if(CMP_VARIETY_MARKED.has(v)&&!markedA.has(t)) return false;
     if(tb.some(u=>cmpTokSim(t,u)>=0.75||(u.length>=3&&v.startsWith(u)))) return false;
     if(CMP_VARIETY_SOFT.has(v)) return tb.some(u=>{ const w=cmpVarietyOf(u); return w&&w!==v; });
     return true;
   });
+}
+// Marcas: si los dos nombres mencionan marcas y no comparten ninguna, son
+// productos distintos ("NOEL ATUN" vs "Atun Lc" = La Campagnola). Si un
+// proveedor omite la marca no se penaliza (en la lista de Arcor, "Mogul
+// Moras" no dice ARCOR). Incluye las abreviaturas que usan los
+// distribuidores; se pueden ir agregando a medida que aparezcan.
+const CMP_BRANDS = {
+  arcor:'arcor',arc:'arcor',arco:'arcor',bc:'bc',lc:'lc',campagnola:'lc',noel:'noel',royal:'royal',godet:'godet',
+  aguila:'aguila',agui:'aguila',cofler:'cofler',mogul:'mogul',georgalos:'georgalos',felfort:'felfort',fel:'felfort',
+  billiken:'billiken',misky:'misky',ledesma:'ledesma',marolio:'marolio',molto:'molto',dulcor:'dulcor',cormillot:'cormillot',
+  inalpa:'inalpa',baggio:'baggio',knorr:'knorr',maggi:'maggi',hellmanns:'hellmanns',natura:'natura',cocinero:'cocinero',
+  canuelas:'canuelas',morixe:'morixe',lheritier:'lheritier',bariloche:'bariloche',copani:'copani',granix:'granix',
+  terrabusi:'terrabusi',bagley:'bagley',milka:'milka',cadbury:'cadbury',toddy:'toddy',nesquik:'nesquik',nestle:'nestle',
+  tang:'tang',clight:'clight',sancor:'sancor',serenisima:'serenisima',paladini:'paladini',swift:'swift',trio:'trio',
+  vauquita:'vauquita',mentos:'mentos',adams:'adams',beldent:'beldent',gentleman:'gentleman',bonafide:'bonafide',
+  fantoche:'fantoche',guaymallen:'guaymallen',havanna:'havanna',jorgito:'jorgito'
+};
+function cmpBrandsOf(tokens){
+  const out=new Set();
+  tokens.forEach(t=>{ const b=CMP_BRANDS[t]; if(b) out.add(b); });
+  return out;
+}
+function cmpBrandConflict(ta,tb){
+  const ba=cmpBrandsOf(ta), bb=cmpBrandsOf(tb);
+  if(!ba.size||!bb.size) return false;
+  for(const b of ba) if(bb.has(b)) return false;
+  return true;
 }
 function cmpNegConflict(negA,tokB,negB){
   return negA.some(w=>{
@@ -4125,7 +4170,8 @@ function cmpNegConflict(negA,tokB,negB){
 // mal como "5").
 function cmpExtractSize(name){
   const s=String(name||'').toLowerCase();
-  const re=/(\d+(?:[.,]\d+)?)\s*(ml|mls|cc|l|lt|lts|litros|kg|kgs|kilos|kilo|gr|grs|gramos|g)\b/g;
+  // El "\.?" acepta "6X8X18.G" / "2*5.KG" (punto entre número y unidad).
+  const re=/(\d+(?:[.,]\d+)?)\.?\s*(ml|mls|cc|l|lt|lts|litros|kg|kgs|kilos|kilo|gr|grs|gramos|g)\b/g;
   let m,best=null;
   while((m=re.exec(s))){
     let val=parseFloat(m[1].replace(',','.'));
@@ -4180,6 +4226,11 @@ function cmpProdSim(a,b){
 // se recalculaba tamaño y tokens desde cero en cada comparación y con
 // listas de varios miles de filas (ej: Tyna) eso trababa el navegador.
 const _cmpSizeCache=new WeakMap(), _cmpTokCache=new WeakMap(), _cmpNegCache=new WeakMap();
+const _cmpMarkCache=new WeakMap();
+function cmpRowMarked(row){
+  if(_cmpMarkCache.has(row)) return _cmpMarkCache.get(row);
+  const v=cmpMarkedWords(row.name); _cmpMarkCache.set(row,v); return v;
+}
 function cmpRowNeg(row){
   if(_cmpNegCache.has(row)) return _cmpNegCache.get(row);
   const v=cmpNegWords(row.name); _cmpNegCache.set(row,v); return v;
@@ -4202,7 +4253,8 @@ function cmpProdSimRows(rowA,rowB){
   if(!ta.length||!tb.length) return 0;
   const na=cmpRowNeg(rowA),nb=cmpRowNeg(rowB);
   if(cmpNegConflict(na,tb,nb)||cmpNegConflict(nb,ta,na)) return 0;
-  if(cmpVarietyConflict(ta,tb)||cmpVarietyConflict(tb,ta)) return 0;
+  if(cmpBrandConflict(ta,tb)) return 0;
+  if(cmpVarietyConflict(ta,tb,cmpRowMarked(rowA))||cmpVarietyConflict(tb,ta,cmpRowMarked(rowB))) return 0;
   let matched=0; const usedB={};
   ta.forEach(wa=>{
     let best=0,bestI=-1;
