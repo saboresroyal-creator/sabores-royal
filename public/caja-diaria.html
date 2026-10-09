@@ -844,6 +844,7 @@ tr:hover td { background:var(--surface2); }
           <option value="factura">Factura</option>
           <option value="remito">Remito</option>
           <option value="nc">Nota de crédito (descuenta)</option>
+          <option value="acuenta">Saldo a favor / pago a cuenta (descuenta)</option>
         </select>
       </div>
       <div>
@@ -3480,12 +3481,19 @@ function mediosDePago(grupo) {
   return f0.formaPago && f0.formaPago!=='combinado' ? [{forma: f0.formaPago, monto: sumaNeta(grupo), detalle: f0.pagoDetalle||''}] : [];
 }
 function textoMedio(m) { return `${FORMAS_PAGO[m.forma]||m.forma} ${pesos2(m.monto)}${m.detalle?' ('+m.detalle+')':''}`; }
-const TIPOS_COMP = { factura:'Factura', remito:'Remito', nc:'Nota de crédito' };
+const TIPOS_COMP = { factura:'Factura', remito:'Remito', nc:'Nota de crédito', acuenta:'Saldo a favor' };
 function compLabel(f) { return (TIPOS_COMP[f.tipo]||'Factura') + (f.numero?' N° '+f.numero:''); }
 // Las notas de crédito restan: se guardan en positivo y el signo lo pone el tipo.
-function montoNeto(f) { return f.tipo==='nc' ? -f.monto : f.monto; }
+function montoNeto(f) { return esNC(f) ? -f.monto : f.monto; }
 function sumaNeta(arr) { return arr.reduce((s,f)=>s+montoNeto(f),0); }
-function esNC(f) { return f.tipo==='nc'; }
+// Créditos a favor: notas de crédito y saldos por pagar de más. Restan y no vencen.
+function esNC(f) { return f.tipo==='nc' || f.tipo==='acuenta'; }
+// Lo que se pagó de verdad en un pago (suma de los medios); si es viejo, el neto de los comprobantes.
+function totalPagadoGrupo(grupo) {
+  const ms = grupo[0].pagoMedios;
+  return ms && ms.length ? r2(ms.reduce((s,m)=>s+(+m.monto||0),0)) : r2(sumaNeta(grupo));
+}
+function saldoGeneradoPor(pagoId) { return pagoId ? state.facturas.find(x=>x.tipo==='acuenta' && x.origenPagoId===pagoId) : null; }
 function facturaVencida(f) { return f.estado!=='pagada' && !esNC(f) && f.fechaVence && diasHasta(f.fechaVence)<0; }
 function pesos2(n) { return (n<0?'−':'') + '$' + Math.abs(n||0).toLocaleString('es-AR',{minimumFractionDigits:2,maximumFractionDigits:2}); }
 
@@ -3580,11 +3588,15 @@ function registrarPagoDeuda() {
   if(!medios.length || medios.some(m=>!m.forma)) { alert('Elegí el medio de pago de cada fila: cheque, eCheq, efectivo o transferencia.'); return; }
   if(medios.some(m=>m.monto<=0)) { alert('Cada medio de pago tiene que tener un monto mayor a cero.'); return; }
   const asignado = r2(medios.reduce((s,m)=>s+m.monto,0));
-  if(asignado!==total) { alert(`Los medios de pago suman ${pesos2(asignado)} y el pago es de ${pesos2(total)}. Tienen que coincidir.`); return; }
+  if(asignado<total) { alert(`Los medios de pago suman ${pesos2(asignado)} y el pago es de ${pesos2(total)}. Falta asignar ${pesos2(r2(total-asignado))}.`); return; }
+  const sobrante = r2(asignado - total);
+  if(sobrante>0 && !confirm(`Pagás ${pesos2(asignado)} y los comprobantes suman ${pesos2(total)}.\n\nLos ${pesos2(sobrante)} de más quedan A CUENTA de ${items[0].proveedor} como saldo a favor, y se descuentan en el próximo pago. ¿Seguir?`)) return;
   const formaPago = medios.length===1 ? medios[0].forma : 'combinado';
   const pagoDetalle = medios.length===1 ? medios[0].detalle : medios.map(textoMedio).join(' + ');
   const pagoId = 'P'+Date.now();
   items.forEach(f=>Object.assign(f, {estado:'pagada', formaPago, fechaPagada, pagoId, pagoDetalle, pagoMedios: medios.map(m=>Object.assign({}, m))}));
+  if(sobrante>0) state.facturas.push({id: Date.now()+1, proveedor: items[0].proveedor, monto: sobrante, fechaIngreso: fechaPagada, fechaVence: fechaPagada,
+    tipo:'acuenta', numero:'', nota:`Pago de más del ${fmtFecha(fechaPagada)}`, estado:'pendiente', formaPago:'', fechaPagada:'', pagoId:'', pagoDetalle:'', origenPagoId: pagoId});
   deudaSeleccion.clear();
   limpiarMediosPago();
   document.getElementById('deudaPagoFecha').value = todayStr();
@@ -3625,7 +3637,10 @@ function textoInformePago(grupo) {
     `Comprobantes que cancela:`,
     ...lineas,
     ``,
-    `TOTAL PAGADO: ${pesos2(sumaNeta(grupo))}`,
+    ...(()=>{ const saldo = saldoGeneradoPor(f0.pagoId);
+      return saldo ? [`Total comprobantes: ${pesos2(sumaNeta(grupo))}`, `TOTAL PAGADO: ${pesos2(totalPagadoGrupo(grupo))}`, `Queda a cuenta (saldo a favor nuestro): ${pesos2(saldo.monto)}`]
+                   : [`TOTAL PAGADO: ${pesos2(totalPagadoGrupo(grupo))}`];
+    })(),
     ``,
     `Saludos!`
   ].join('\n');
@@ -3686,7 +3701,10 @@ function informarPagoImprimir() {
       return `<div class="dato">Forma de pago: <b>${escHtml(FORMAS_PAGO_TODAS[f.formaPago]||f.formaPago||'-')}</b></div>${f.pagoDetalle?`<div class="dato">Detalle: <b>${escHtml(f.pagoDetalle)}</b></div>`:''}`;
     })()}
     <table><thead><tr><th>Comprobante</th><th>Fecha</th><th style="text-align:right;">Importe</th></tr></thead><tbody>${filas}</tbody></table>
-    <div class="tot">TOTAL PAGADO: ${pesos2(sumaNeta(grupo))}</div>
+    ${(()=>{ const saldo = saldoGeneradoPor(f.pagoId);
+      return saldo ? `<div class="dato" style="text-align:right;">Total comprobantes: <b>${pesos2(sumaNeta(grupo))}</b></div><div class="tot">TOTAL PAGADO: ${pesos2(totalPagadoGrupo(grupo))}</div><div class="dato" style="text-align:right;">Queda a cuenta (saldo a favor nuestro): <b>${pesos2(saldo.monto)}</b></div>`
+                   : `<div class="tot">TOTAL PAGADO: ${pesos2(totalPagadoGrupo(grupo))}</div>`;
+    })()}
     <script>window.onload=()=>window.print();<\/script></body></html>`);
   w.document.close();
   marcarInformado();
@@ -3700,8 +3718,11 @@ function volverAPendiente(id) {
   const msg = grupo.length>1
     ? `Este pago incluye ${grupo.length} comprobantes (${pesos2(sumaNeta(grupo))}). ¿Volver todos a pendiente?`
     : '¿Volver este comprobante a pendiente?';
-  if(!confirm(msg)) return;
+  const saldo = saldoGeneradoPor(f.pagoId);
+  if(saldo && saldo.estado==='pagada') { alert(`Este pago dejó ${pesos2(saldo.monto)} a cuenta y ese saldo ya se usó en el pago del ${fmtFecha(saldo.fechaPagada)}. Primero volvé a pendiente ese otro pago.`); return; }
+  if(!confirm(msg + (saldo ? `\n\nTambién se borra el saldo a favor de ${pesos2(saldo.monto)} que generó.` : ''))) return;
   grupo.forEach(x=>Object.assign(x, {estado:'pendiente', formaPago:'', fechaPagada:'', pagoId:'', pagoDetalle:'', pagoInformado:'', pagoMedios:[]}));
+  if(saldo) state.facturas = state.facturas.filter(x=>x!==saldo);
   save(); renderDeuda();
 }
 
@@ -3748,7 +3769,7 @@ function actualizarAsignadoPago() {
   el.innerHTML = dif===0
     ? `<span style="color:var(--green);">✓ Asignado ${pesos2(asignado)} de ${pesos2(total)}</span>`
     : dif>0 ? `<span style="color:var(--yellow);">Asignado ${pesos2(asignado)} · falta ${pesos2(dif)}</span>`
-            : `<span style="color:var(--red);">Asignado ${pesos2(asignado)} · sobra ${pesos2(-dif)}</span>`;
+            : `<span style="color:#60a5fa;">Asignado ${pesos2(asignado)} · pagás ${pesos2(-dif)} de más → queda a cuenta</span>`;
 }
 function limpiarMediosPago() {
   document.getElementById('deudaPagoMedios').innerHTML = '';
@@ -3778,7 +3799,7 @@ function renderDeudaPagoPanel() {
   // Avisa si el proveedor tiene notas de crédito pendientes que no se están usando.
   const ncLibres = state.facturas.filter(f=>esNC(f) && f.estado!=='pagada' && !deudaSeleccion.has(f.id) && provKey(f.proveedor)===provKey(items[0].proveedor));
   if(ncLibres.length) document.getElementById('deudaPagoDetalleSel').innerHTML +=
-    `<br><span style="color:var(--green);">💡 ${escHtml(items[0].proveedor)} tiene ${ncLibres.length} nota(s) de crédito sin aplicar por ${pesos2(ncLibres.reduce((s,f)=>s+f.monto,0))}: tildá "Juntar" en ella para descontarla.</span>`;
+    `<br><span style="color:var(--green);">💡 ${escHtml(items[0].proveedor)} tiene ${ncLibres.length} crédito(s) a favor sin aplicar (notas de crédito o saldo a cuenta) por ${pesos2(ncLibres.reduce((s,f)=>s+f.monto,0))}: tildá "Juntar" en ella para descontarla.</span>`;
 }
 
 function removeFactura(id) {
@@ -3910,9 +3931,11 @@ function renderDeuda() {
       if(f.pagoDetalle) status += `<div style="color:var(--muted);font-weight:400;">${escHtml(f.pagoDetalle)}</div>`;
       const grupo = grupoDePago(f);
       if(grupo.length>1) status += `<div style="color:var(--muted);font-weight:400;">🔗 Pago conjunto de ${grupo.length} comprobantes: ${pesos2(sumaNeta(grupo))}</div>`;
+      const saldoGen = saldoGeneradoPor(f.pagoId);
+      if(saldoGen) status += `<div style="color:#60a5fa;font-weight:400;">💵 Se pagó ${pesos2(totalPagadoGrupo(grupo))}: quedaron ${pesos2(saldoGen.monto)} a cuenta</div>`;
       if(f.pagoInformado) status += `<div style="color:var(--muted);font-weight:400;">📤 Informado al proveedor el ${fmtFecha(f.pagoInformado)}</div>`;
       statusColor='var(--green)'; }
-    else if(esNC(f)){ status='CRÉDITO A FAVOR · juntala con una factura al pagar'; statusColor='var(--green)'; }
+    else if(esNC(f)){ status = f.tipo==='acuenta' ? 'SALDO A FAVOR · se descuenta al juntarlo en el próximo pago' : 'CRÉDITO A FAVOR · juntala con una factura al pagar'; statusColor='var(--green)'; }
     else if(diff<0){ cls+=' vencido'; status=`⚠ Vencida hace ${Math.abs(diff)} día(s)`; statusColor='var(--red)'; }
     else if(diff===0){ cls+=' alerta'; status='⏰ Vence HOY'; statusColor='var(--yellow)'; }
     else if(diff<=DEUDA_ALERTA_DIAS){ cls+=' alerta'; status=`⏰ Vence en ${diff} día(s)`; statusColor='var(--yellow)'; }
@@ -3923,7 +3946,7 @@ function renderDeuda() {
         <div class="imp-nombre">${escHtml(f.proveedor)}</div>
         ${f.estado!=='pagada' ? `<label style="display:flex;align-items:center;gap:6px;font-size:11px;color:var(--muted);cursor:pointer;margin:0;white-space:nowrap;"><input type="checkbox" ${sel?'checked':''} onchange="toggleSeleccionDeuda(${f.id})" style="width:18px;height:18px;padding:0;">Juntar</label>` : ''}
       </div>
-      <div style="font-size:12px;font-weight:600;color:${esNC(f)?'var(--green)':f.tipo==='remito'?'#60a5fa':'var(--gold)'};margin-bottom:2px;">${esNC(f)?'➖':f.tipo==='remito'?'📦':'🧾'} ${escHtml(compLabel(f))}</div>
+      <div style="font-size:12px;font-weight:600;color:${esNC(f)?'var(--green)':f.tipo==='remito'?'#60a5fa':'var(--gold)'};margin-bottom:2px;">${f.tipo==='acuenta'?'💵':esNC(f)?'➖':f.tipo==='remito'?'📦':'🧾'} ${escHtml(compLabel(f))}</div>
       <div class="imp-monto" style="${esNC(f)?'color:var(--green);':''}">${esNC(f)?'−':''}${pesos2(f.monto)}</div>
       <div class="imp-vence">${esNC(f)?'Fecha: '+fmtFecha(f.fechaIngreso):`Ingresó: ${fmtFecha(f.fechaIngreso)} · Vence: ${fmtFecha(f.fechaVence)}`}</div>
       ${f.nota?`<div style="font-size:11px;color:var(--muted);margin-top:4px;">${escHtml(f.nota)}</div>`:''}
