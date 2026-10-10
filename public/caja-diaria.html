@@ -816,7 +816,12 @@ tr:hover td { background:var(--surface2); }
 
   <!-- Formulario -->
   <div class="card mb16">
-    <div class="card-title"><div class="dot"></div>NUEVA FACTURA / REMITO</div>
+    <div class="card-title" style="display:flex;align-items:center;justify-content:space-between;flex-wrap:wrap;row-gap:8px;">
+      <span style="display:flex;align-items:center;gap:8px;"><div class="dot"></div>NUEVA FACTURA / REMITO</span>
+      <button class="btn btn-gold btn-sm" id="btnFotoFactura" onclick="document.getElementById('facFotoInput').click()">📷 Cargar desde foto</button>
+      <input type="file" id="facFotoInput" accept="image/*,application/pdf" style="display:none;" onchange="leerFotoFactura(this)">
+    </div>
+    <div id="facFotoEstado" style="display:none;font-size:12px;margin:-4px 0 14px;padding:10px 12px;border-radius:8px;background:var(--surface2);border:1px solid var(--border);"></div>
     <div class="grid4 mb16">
       <div>
         <label>Proveedor</label>
@@ -3522,6 +3527,7 @@ function guardarFactura() {
   }
   save();
   cancelarEdicionFactura();
+  estadoFotoFactura('');
   renderDeuda();
 }
 
@@ -3549,6 +3555,91 @@ function cancelarEdicionFactura() {
   document.getElementById('facFechaIngreso').value = todayStr();
   document.getElementById('btnGuardarFactura').textContent = '+ Agregar comprobante';
   document.getElementById('btnCancelarEdicionFactura').style.display = 'none';
+}
+
+// ── CARGA DESDE FOTO ──
+// La foto (o PDF) va a /api/factura-foto, que la lee con IA y devuelve los
+// campos. Solo se completa el formulario: el usuario revisa y guarda.
+function estadoFotoFactura(html, color) {
+  const el = document.getElementById('facFotoEstado');
+  el.style.display = html ? 'block' : 'none';
+  el.style.borderColor = color || 'var(--border)';
+  el.innerHTML = html || '';
+}
+// Achica la foto (las del celular pesan varios MB) y la pasa a JPEG base64.
+function achicarImagen(file, maxLado, calidad) {
+  return new Promise((resolve, reject) => {
+    const url = URL.createObjectURL(file);
+    const img = new Image();
+    img.onload = () => {
+      const k = Math.min(1, maxLado / Math.max(img.width, img.height));
+      const c = document.createElement('canvas');
+      c.width = Math.round(img.width * k); c.height = Math.round(img.height * k);
+      c.getContext('2d').drawImage(img, 0, 0, c.width, c.height);
+      URL.revokeObjectURL(url);
+      resolve({ data: c.toDataURL('image/jpeg', calidad).split(',')[1], mediaType: 'image/jpeg' });
+    };
+    img.onerror = () => { URL.revokeObjectURL(url); reject(new Error('No se pudo abrir la imagen')); };
+    img.src = url;
+  });
+}
+function archivoABase64(file) {
+  return new Promise((resolve, reject) => {
+    const r = new FileReader();
+    r.onload = () => resolve(String(r.result).split(',')[1]);
+    r.onerror = () => reject(new Error('No se pudo leer el archivo'));
+    r.readAsDataURL(file);
+  });
+}
+async function leerFotoFactura(input) {
+  const file = input.files && input.files[0];
+  input.value = '';
+  if(!file) return;
+  const btn = document.getElementById('btnFotoFactura');
+  try {
+    btn.disabled = true;
+    estadoFotoFactura('⏳ Leyendo el comprobante… (tarda unos segundos)');
+    let archivo;
+    if(file.type === 'application/pdf') {
+      if(file.size > 3 * 1024 * 1024) throw new Error('El PDF es muy pesado (máximo 3 MB). Probá con una foto.');
+      archivo = { data: await archivoABase64(file), mediaType: 'application/pdf' };
+    } else {
+      archivo = await achicarImagen(file, 1800, 0.85);
+    }
+    const proveedores = [...new Set([...(state.facturas||[]), ...(state.cheques||[])].map(x=>(x.proveedor||'').trim()).filter(Boolean))];
+    const res = await fetch('/api/factura-foto', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ pin: CAJA_PIN, data: archivo.data, mediaType: archivo.mediaType, proveedores }),
+    });
+    const r = await res.json().catch(()=>({}));
+    if(!res.ok) throw new Error(r.error || ('Error ' + res.status));
+    if(!r.legible) { estadoFotoFactura('⚠ No pude leer un comprobante en esa foto. Probá con más luz, de frente y que se vea entero el total.', 'var(--yellow)'); return; }
+
+    // Completa el formulario como comprobante nuevo
+    cancelarEdicionFactura();
+    document.getElementById('facProveedor').value = r.proveedor;
+    document.getElementById('facTipo').value = r.tipo;
+    document.getElementById('facNumero').value = r.numero;
+    document.getElementById('facMonto').value = r.total || '';
+    document.getElementById('facFechaIngreso').value = r.fechaEmision || todayStr();
+    document.getElementById('facFechaVence').value = r.fechaVencimiento || '';
+
+    const avisos = [];
+    if(!r.total) avisos.push('no se leyó el total: completalo');
+    if(!r.fechaVencimiento && r.tipo!=='nc') avisos.push('el comprobante no trae vencimiento de pago: completalo');
+    if(!r.fechaEmision) avisos.push('no se leyó la fecha: quedó la de hoy');
+    if(r.observaciones) avisos.push(escHtml(r.observaciones));
+    const dup = r.numero && (state.facturas||[]).find(f=>provKey(f.proveedor)===provKey(r.proveedor) && (f.numero||'').trim()===r.numero && f.tipo===r.tipo);
+    if(dup) avisos.push(`<b style="color:var(--red)">ojo: ya tenés cargado este comprobante (${escHtml(compLabel(dup))}, ${pesos2(dup.monto)})</b>`);
+    estadoFotoFactura(`✓ Leído: <b>${escHtml(compLabel(r))}</b> de <b>${escHtml(r.proveedor||'¿proveedor?')}</b> por <b>${pesos2(r.total)}</b>. Revisá los datos y tocá <b>+ Agregar comprobante</b>.`
+      + (avisos.length ? `<br><span style="color:var(--yellow)">⚠ ${avisos.join(' · ')}</span>` : ''), dup ? 'var(--red)' : avisos.length ? 'var(--yellow)' : 'var(--green)');
+    document.getElementById('facProveedor').scrollIntoView({behavior:'smooth', block:'center'});
+  } catch(e) {
+    estadoFotoFactura('✗ ' + escHtml(e.message || 'No se pudo leer la foto'), 'var(--red)');
+  } finally {
+    btn.disabled = false;
+  }
 }
 
 // ── PAGO (uno o varios comprobantes del mismo proveedor juntos) ──
