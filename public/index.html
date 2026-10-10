@@ -1484,6 +1484,28 @@ async function apiSaveProduct(product){
     } else {
       photoCleanUrl = product.photoClean || null;
     }
+    // Fotos propias de cada color/variante, recién elegidas (data:): se
+    // suben con nombre único para que no queden fotos viejas en caché.
+    if(product.variants && Array.isArray(product.variants.options)){
+      for(let i=0;i<product.variants.options.length;i++){
+        const o = product.variants.options[i];
+        if(!o.photo || !o.photo.startsWith('data:')) continue;
+        try{
+          o.photo = await uploadProductPhoto(o.photo, (product._apiId||product.id)+'_v'+Date.now().toString(36)+i);
+          saveState();
+        }catch(pe){
+          console.warn('No se pudo subir foto de variante:', pe);
+          delete o.photo;
+          toast('No se pudo subir la foto de "'+o.name+'" — volvé a cargarla', 'err');
+        }
+      }
+      // Sin foto propia del producto: usa la del primer color, así la
+      // tarjeta del catálogo (y búsquedas, ofertas, admin) no queda vacía.
+      if(!photoUrl && !product.photo){
+        const first = product.variants.options.find(o=>o.photo && !o.photo.startsWith('data:'));
+        if(first){ product.photo = first.photo; photoUrl = first.photo; saveState(); }
+      }
+    }
     const body = {
       name: product.name,
       description: product.desc||"",
@@ -2981,6 +3003,11 @@ function renderProductDetail(id){
   const qty = state.route.qty || 1;
   const _variants = productVariants(p);
   const _selVariant = _variants.some(o=>o.name===state.route.variant&&!o.out) ? state.route.variant : null;
+  // Foto grande: la del color elegido si tiene una propia (o la del que se
+  // está mirando aunque esté agotado), si no la del producto.
+  const _viewVariant = _variants.find(o=>o.name===state.route.variant);
+  const _pdPhoto = (_viewVariant&&_viewVariant.photo) || p.photo;
+  const _variantsHavePhotos = _variants.some(o=>o.photo);
   const outOfStock = isOutOfStock(p) || (_variants.length>0 && _variants.every(o=>o.out));
   const _unitPr = effectivePrice(p);
   const _clW = state.currentClientPhone ? state.clients[state.currentClientPhone] : null;
@@ -2997,7 +3024,7 @@ function renderProductDetail(id){
     </div>
     <div class="pd-img">
       ${_pdPromoPct?`<span class="pd-promo-badge">🔥 -${_pdPromoPct}%</span>`:''}
-      ${p.photo?`<img src="${p.photo}" loading="lazy">`:ic('box')}
+      ${_pdPhoto?`<img src="${_pdPhoto}" loading="lazy">`:ic('box')}
     </div>
     <div class="pd-body">
       <h2>${p.name}</h2>
@@ -3013,7 +3040,12 @@ function renderProductDetail(id){
         <div style="margin:4px 0 14px;">
           <div style="font-size:12px; color:rgba(255,255,255,0.55); font-weight:600; margin-bottom:8px;">Elegí ${escapeHtml(productVariantLabel(p).toLowerCase())}${_selVariant?`: <b style="color:var(--gold2);">${escapeHtml(_selVariant)}</b>`:''}</div>
           <div style="display:flex; flex-wrap:wrap; gap:8px;">
-            ${_variants.map((o,i)=>`<button class="chip ${_selVariant===o.name?'active':''}" ${o.out?'disabled style="opacity:.4; text-decoration:line-through;"':''} onclick="setDetailVariant(${i})">${escapeHtml(o.name)}${o.out?' (agotado)':''}</button>`).join('')}
+            ${_variants.map((o,i)=>_variantsHavePhotos
+              ? `<button onclick="setDetailVariant(${i})" style="width:72px; padding:0; background:none; border:none; color:var(--cream); cursor:pointer; ${o.out?'opacity:.4;':''}">
+                  <div style="width:72px; height:72px; border-radius:12px; overflow:hidden; border:2px solid ${state.route.variant===o.name?'var(--gold)':'var(--glass-bd)'}; background:${o.photo?`url('${o.photo}') center/cover`:'var(--glass)'};"></div>
+                  <div style="font-size:11px; margin-top:4px; line-height:1.2; ${o.out?'text-decoration:line-through;':''}">${escapeHtml(o.name)}${o.out?'<br>(agotado)':''}</div>
+                </button>`
+              : `<button class="chip ${_selVariant===o.name?'active':''}" ${o.out?'disabled style="opacity:.4; text-decoration:line-through;"':''} onclick="setDetailVariant(${i})">${escapeHtml(o.name)}${o.out?' (agotado)':''}</button>`).join('')}
           </div>
         </div>` : ''}
       ${outOfStock ? `
@@ -3041,7 +3073,10 @@ function renderProductDetail(id){
 function setDetailVariant(i){
   const p = state.products.find(pr=>pr.id===state.route.id);
   const o = productVariants(p)[i];
-  if(!o || o.out) return;
+  if(!o) return;
+  // Un color agotado se puede tocar para ver su foto, pero no queda
+  // elegido para comprar (ver _selVariant en renderProductDetail).
+  if(o.out && !o.photo) return;
   state.route.variant = o.name; render();
 }
 function detailSelectedVariant(){ return state.route.variant||null; }
@@ -3266,8 +3301,9 @@ function renderCart(){
             <button class="cart-remove" onclick="removeFromCart('${p.id}')">Quitar</button>
           </div>`;
         }
+        const _vPhoto = item.variant ? ((productVariants(p).find(o=>o.name===item.variant)||{}).photo||'') : '';
         return `<div class="cart-item">
-          <img src="${p.photoThumb||p.photo||''}" loading="lazy" onerror="this.style.display='none'">
+          <img src="${_vPhoto||p.photoThumb||p.photo||''}" loading="lazy" onerror="this.style.display='none'">
           <div class="cart-item-body">
             <h4>${p.name}</h4>
             ${item.variant?`<div style="font-size:12px; color:var(--gold2); margin:2px 0;">${escapeHtml(productVariantLabel(p))}: <b>${escapeHtml(item.variant)}</b></div>`:''}
@@ -7917,7 +7953,7 @@ function openProductModal(id){
     </div>
   `;
   document.body.appendChild(overlay);
-  _pmVariants = productVariants(p).map(o=>({name:o.name, out:!!o.out}));
+  _pmVariants = productVariants(p).map(o=>({name:o.name, out:!!o.out, ...(o.photo?{photo:o.photo}:{})}));
   pmRenderVariants();
 }
 // Colores/variantes que se están editando en el modal de producto.
@@ -7925,8 +7961,27 @@ let _pmVariants = [];
 function pmRenderVariants(){
   const el = document.getElementById('pm-var-list'); if(!el) return;
   el.innerHTML = _pmVariants.length
-    ? _pmVariants.map((o,i)=>`<span class="subcat-chip" style="cursor:pointer; ${o.out?'opacity:.5; text-decoration:line-through;':''}" title="Tocá para marcar ${o.out?'disponible':'agotado'}" onclick="pmToggleVariant(${i})">${escapeHtml(o.name)}${o.out?' (agotado)':''} <button type="button" onclick="event.stopPropagation(); pmRemoveVariant(${i})">×</button></span>`).join('')
+    ? _pmVariants.map((o,i)=>`<span class="subcat-chip" style="cursor:pointer; display:inline-flex; align-items:center; gap:6px; ${o.out?'opacity:.5; text-decoration:line-through;':''}" title="Tocá para marcar ${o.out?'disponible':'agotado'}" onclick="pmToggleVariant(${i})">
+        <label onclick="event.stopPropagation();" title="${o.photo?'Cambiar':'Subir'} foto de este ${escapeHtml(((document.getElementById('pm-var-label')||{}).value||'color').toLowerCase())}" style="width:30px; height:30px; flex:none; border-radius:6px; overflow:hidden; cursor:pointer; display:flex; align-items:center; justify-content:center; border:1px dashed rgba(255,255,255,0.3); ${o.photo?`background:url('${o.photo}') center/cover;`:''}">
+          ${o.photo?'':`<span style="width:16px; height:16px; display:inline-flex; opacity:.6;">${ic('camera')}</span>`}
+          <input type="file" accept="image/*" style="display:none;" onchange="pmVariantPhoto(event, ${i})">
+        </label>
+        ${escapeHtml(o.name)}${o.out?' (agotado)':''} <button type="button" onclick="event.stopPropagation(); pmRemoveVariant(${i})">×</button></span>`).join('')
     : `<span style="font-size:12px; color:rgba(255,255,255,0.35);">Sin variantes: se vende como un solo producto.</span>`;
+}
+// Foto propia de cada color: se achica acá (como la del producto) y se
+// sube a Storage al guardar el producto (apiSaveProduct).
+function pmVariantPhoto(event, i){
+  const file = event.target.files && event.target.files[0];
+  if(!file || !_pmVariants[i]) return;
+  const r = new FileReader();
+  r.onload = async e=>{
+    try{
+      _pmVariants[i].photo = await downscaleImageDataUrl(e.target.result, 900, 0.82);
+      pmRenderVariants();
+    }catch(err){ toast('No se pudo leer la foto', 'err'); }
+  };
+  r.readAsDataURL(file);
 }
 function pmAddVariants(){
   const inp = document.getElementById('pm-var-input'); if(!inp) return;
@@ -8056,7 +8111,7 @@ function saveProductModal(id){
   // suma igual (es lo que uno espera al tocar Guardar).
   if((document.getElementById('pm-var-input')||{}).value) pmAddVariants();
   const varLabel = ((document.getElementById('pm-var-label')||{}).value||'').trim() || 'Color';
-  const variantsObj = (!sellByWeight && _pmVariants.length) ? {label:varLabel, options:_pmVariants.map(o=>({name:o.name, out:!!o.out}))} : null;
+  const variantsObj = (!sellByWeight && _pmVariants.length) ? {label:varLabel, options:_pmVariants.map(o=>({name:o.name, out:!!o.out, ...(o.photo?{photo:o.photo}:{})}))} : null;
   let savedProduct;
   if(id){
     const p = state.products.find(pr=>pr.id===id);
