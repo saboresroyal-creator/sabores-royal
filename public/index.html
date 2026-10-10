@@ -1139,6 +1139,7 @@ async function apiSyncProducts(){
       superOffer: p.super_offer||false,
       barcode: p.barcode||"",
       hidden: p.hidden||false,
+      ...(p.variants ? {variants: p.variants} : {}),
     };});
     const pendingOnly = state.products.filter(p=>_pendingSaves.has(p.id));
     const newProducts = [...apiMapped, ...pendingOnly];
@@ -1509,6 +1510,10 @@ async function apiSaveProduct(product){
       super_offer: product.superOffer||false,
       barcode: product.barcode||null,
       hidden: product.hidden||false,
+      // Solo se manda si el producto tiene (o tuvo) variantes: así los
+      // productos comunes se siguen guardando aunque todavía no se haya
+      // corrido supabase-migration-product-variants.sql.
+      ...(product.variants!==undefined ? {variants: product.variants} : {}),
     };
     if(product._apiId){
       await adminFetch('/products?id=eq.' + product._apiId, 'PATCH', body);
@@ -1526,7 +1531,11 @@ async function apiSaveProduct(product){
     }
   }catch(e){
     console.warn("Error guardando producto:", e);
-    alert("Error al guardar en Supabase:\n\n" + e.message);
+    if(/variants/.test(e.message||'')){
+      alert("Error al guardar los colores/variantes: falta crear la columna en la base.\n\nCorré el archivo supabase-migration-product-variants.sql en el SQL Editor de Supabase y volvé a guardar el producto.");
+    } else {
+      alert("Error al guardar en Supabase:\n\n" + e.message);
+    }
   }finally{
     _pendingSaves.delete(product.id);
   }
@@ -1558,7 +1567,7 @@ function mapOrderRow(row){
 // alcanza el stock de algún producto, tira "sin_stock:<nombre>" y no
 // crea nada — el pedido nunca queda "a medias".
 async function apiSaveOrder({customer, items, clientDiscountPct, clientDiscountAmount, total}){
-  const rpcItems = items.map(it=>({id: Number(it.id), name: it.name, price: it.price, qty: it.qty, grams: it.grams||null, lineTotal: it.lineTotal}));
+  const rpcItems = items.map(it=>({id: Number(it.id), name: it.name, price: it.price, qty: it.qty, grams: it.grams||null, lineTotal: it.lineTotal, ...(it.variant?{variant:it.variant}:{})}));
   return rpcFetch('create_order', {
     p_phone: customer.phone,
     p_name: customer.name,
@@ -1776,14 +1785,37 @@ function toast(msg, type){
 /* =========================================================
    CART
    ========================================================= */
-function addToCart(productId, qty){
+// Variantes (colores, talles, sabores) de un producto: p.variants =
+// {label:"Color", options:[{name:"Rojo", out:false}, ...]}. Un solo
+// producto con la lista de opciones en vez de cargar uno por color; el
+// cliente elige al agregar al carrito y cada opción es una línea aparte
+// (c.variant). El stock es el del producto, compartido entre opciones;
+// "out" marca a mano una opción agotada.
+function productVariants(p){
+  return (p && p.variants && Array.isArray(p.variants.options)) ? p.variants.options.filter(o=>o&&o.name) : [];
+}
+function productVariantLabel(p){
+  return (p && p.variants && p.variants.label) || 'Color';
+}
+function addToCart(productId, qty, variant){
   qty = qty || 1;
-  const existing = state.cart.find(c=>c.id===productId && !c.grams);
+  const p = state.products.find(pr=>pr.id===productId);
+  if(!variant && productVariants(p).length){ openProduct(productId); return; }
+  const existing = state.cart.find(c=>c.id===productId && !c.grams && (c.variant||'')===(variant||''));
   if(existing){ existing.qty += qty; }
-  else{ state.cart.push({id:productId, qty}); }
+  else{ state.cart.push(variant ? {id:productId, qty, variant} : {id:productId, qty}); }
   saveState();
   toast("Agregado al carrito", "ok");
   render();
+}
+function cartSetQtyAt(i, qty){
+  const item = state.cart[i]; if(!item) return;
+  if(qty<=0) state.cart.splice(i,1); else item.qty = qty;
+  saveState(); render();
+}
+function cartRemoveAt(i){
+  state.cart.splice(i,1);
+  saveState(); render();
 }
 function addToCartByWeight(productId, grams){
   const existing = state.cart.find(c=>c.id===productId && c.grams);
@@ -2281,7 +2313,10 @@ function buildCartItemsForOrder(){
     if(c.grams){
       return {id:c.id, name:p?p.name:"Producto", price:p?effectivePriceForWeight(p):0, qty:1, grams:c.grams, lineTotal:cartItemLineTotal(c)};
     }
-    return {id:c.id, name:p?p.name:"Producto", price:p?effectivePrice(p):0, qty:c.qty, lineTotal:cartItemLineTotal(c)};
+    // El color/variante va dentro del nombre para que se vea solo en todos
+    // lados donde se muestra el pedido (admin, WhatsApp, comprobantes).
+    const name = (p?p.name:"Producto") + (c.variant ? ` — ${productVariantLabel(p)}: ${c.variant}` : '');
+    return {id:c.id, name, price:p?effectivePrice(p):0, qty:c.qty, lineTotal:cartItemLineTotal(c), ...(c.variant?{variant:c.variant}:{})};
   });
 }
 function orderTotals(items, clientDiscountPct){
@@ -2944,7 +2979,9 @@ function renderProductDetail(id){
     </div>`;
   }
   const qty = state.route.qty || 1;
-  const outOfStock = isOutOfStock(p);
+  const _variants = productVariants(p);
+  const _selVariant = _variants.some(o=>o.name===state.route.variant&&!o.out) ? state.route.variant : null;
+  const outOfStock = isOutOfStock(p) || (_variants.length>0 && _variants.every(o=>o.out));
   const _unitPr = effectivePrice(p);
   const _clW = state.currentClientPhone ? state.clients[state.currentClientPhone] : null;
   const _isWholesale = wholesaleModeActive(_clW);
@@ -2972,6 +3009,13 @@ function renderProductDetail(id){
       ${_isWholesale && p.displayQty && qty < p.displayQty ? `<button class="pc-add" style="margin:8px 0; background:transparent; border:1.5px solid #6db8e8; color:#6db8e8;" onclick="setDetailQty(${p.displayQty})">📦 Comprar caja x${p.displayQty} directo</button>` : ''}
       ${p.sinAzucar ? `<span style="background:#b8860b;color:#fff;font-size:10px;font-weight:800;border-radius:8px;padding:3px 10px;display:inline-block;margin-bottom:6px;cursor:pointer;" onclick="nav('catalog',{section:'sinazucar'})">SIN AZÚCAR · SUGAR FREE</span>` : ''}
       <p class="pd-desc">${p.desc||''}</p>
+      ${_variants.length && !outOfStock ? `
+        <div style="margin:4px 0 14px;">
+          <div style="font-size:12px; color:rgba(255,255,255,0.55); font-weight:600; margin-bottom:8px;">Elegí ${escapeHtml(productVariantLabel(p).toLowerCase())}${_selVariant?`: <b style="color:var(--gold2);">${escapeHtml(_selVariant)}</b>`:''}</div>
+          <div style="display:flex; flex-wrap:wrap; gap:8px;">
+            ${_variants.map((o,i)=>`<button class="chip ${_selVariant===o.name?'active':''}" ${o.out?'disabled style="opacity:.4; text-decoration:line-through;"':''} onclick="setDetailVariant(${i})">${escapeHtml(o.name)}${o.out?' (agotado)':''}</button>`).join('')}
+          </div>
+        </div>` : ''}
       ${outOfStock ? `
         <div style="background:rgba(229,86,109,0.12); border:1px solid rgba(229,86,109,0.35); border-radius:10px; padding:10px 12px; font-size:13px; font-weight:700; color:var(--danger);">Sin stock por el momento</div>
       ` : `
@@ -2986,10 +3030,21 @@ function renderProductDetail(id){
     <div class="sticky-cta">
       ${outOfStock
         ? `<button class="btn-primary" disabled style="opacity:.4;">Sin stock</button>`
-        : `<button class="btn-primary" onclick="addToCart('${p.id}', ${qty}); nav('catalog',{section:'${p.section}'})"><svg width="28" height="28" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" style="flex-shrink:0"><circle cx="9" cy="20" r="1.4"/><circle cx="18" cy="20" r="1.4"/><path d="M3 4h2l2.4 12.2a2 2 0 0 0 2 1.8h7.2a2 2 0 0 0 2-1.6L21 8H6"/></svg> Agregar al carrito — ${money(applyClientDiscount(_lineTotal))}</button>`}
+        : (_variants.length && !_selVariant)
+        ? `<button class="btn-primary" style="opacity:.55;" onclick="toast('Elegí una opción primero','err')">Elegí ${escapeHtml(productVariantLabel(p).toLowerCase())} para agregar</button>`
+        : `<button class="btn-primary" onclick="addToCart('${p.id}', ${qty}${_selVariant?`, detailSelectedVariant()`:''}); nav('catalog',{section:'${p.section}'})"><svg width="28" height="28" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" style="flex-shrink:0"><circle cx="9" cy="20" r="1.4"/><circle cx="18" cy="20" r="1.4"/><path d="M3 4h2l2.4 12.2a2 2 0 0 0 2 1.8h7.2a2 2 0 0 0 2-1.6L21 8H6"/></svg> Agregar al carrito — ${money(applyClientDiscount(_lineTotal))}</button>`}
     </div>
   </div>`;
 }
+// La variante elegida se pasa leyéndola del estado (no escrita dentro del
+// onclick) para no tener que escapar nombres con comillas.
+function setDetailVariant(i){
+  const p = state.products.find(pr=>pr.id===state.route.id);
+  const o = productVariants(p)[i];
+  if(!o || o.out) return;
+  state.route.variant = o.name; render();
+}
+function detailSelectedVariant(){ return state.route.variant||null; }
 function changeDetailQty(delta){
   const q = Math.max(1, (state.route.qty||1)+delta);
   state.route.qty = q; render();
@@ -3113,7 +3168,7 @@ function pcCardBodyHtml(p){
       ${!isWholesaleClient && p.displayQty && p.displayDiscount && !outOfStock ? displayBoxHintHtml(p) : ''}
       ${outOfStock
         ? `<button class="pc-add" disabled>Sin stock</button>`
-        : `<button class="pc-add" onclick="event.stopPropagation(); addToCart('${p.id}',1)">Agregar</button>`}
+        : `<button class="pc-add" onclick="event.stopPropagation(); addToCart('${p.id}',1)">${productVariants(p).length?`Elegir ${escapeHtml(productVariantLabel(p).toLowerCase())}`:'Agregar'}</button>`}
       ${isWholesaleClient && p.displayQty && !outOfStock ? `<button class="pc-add" style="margin-top:6px; background:transparent; border:1.5px solid #6db8e8; color:#6db8e8;" onclick="event.stopPropagation(); addToCart('${p.id}', ${p.displayQty})">📦 Comprar caja x${p.displayQty}</button>` : ''}
     `}
   `;
@@ -3191,7 +3246,7 @@ function renderCart(){
   <div class="screen">
     <div class="topbar"><button class="back" onclick="nav('home')">${ic('chevron')}</button><h2>Carrito</h2></div>
     <div>
-      ${state.cart.map(item=>{
+      ${state.cart.map((item,ci)=>{
         const p = state.products.find(pr=>pr.id===item.id);
         if(!p) return '';
         if(item.grams){
@@ -3215,14 +3270,15 @@ function renderCart(){
           <img src="${p.photoThumb||p.photo||''}" loading="lazy" onerror="this.style.display='none'">
           <div class="cart-item-body">
             <h4>${p.name}</h4>
+            ${item.variant?`<div style="font-size:12px; color:var(--gold2); margin:2px 0;">${escapeHtml(productVariantLabel(p))}: <b>${escapeHtml(item.variant)}</b></div>`:''}
             <div class="price">${money(effectivePrice(p))}</div>
             <div class="cart-qty">
-              <button onclick="setCartQty('${p.id}', ${item.qty-1})">−</button>
+              <button onclick="cartSetQtyAt(${ci}, ${item.qty-1})">−</button>
               <span>${item.qty}</span>
-              <button onclick="setCartQty('${p.id}', ${item.qty+1})">+</button>
+              <button onclick="cartSetQtyAt(${ci}, ${item.qty+1})">+</button>
             </div>
           </div>
-          <button class="cart-remove" onclick="removeFromCart('${p.id}')">Quitar</button>
+          <button class="cart-remove" onclick="cartRemoveAt(${ci})">Quitar</button>
         </div>`;
       }).join('')}
     </div>
@@ -7796,6 +7852,17 @@ function openProductModal(id){
       </div>
       <div class="form-group"><label>Descripción</label><textarea id="pm-desc" placeholder="Descripción breve">${p?p.desc:''}</textarea></div>
 
+      <div class="form-group">
+        <label>Colores / variantes (opcional)</label>
+        <p style="font-size:11.5px; color:rgba(255,255,255,0.45); margin:-2px 0 8px; line-height:1.4;">Para productos iguales que solo cambian de color (o talle, sabor): cargalos acá en vez de un producto por color. El cliente elige al comprar. Tocá un color para marcarlo agotado.</p>
+        <div style="display:flex; gap:8px; margin-bottom:8px;">
+          <input id="pm-var-label" value="${escapeHtml(p&&p.variants&&p.variants.label?p.variants.label:'Color')}" placeholder="Color" style="width:110px; flex:none;" title="Cómo se llama la opción: Color, Talle, Sabor...">
+          <input id="pm-var-input" placeholder="Ej: Rojo, Azul, Verde" style="flex:1;" onkeydown="if(event.key==='Enter'){event.preventDefault();pmAddVariants();}">
+          <button type="button" class="btn-secondary" style="flex:none; width:auto; padding:8px 14px;" onclick="pmAddVariants()">Agregar</button>
+        </div>
+        <div id="pm-var-list" style="display:flex; flex-wrap:wrap; gap:6px;"></div>
+      </div>
+
       <div style="margin:0 16px 10px; display:flex; flex-direction:column; gap:8px;">
         <div class="settings-row" style="border-radius:12px; background:rgba(46,125,79,0.12); border:1.5px solid rgba(46,125,79,0.4); border-bottom:1.5px solid rgba(46,125,79,0.4);">
           <div style="display:flex; align-items:center; gap:8px;">
@@ -7850,7 +7917,28 @@ function openProductModal(id){
     </div>
   `;
   document.body.appendChild(overlay);
+  _pmVariants = productVariants(p).map(o=>({name:o.name, out:!!o.out}));
+  pmRenderVariants();
 }
+// Colores/variantes que se están editando en el modal de producto.
+let _pmVariants = [];
+function pmRenderVariants(){
+  const el = document.getElementById('pm-var-list'); if(!el) return;
+  el.innerHTML = _pmVariants.length
+    ? _pmVariants.map((o,i)=>`<span class="subcat-chip" style="cursor:pointer; ${o.out?'opacity:.5; text-decoration:line-through;':''}" title="Tocá para marcar ${o.out?'disponible':'agotado'}" onclick="pmToggleVariant(${i})">${escapeHtml(o.name)}${o.out?' (agotado)':''} <button type="button" onclick="event.stopPropagation(); pmRemoveVariant(${i})">×</button></span>`).join('')
+    : `<span style="font-size:12px; color:rgba(255,255,255,0.35);">Sin variantes: se vende como un solo producto.</span>`;
+}
+function pmAddVariants(){
+  const inp = document.getElementById('pm-var-input'); if(!inp) return;
+  inp.value.split(',').map(s=>s.trim()).filter(Boolean).forEach(name=>{
+    if(!_pmVariants.some(o=>o.name.toLowerCase()===name.toLowerCase())) _pmVariants.push({name, out:false});
+  });
+  inp.value = '';
+  pmRenderVariants();
+  inp.focus();
+}
+function pmToggleVariant(i){ if(_pmVariants[i]){ _pmVariants[i].out = !_pmVariants[i].out; pmRenderVariants(); } }
+function pmRemoveVariant(i){ _pmVariants.splice(i,1); pmRenderVariants(); }
 function renderCatOptions(section, selectedCat){
   const cats = Object.keys(state.categories[section]||{}).sort((a,b)=>a.localeCompare(b,'es'));
   return cats.map(c=>`<option value="${c}" ${selectedCat===c?'selected':''}>${c}</option>`).join('');
@@ -7964,16 +8052,25 @@ function saveProductModal(id){
   // perder la edición. Si el toggle de la foto está apagado, no hace
   // falta guardar una versión "limpia" separada (la foto final ya lo es).
   const photoClean = adminPhotoDraft.sinTacc ? (adminPhotoDraft.currentClean||null) : null;
+  // Si quedó algo escrito en el campo de colores sin tocar "Agregar", se
+  // suma igual (es lo que uno espera al tocar Guardar).
+  if((document.getElementById('pm-var-input')||{}).value) pmAddVariants();
+  const varLabel = ((document.getElementById('pm-var-label')||{}).value||'').trim() || 'Color';
+  const variantsObj = (!sellByWeight && _pmVariants.length) ? {label:varLabel, options:_pmVariants.map(o=>({name:o.name, out:!!o.out}))} : null;
   let savedProduct;
   if(id){
     const p = state.products.find(pr=>pr.id===id);
     Object.assign(p, {name, section, cat, sub, price, wholesalePrice, stock, desc, barcode, sellByWeight, pricePerKg, wholesalePricePerKg, minGrams, sinTacc, sinAzucar, hidden, displayQty, displayDiscount, displayBarcode, promoPrice, promoUntil, superOffer, photo:adminPhotoDraft.current||p.photo, photoClean});
+    // undefined = el producto nunca tuvo variantes y sigue sin tener: no
+    // se manda la columna (ver apiSaveProduct).
+    if(variantsObj || p.variants) p.variants = variantsObj;
     savedProduct = p;
   }else{
     savedProduct = {
       id: "p"+Date.now(), section, cat, sub, name, price, wholesalePrice, stock, desc, barcode,
       sellByWeight, pricePerKg, wholesalePricePerKg, minGrams, sinTacc, sinAzucar, hidden, displayQty, displayDiscount, displayBarcode, promoPrice, promoUntil, superOffer,
-      photo: adminPhotoDraft.current||"", photoClean
+      photo: adminPhotoDraft.current||"", photoClean,
+      ...(variantsObj ? {variants: variantsObj} : {})
     };
     state.products.push(savedProduct);
   }
