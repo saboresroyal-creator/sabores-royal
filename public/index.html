@@ -5383,6 +5383,7 @@ async function cmpDoAiImport(){
   const now=new Date().toISOString();
   const lista={provId,rows,at:now};
   const idx=cmpDB.listas.findIndex(l=>l.provId===provId);
+  const remap=cmpRemapAfterImport(provId, idx>=0?cmpDB.listas[idx].rows:[], rows);
   if(idx>=0) cmpDB.listas[idx]=lista; else cmpDB.listas.push(lista);
   if(prov){
     prov.lastImport=now;
@@ -5393,10 +5394,108 @@ async function cmpDoAiImport(){
   _cmpPendingCols=null;
   _cmpImportAdjustStr='';
   try{
-    await Promise.all([cmpSaveListaSupa(lista),prov?cmpSaveProvSupa(prov):Promise.resolve()]);
-    toast(rows.length+' productos importados');
+    const otherProvs=remap.touchedProvs.filter(p=>p!==prov);
+    await Promise.all([cmpSaveListaSupa(lista),prov?cmpSaveProvSupa(prov):Promise.resolve(),
+      ...remap.links.map(cmpSaveLinkSupa),...otherProvs.map(cmpSaveProvSupa)]);
+    let msg=rows.length+' productos importados';
+    if(remap.links.length) msg+=` · ${remap.links.length} vínculo(s) pasados al nombre nuevo`;
+    if(remap.lost.length) msg+=` · ${remap.lost.length} vínculo(s) sin encontrar en la lista nueva`;
+    toast(msg);
+    if(remap.lost.length) console.warn('Vínculos sin encontrar tras importar:', remap.lost.map(l=>l.name));
     state.cmpTab='comparar'; render();
   }catch(e){ toast('Error guardando: '+e.message,'err'); }
+}
+
+// Los vínculos (y los "no es el mismo producto") se guardan con el nombre
+// normalizado del producto en la lista del proveedor. Si la lista nueva
+// trae el mismo producto con el nombre un poco distinto (otra abreviatura,
+// "SIN TACC" agregado, la IA que limpió el nombre de otra forma), el
+// vínculo quedaba huérfano y había que volver a asociar. Esto busca el
+// producto en la lista nueva —primero por código, después por nombre muy
+// parecido y sin empates— y le pasa el vínculo.
+function cmpRemapAfterImport(provId,oldRows,newRows){
+  const newNorms=new Set(newRows.map(r=>r.norm));
+  const oldByNorm=new Map(oldRows.map(r=>[r.norm,r]));
+  const codeCount=new Map();
+  newRows.forEach(r=>{ if(r.code) codeCount.set(r.code,(codeCount.get(r.code)||0)+1); });
+  const newByCode=new Map(newRows.filter(r=>r.code&&codeCount.get(r.code)===1).map(r=>[r.code,r]));
+  // Mismo nombre ignorando espacios ("ALF.JORGITO 50grs" = "ALF. JORGITO 50 grs").
+  const compact=n=>n.replace(/\s+/g,'');
+  const compactCount=new Map();
+  newRows.forEach(r=>{ const c=compact(r.norm); compactCount.set(c,(compactCount.get(c)||0)+1); });
+  const newByCompact=new Map(newRows.filter(r=>compactCount.get(compact(r.norm))===1).map(r=>[compact(r.norm),r]));
+  // Desempate: palabras exactas en común sobre el total (penaliza las que
+  // sobran o faltan, ej. "SIN GLUTEN" vs "AZUCARADO").
+  const jac=(a,b)=>{ const A=new Set(a.split(' ')),B=new Set(b.split(' ')); let i=0; A.forEach(w=>{ if(B.has(w)) i++; }); return i/(A.size+B.size-i||1); };
+  // Parecido en las dos direcciones: palabras que se corresponden (con la
+  // misma tolerancia de abreviaturas que el comparador) sobre el nombre
+  // más largo.
+  const symSim=(a,b)=>{
+    const ta=a.split(' ').filter(Boolean), tb=b.split(' ').filter(Boolean);
+    const used={}; let m=0;
+    ta.forEach(wa=>{ let best=0,bi=-1; tb.forEach((wb,i)=>{ if(used[i]) return; const s=cmpTokSim(wa,wb); if(s>best){best=s;bi=i;} }); if(best>=0.75){ m+=best; used[bi]=1; } });
+    return m/Math.max(ta.length,tb.length,1);
+  };
+  // Índice por palabra, para no comparar contra las miles de filas.
+  const byTok=new Map();
+  newRows.forEach((r,i)=>{ new Set(r.norm.split(' ').filter(w=>w.length>2)).forEach(w=>{ if(!byTok.has(w)) byTok.set(w,[]); byTok.get(w).push(i); }); });
+  const normMap=new Map(); // nombre viejo -> fila nueva
+  const findNew=(oldNorm,oldName,fuzzy)=>{
+    if(normMap.has(oldNorm)) return normMap.get(oldNorm);
+    const old=oldByNorm.get(oldNorm);
+    let hit=null;
+    if(old&&old.code&&newByCode.has(old.code)) hit=newByCode.get(old.code);
+    if(!hit) hit=newByCompact.get(compact(oldNorm))||null;
+    if(!hit&&!fuzzy) return null;
+    if(!hit){
+      const seed=old||{name:oldName,norm:oldNorm};
+      const counts=new Map();
+      oldNorm.split(' ').filter(w=>w.length>2).forEach(w=>(byTok.get(w)||[]).forEach(i=>counts.set(i,(counts.get(i)||0)+1)));
+      let best=0,second=0,bestRow=null;
+      counts.forEach((n,i)=>{
+        if(n<2) return;
+        // Sin conflicto de marca/tamaño/variedad, y casi todas las palabras
+        // de cada nombre tienen que estar en el otro: una que sobra o falta
+        // ("SIN GLUTEN", "AZUCARADO") ya es otro producto.
+        if(!cmpProdSimRows(seed,newRows[i])) return;
+        const sim=symSim(oldNorm,newRows[i].norm);
+        if(sim<0.8) return;
+        const s=sim+0.1*jac(oldNorm,newRows[i].norm);
+        if(s>best){ second=best; best=s; bestRow=newRows[i]; } else if(s>second) second=s;
+      });
+      if(bestRow&&best-second>=0.03) hit=bestRow;
+    }
+    normMap.set(oldNorm,hit);
+    return hit;
+  };
+  const links=[], lost=[];
+  const linkedNorms=new Set((cmpDB.links||[]).filter(l=>l.provId===provId).map(l=>l.norm));
+  (cmpDB.links||[]).forEach(l=>{
+    if(l.provId!==provId||newNorms.has(l.norm)) return;
+    const hit=findNew(l.norm,l.name,true);
+    if(hit&&!linkedNorms.has(hit.norm)){
+      linkedNorms.delete(l.norm); linkedNorms.add(hit.norm);
+      l.norm=hit.norm; l.name=hit.name;
+      links.push(l);
+    }else lost.push(l);
+  });
+  // "No es el mismo producto": claves "normA|provB|normB" guardadas en el
+  // proveedor A. Solo se pasan las que ya se resolvieron arriba o por código.
+  const touchedProvs=[];
+  cmpDB.proveedores.forEach(p=>{
+    const rej=(p.mapping&&p.mapping.rejects)||[];
+    if(!rej.length) return;
+    let changed=false;
+    const next=rej.map(key=>{
+      const [nA,pB,nB]=key.split('|');
+      let a=nA,b=nB;
+      if(p.id===provId&&!newNorms.has(nA)){ const h=findNew(nA,nA,false); if(h){ a=h.norm; changed=true; } }
+      if(pB===provId&&!newNorms.has(nB)){ const h=findNew(nB,nB,false); if(h){ b=h.norm; changed=true; } }
+      return a+'|'+pB+'|'+b;
+    });
+    if(changed){ p.mapping=Object.assign({},p.mapping,{rejects:[...new Set(next)]}); touchedProvs.push(p); }
+  });
+  return {links,lost,touchedProvs};
 }
 
 // ── COMPARAR ────────────────────────────────────────────
