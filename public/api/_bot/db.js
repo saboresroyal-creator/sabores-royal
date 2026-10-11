@@ -68,5 +68,18 @@ export function todayAR(){
 export function nowARText(){
   const d = new Date(Date.now() - 3 * 3600 * 1000);
   const dias = ['domingo', 'lunes', 'martes', 'miércoles', 'jueves', 'viernes', 'sábado'];
-  return `${dias[d.getUTCDay()]} ${d.toISOString().slice(0, 10)} ${d.toISOString().slice(11, 16)} (hora de Argentina)`;
+  return `${dias[d.getUTCDay()]} ${fmtDate(d.toISOString().slice(0, 10))} ${d.toISOString().slice(11, 16)} (hora de Argentina)`;
+}
+
+// Fechas visibles siempre DD/MM/AAAA (en la base se guardan en ISO).
+// Acepta 'AAAA-MM-DD' o un timestamp, que se pasa a hora de Argentina.
+export function fmtDate(v){
+  if(!v) return '';
+  const s = String(v);
+  const iso = /^\d{4}-\d{2}-\d{2}$/.test(s) ? s : new Date(new Date(s).getTime() - 3 * 3600 * 1000).toISOString().slice(0, 10);
+  return `${iso.slice(8, 10)}/${iso.slice(5, 7)}/${iso.slice(0, 4)}`;
+}
+export function fmtDateTime(ts){
+  const iso = new Date(new Date(ts).getTime() - 3 * 3600 * 1000).toISOString();
+  return `${fmtDate(iso.slice(0, 10))} ${iso.slice(11, 16)}`;
 }

@@ -6,7 +6,7 @@
 // cuando el dueño contesta "sí" — eso lo resuelve agent.js en código, no
 // depende de que el modelo se acuerde de preguntar.
 
-import { db, normalizePhone, getSetting, setSetting, todayAR } from './db.js';
+import { db, normalizePhone, getSetting, setSetting, todayAR, fmtDate, fmtDateTime } from './db.js';
 import { money, searchProducts, getProductsByIds, activePromo } from './catalogo.js';
 import { sendText } from './wa.js';
 
@@ -44,7 +44,7 @@ function productAdminView(p){
     precio_mayorista: p.sell_by_weight
       ? (p.wholesale_price_per_kg ? `${money(p.wholesale_price_per_kg)}/kg` : null)
       : (p.wholesale_price ? money(p.wholesale_price) : null),
-    oferta: promo !== null ? `${money(promo)}${p.super_offer ? ' (súper oferta)' : ` hasta ${p.promo_until}`}` : null,
+    oferta: promo !== null ? `${money(promo)}${p.super_offer ? ' (súper oferta)' : ` hasta ${fmtDate(p.promo_until)}`}` : null,
     stock: p.sell_by_weight ? 'por peso' : p.stock,
     oculto: !!p.hidden,
     codigo_barras: p.barcode || null,
@@ -95,7 +95,7 @@ const actions = {
           if(!(val >= 0)) return { error: `Stock inválido para "${p.name}".` };
         }
         const before = p[col];
-        const fmt = v => v === null || v === undefined || v === '' ? '—' : (['stock', 'oculto', 'oferta_hasta'].includes(campo) ? String(v) : money(v));
+        const fmt = v => v === null || v === undefined || v === '' ? '—' : (campo === 'oferta_hasta' ? fmtDate(v) : ['stock', 'oculto'].includes(campo) ? String(v) : money(v));
         diffs.push(`${campo.replace(/_/g, ' ')} ${fmt(before)} → ${fmt(val)}`);
         patch[col] = val;
       }
@@ -217,7 +217,7 @@ export const ownerTools = [
       const posTotal = pos.reduce((a, s) => a + Number(s.total), 0);
       const ordTotal = orders.reduce((a, o) => a + Number(o.total), 0);
       return {
-        periodo: r.d === r.h ? r.d : `${r.d} a ${r.h}`,
+        periodo: r.d === r.h ? fmtDate(r.d) : `${fmtDate(r.d)} a ${fmtDate(r.h)}`,
         total_general: money(posTotal + ordTotal),
         caja_local: {
           total: money(posTotal),
@@ -256,7 +256,7 @@ export const ownerTools = [
       return {
         pedidos: rows.map(o => ({
           pedido: o.id,
-          fecha: new Date(new Date(o.created_at).getTime() - 3 * 3600000).toISOString().slice(0, 16).replace('T', ' '),
+          fecha: fmtDateTime(o.created_at),
           cliente: `${o.customer_name} (${o.client_phone})`,
           direccion: o.customer_address || null,
           total: money(o.total),
@@ -339,7 +339,7 @@ export const ownerTools = [
           razon_social: c.razon_social || null,
           puntos: c.points || 0,
           numero_cliente: c.client_number || null,
-          ultimos_pedidos: orders.map(o => `${o.id} ${o.created_at.slice(0, 10)} ${money(o.total)} ${o.status}`),
+          ultimos_pedidos: orders.map(o => `${o.id} ${fmtDate(o.created_at)} ${money(o.total)} ${o.status}`),
         });
       }
       return { clientes: out };
@@ -390,7 +390,7 @@ export const ownerTools = [
       const phone = normalizePhone(telefono);
       const until = new Date(Date.now() + (horas || 12) * 3600000).toISOString();
       const rows = await db.patch(`/bot_conversations?phone=eq.${encodeURIComponent(phone)}`, { paused_until: until });
-      return rows.length ? { ok: true, pausado_hasta: until } : { error: 'Ese número no tiene conversación con el bot.' };
+      return rows.length ? { ok: true, pausado_hasta: fmtDateTime(until) } : { error: 'Ese número no tiene conversación con el bot.' };
     },
   },
   {

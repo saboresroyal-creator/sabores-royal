@@ -13,7 +13,7 @@ import { handlePhone, isOwner } from './_bot/agent.js';
 //   WHATSAPP_VERIFY_TOKEN      texto inventado, el mismo que se pone en Meta al configurar el webhook
 //   WHATSAPP_APP_SECRET        "Clave secreta de la app" (Meta > Configuración de la app > Básica)
 //   WHATSAPP_TOKEN, WHATSAPP_PHONE_NUMBER_ID   (ver _bot/wa.js)
-//   SUPABASE_SERVICE_ROLE_KEY, ANTHROPIC_API_KEY
+//   SUPABASE_SERVICE_ROLE_KEY, y GEMINI_API_KEY (o ANTHROPIC_API_KEY)
 //   OWNER_PHONES               números del dueño separados por coma, ej: 5493411234567
 
 export const config = { maxDuration: 60 };
@@ -66,7 +66,7 @@ async function onMessage(m, contacts){
   const paused = !isOwner(phone) && conv?.paused_until && new Date(conv.paused_until) > new Date();
   if(!paused) await markReadTyping(m.id);
 
-  await handlePhone(phone);
+  await handlePhone(phone, m.id);
 }
 
 // Mensaje mandado a mano desde la app de WhatsApp Business (modo

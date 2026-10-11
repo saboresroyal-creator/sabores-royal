@@ -1,7 +1,7 @@
 // Herramientas que Claude puede usar cuando habla con un CLIENTE.
 // ctx = { phone, waId, profileName, client, conv }
 
-import { db } from './db.js';
+import { db, fmtDate } from './db.js';
 import {
   MIN_WHOLESALE_ORDER, money, searchProducts, getProductsByIds,
   productForCustomer, lineTotal, unitPrice, kgPrice, activePromo,
@@ -138,7 +138,7 @@ export const customerTools = [
       return {
         pedidos: rows.map(o => ({
           pedido: o.id,
-          fecha: o.created_at.slice(0, 10),
+          fecha: fmtDate(o.created_at),
           total: money(o.total),
           estado: o.status === 'Revision' ? 'En revisión' : o.status,
           items: (o.items || []).length,

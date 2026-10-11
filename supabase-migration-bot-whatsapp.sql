@@ -31,6 +31,10 @@ CREATE TABLE IF NOT EXISTS bot_conversations (
   created_at       timestamptz NOT NULL DEFAULT now()
 );
 
+-- Qué IA armó el historial (claude / gemini): cada una lo guarda en su
+-- propio formato. Va aparte del CREATE por si la tabla ya existía.
+ALTER TABLE bot_conversations ADD COLUMN IF NOT EXISTS llm text;
+
 CREATE TABLE IF NOT EXISTS bot_inbox (
   id           text PRIMARY KEY,               -- id del mensaje de WhatsApp (wamid...)
   phone        text NOT NULL,

@@ -8,8 +8,9 @@ import { db, todayAR } from './db.js';
 
 export const MIN_WHOLESALE_ORDER = 50000;
 
+// Siempre con centavos, formato argentino: $1.652.914,06
 export function money(n){
-  return '$' + Math.round(Number(n) || 0).toLocaleString('es-AR');
+  return '$' + (Number(n) || 0).toLocaleString('es-AR', { minimumFractionDigits: 2, maximumFractionDigits: 2 });
 }
 
 export function activePromo(p){
