@@ -6935,7 +6935,15 @@ async function deleteChatMessage(id, phone, isAdmin){
 
 function startChatPoll(){
   if(_chatPollTimer) return;
+  // Cada 5 s solo mirando el chat; en el resto de la app cada 30 s (alcanza
+  // para el aviso de mensajes nuevos) y nada con la pestaña en segundo
+  // plano. Antes el admin bajaba los últimos 600 mensajes cada 5 s siempre.
+  let tick = 0;
   _chatPollTimer = setInterval(()=>{
+    if(document.visibilityState !== 'visible') return;
+    tick++;
+    const watchingChat = IS_ADMIN_APP ? state.adminTab==='chats' : state.route.screen==='chat';
+    if(!watchingChat && tick % 6 !== 0) return;
     if(IS_ADMIN_APP){ syncAdminChats(); }
     else if(state.currentClientPhone){ syncClientChat(); }
   }, 5000);
@@ -12055,11 +12063,33 @@ if(IS_ADMIN_APP){
 }else if(state.currentClientPhone){ syncClientChat(); refreshCurrentClient(); }
 startChatPoll();
 
-document.addEventListener('visibilitychange', ()=>{
-  if(document.visibilityState === 'visible'){ apiSyncProducts(); apiSyncContent(); if(IS_ADMIN_APP){ apiSyncClients(); apiSyncOrders(); apiSyncPosSales(); apiSyncSuggestions(); apiSyncVouchers(); } else{ refreshCurrentClient(); } }
-});
-window.addEventListener('focus', ()=>{ apiSyncProducts(); apiSyncContent(); if(IS_ADMIN_APP){ apiSyncClients(); apiSyncOrders(); apiSyncPosSales(); apiSyncSuggestions(); apiSyncVouchers(); } else{ refreshCurrentClient(); } });
-setInterval(()=>{ apiSyncProducts(); apiSyncContent(); if(IS_ADMIN_APP){ apiSyncClients(); apiSyncOrders(); apiSyncPosSales(); apiSyncSuggestions(); apiSyncVouchers(); } else{ refreshCurrentClient(); } }, 30000);
+// Actualización automática. Antes cada pestaña abierta bajaba el catálogo
+// entero (y en el admin 500 pedidos, ventas, clientes y comprobantes) cada
+// 30 s y en cada "focus" de la ventana, aunque nadie la mirara: eso agotó
+// la cuota mensual de transferencia del plan gratuito de Supabase y el
+// proyecto quedó bloqueado. Ahora cada grupo tiene su propio intervalo, y
+// con la pestaña en segundo plano no se baja nada.
+const SYNC_EVERY_MS = { catalog: 5*60*1000, admin: 60*1000, client: 30*1000 };
+const SYNC_ON_RETURN_MS = 60*1000; // al volver a la pestaña, solo si pasó al menos esto
+const _lastSync = { catalog: Date.now(), admin: Date.now(), client: Date.now() };
+function autoSync(returning){
+  if(document.visibilityState !== 'visible') return;
+  const now = Date.now();
+  const due = k => now - _lastSync[k] >= (returning ? SYNC_ON_RETURN_MS : SYNC_EVERY_MS[k]);
+  if(due('catalog')){
+    _lastSync.catalog = now;
+    apiSyncProducts(); apiSyncContent();
+    if(IS_ADMIN_APP) apiSyncClients();
+  }
+  if(IS_ADMIN_APP){
+    if(due('admin')){ _lastSync.admin = now; apiSyncOrders(); apiSyncPosSales(); apiSyncSuggestions(); apiSyncVouchers(); }
+  }else if(due('client')){
+    _lastSync.client = now; refreshCurrentClient();
+  }
+}
+document.addEventListener('visibilitychange', ()=>autoSync(true));
+window.addEventListener('focus', ()=>autoSync(true));
+setInterval(()=>autoSync(false), 30000);
 
 if('serviceWorker' in navigator){
   navigator.serviceWorker.register('sw.js');

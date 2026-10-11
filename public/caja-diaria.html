@@ -1372,8 +1372,17 @@ function scheduleRemoteSync(){
   clearTimeout(_remoteSyncTimer);
   _remoteSyncTimer = setTimeout(()=>pushRemoteState(), 1200);
 }
-setInterval(()=>{ if(document.visibilityState === 'visible') pullRemoteState(); }, 30000);
-document.addEventListener('visibilitychange', ()=>{ if(document.visibilityState === 'visible') pullRemoteState(); });
+// Cada pull baja la caja entera: cada 2 min alcanza (lo que se carga acá
+// se sube a los pocos segundos igual) y cuida la cuota de transferencia del
+// plan gratuito de Supabase. Al volver a la pestaña, solo si pasó 1 min.
+let _lastPull = Date.now();
+function pullIfDue(minMs){
+  if(document.visibilityState !== 'visible' || Date.now() - _lastPull < minMs) return;
+  _lastPull = Date.now();
+  pullRemoteState();
+}
+setInterval(()=>pullIfDue(120000), 30000);
+document.addEventListener('visibilitychange', ()=>pullIfDue(60000));
 
 // ============================================================
 // PERSIST
