@@ -78,10 +78,15 @@ const GEMINI_MODELOS = ['gemini-flash-latest', 'gemini-3.8-flash', 'gemini-3.7-f
 
 async function leerConGemini(data, mediaType, pedido) {
   const modelos = process.env.GEMINI_MODEL ? [process.env.GEMINI_MODEL, ...GEMINI_MODELOS] : GEMINI_MODELOS;
+  // Vercel corta la función a los 60 s: cada modelo tiene un tope de espera
+  // y se deja margen para responder.
+  const limite = Date.now() + 50000;
   let ultimoError;
   for (const modelo of [...new Set(modelos)]) {
+    const resta = limite - Date.now();
+    if (resta < 5000) break;
     try {
-      return await geminiUnModelo(modelo, data, mediaType, pedido);
+      return await geminiUnModelo(modelo, data, mediaType, pedido, Math.min(22000, resta));
     } catch (e) {
       ultimoError = e;
       // Saturado, sin cupo o inexistente: probar el siguiente. Otro error: cortar.
@@ -91,7 +96,8 @@ async function leerConGemini(data, mediaType, pedido) {
   throw ultimoError;
 }
 
-async function geminiUnModelo(modelo, data, mediaType, pedido) {
+async function geminiUnModelo(modelo, data, mediaType, pedido, espera) {
+  const hasta = Date.now() + espera;
   const llamar = (generationConfig) => fetch(
     `https://generativelanguage.googleapis.com/v1beta/models/${encodeURIComponent(modelo)}:generateContent`,
     {
@@ -102,10 +108,17 @@ async function geminiUnModelo(modelo, data, mediaType, pedido) {
         contents: [{ role: 'user', parts: [{ inline_data: { mime_type: mediaType, data } }, { text: pedido }] }],
         ...(generationConfig ? { generationConfig } : {}),
       }),
+      signal: AbortSignal.timeout(Math.max(1000, hasta - Date.now())),
     }
   );
-  let r = await llamar({ responseMimeType: 'application/json', temperature: 0 });
-  if (r.status === 400) r = await llamar(null); // por si esta versión no acepta esa config
+  let r;
+  try {
+    r = await llamar({ responseMimeType: 'application/json', temperature: 0 });
+    if (r.status === 400) r = await llamar(null); // por si esta versión no acepta esa config
+  } catch (e) {
+    // Tardó demasiado (modelo saturado): se trata igual que un 503 para probar el siguiente.
+    throw Object.assign(new Error('El modelo tardó demasiado en responder'), { status: 503 });
+  }
   const body = await r.json().catch(() => ({}));
   if (!r.ok) {
     const err = new Error((body.error && body.error.message) || ('HTTP ' + r.status));
