@@ -12,7 +12,7 @@ import { handlePhone, isOwner } from './_bot/agent.js';
 // Variables de entorno en Vercel:
 //   WHATSAPP_VERIFY_TOKEN      texto inventado, el mismo que se pone en Meta al configurar el webhook
 //   WHATSAPP_APP_SECRET        "Clave secreta de la app" (Meta > Configuración de la app > Básica)
-//   WHATSAPP_TOKEN, WHATSAPP_PHONE_NUMBER_ID   (ver _bot/wa.js)
+//   WHATSAPP_ACCESS_TOKEN, WHATSAPP_PHONE_NUMBER_ID   (ver _bot/wa.js)
 //   SUPABASE_SERVICE_ROLE_KEY, y GEMINI_API_KEY (o ANTHROPIC_API_KEY)
 //   OWNER_PHONES               números del dueño separados por coma, ej: 5493411234567
 
