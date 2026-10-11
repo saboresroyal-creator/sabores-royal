@@ -72,8 +72,26 @@ function normalizar(c) {
 // que cambiaron de nombre entre versiones de la API.
 const FORMATO_JSON = `\n\nRespondé SOLO con un objeto JSON con estas claves exactas: legible (boolean), tipo ("factura" | "remito" | "nc"), numero (string), proveedor (string), fechaEmision (string AAAA-MM-DD o ""), fechaVencimiento (string AAAA-MM-DD o ""), total (number), observaciones (string).`;
 
+// Modelos a probar en orden: en el plan gratuito a veces uno está saturado
+// ("high demand") o sin cupo, y otro responde bien.
+const GEMINI_MODELOS = ['gemini-flash-latest', 'gemini-3.8-flash', 'gemini-3.7-flash', 'gemini-3.6-flash', 'gemini-3.5-flash', 'gemini-flash-lite-latest'];
+
 async function leerConGemini(data, mediaType, pedido) {
-  const modelo = process.env.GEMINI_MODEL || 'gemini-flash-latest';
+  const modelos = process.env.GEMINI_MODEL ? [process.env.GEMINI_MODEL, ...GEMINI_MODELOS] : GEMINI_MODELOS;
+  let ultimoError;
+  for (const modelo of [...new Set(modelos)]) {
+    try {
+      return await geminiUnModelo(modelo, data, mediaType, pedido);
+    } catch (e) {
+      ultimoError = e;
+      // Saturado, sin cupo o inexistente: probar el siguiente. Otro error: cortar.
+      if (![404, 429, 500, 503].includes(e.status)) throw e;
+    }
+  }
+  throw ultimoError;
+}
+
+async function geminiUnModelo(modelo, data, mediaType, pedido) {
   const llamar = (generationConfig) => fetch(
     `https://generativelanguage.googleapis.com/v1beta/models/${encodeURIComponent(modelo)}:generateContent`,
     {
@@ -167,8 +185,8 @@ export default async function handler(req, res) {
       return res.json(normalizar(await leerConGemini(data, mediaType, pedido)));
     } catch (error) {
       console.error('factura-foto gemini error:', error);
-      return res.status(error.status === 429 ? 429 : 502).json({
-        error: error.status === 429 ? 'Se llegó al límite gratuito de Gemini, probá en un rato' : 'Error de la IA: ' + error.message,
+      return res.status([429, 503].includes(error.status) ? 503 : 502).json({
+        error: [429, 503].includes(error.status) ? 'La IA gratuita de Google está saturada en este momento, probá de nuevo en un rato' : 'Error de la IA: ' + error.message,
       });
     }
   }
