@@ -3598,7 +3598,7 @@ async function leerFotoFactura(input) {
   const btn = document.getElementById('btnFotoFactura');
   try {
     btn.disabled = true;
-    estadoFotoFactura('⏳ Leyendo el comprobante… (tarda unos segundos)');
+    estadoFotoFactura('⏳ Leyendo el comprobante… puede tardar hasta medio minuto, no cierres la pantalla.');
     let archivo;
     if(file.type === 'application/pdf') {
       if(file.size > 3 * 1024 * 1024) throw new Error('El PDF es muy pesado (máximo 3 MB). Probá con una foto.');

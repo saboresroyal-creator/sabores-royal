@@ -178,7 +178,9 @@ export default async function handler(req, res) {
   const conocidos = Array.isArray(proveedores)
     ? proveedores.filter((p) => typeof p === 'string' && p.trim()).slice(0, 300)
     : [];
-  const pedido = `Proveedores conocidos: ${conocidos.length ? conocidos.join(', ') : '(ninguno todavía)'}\n\nLeé este comprobante.`;
+  const hoy = new Date().toLocaleDateString('es-AR', { timeZone: 'America/Argentina/Buenos_Aires' });
+  const pedido = `Hoy es ${hoy}.
+Proveedores conocidos: ${conocidos.length ? conocidos.join(', ') : '(ninguno todavía)'}\n\nLeé este comprobante.`;
 
   // Sin clave de Anthropic: Gemini si hay clave; si no, el AI Gateway de Vercel.
   if (!process.env.ANTHROPIC_API_KEY && !process.env.GEMINI_API_KEY) {
