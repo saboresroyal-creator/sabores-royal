@@ -4,6 +4,7 @@ import Anthropic from '@anthropic-ai/sdk';
 // factura/remito/nota de crédito que le dejó el proveedor y esta función le
 // pide a Claude que lea los datos. Devuelve solo los campos del formulario;
 // el usuario los revisa antes de guardar — acá no se escribe nada.
+// Usa Claude si está ANTHROPIC_API_KEY; si no, Gemini con GEMINI_API_KEY.
 
 export const config = { maxDuration: 60 };
 
@@ -46,6 +47,56 @@ Devolvé:
 
 No inventes datos: si un campo no se ve, dejalo vacío.`;
 
+// Deja la respuesta de la IA (Claude o Gemini) con los tipos que espera el formulario.
+function normalizar(c) {
+  c = c || {};
+  const fecha = (s) => (typeof s === 'string' && /^\d{4}-\d{2}-\d{2}$/.test(s) ? s : '');
+  const total = typeof c.total === 'number' ? c.total : parseFloat(String(c.total || '').replace(',', '.'));
+  return {
+    legible: c.legible === true || c.legible === 'true',
+    tipo: ['factura', 'remito', 'nc'].includes(c.tipo) ? c.tipo : 'factura',
+    numero: String(c.numero || '').trim(),
+    proveedor: String(c.proveedor || '').trim(),
+    fechaEmision: fecha(c.fechaEmision),
+    fechaVencimiento: fecha(c.fechaVencimiento),
+    total: total > 0 ? Math.round(total * 100) / 100 : 0,
+    observaciones: String(c.observaciones || '').trim(),
+  };
+}
+
+// Gemini por REST. El formato de la respuesta se pide en el texto (y en
+// JSON con responseMimeType) para no depender de los parámetros de esquema,
+// que cambiaron de nombre entre versiones de la API.
+const GEMINI_FORMATO = `\n\nRespondé SOLO con un objeto JSON con estas claves exactas: legible (boolean), tipo ("factura" | "remito" | "nc"), numero (string), proveedor (string), fechaEmision (string AAAA-MM-DD o ""), fechaVencimiento (string AAAA-MM-DD o ""), total (number), observaciones (string).`;
+
+async function leerConGemini(data, mediaType, pedido) {
+  const modelo = process.env.GEMINI_MODEL || 'gemini-flash-latest';
+  const llamar = (generationConfig) => fetch(
+    `https://generativelanguage.googleapis.com/v1beta/models/${encodeURIComponent(modelo)}:generateContent`,
+    {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json', 'x-goog-api-key': process.env.GEMINI_API_KEY },
+      body: JSON.stringify({
+        systemInstruction: { parts: [{ text: SYSTEM_PROMPT + GEMINI_FORMATO }] },
+        contents: [{ role: 'user', parts: [{ inline_data: { mime_type: mediaType, data } }, { text: pedido }] }],
+        ...(generationConfig ? { generationConfig } : {}),
+      }),
+    }
+  );
+  let r = await llamar({ responseMimeType: 'application/json', temperature: 0 });
+  if (r.status === 400) r = await llamar(null); // por si esta versión no acepta esa config
+  const body = await r.json().catch(() => ({}));
+  if (!r.ok) {
+    const err = new Error((body.error && body.error.message) || ('HTTP ' + r.status));
+    err.status = r.status;
+    throw err;
+  }
+  const texto = (((body.candidates || [])[0] || {}).content || {}).parts?.map((p) => p.text || '').join('') || '';
+  const json = texto.slice(texto.indexOf('{'), texto.lastIndexOf('}') + 1);
+  if (!json) throw new Error('Respuesta vacía de Gemini');
+  return JSON.parse(json);
+}
+
 async function pinValido(pin) {
   if (!pin || typeof pin !== 'string') return false;
   const res = await fetch(SUPABASE_URL + '/rest/v1/rpc/get_caja_diaria', {
@@ -70,13 +121,27 @@ export default async function handler(req, res) {
   }
   if (!data || typeof data !== 'string') return res.status(400).json({ error: 'Falta la foto' });
   if (!MEDIA_TYPES.includes(mediaType)) return res.status(400).json({ error: 'Formato no soportado (usá foto o PDF)' });
-  if (!process.env.ANTHROPIC_API_KEY) {
-    return res.status(500).json({ error: 'El servidor no tiene configurada ANTHROPIC_API_KEY' });
+  if (!process.env.ANTHROPIC_API_KEY && !process.env.GEMINI_API_KEY) {
+    return res.status(503).json({ error: 'La lectura de fotos todavía no está activada (falta la clave de IA en Vercel)' });
   }
 
   const conocidos = Array.isArray(proveedores)
     ? proveedores.filter((p) => typeof p === 'string' && p.trim()).slice(0, 300)
     : [];
+  const pedido = `Proveedores conocidos: ${conocidos.length ? conocidos.join(', ') : '(ninguno todavía)'}\n\nLeé este comprobante.`;
+
+  // Sin clave de Anthropic se usa Gemini (Google), que tiene plan gratuito.
+  if (!process.env.ANTHROPIC_API_KEY) {
+    try {
+      return res.json(normalizar(await leerConGemini(data, mediaType, pedido)));
+    } catch (error) {
+      console.error('factura-foto gemini error:', error);
+      return res.status(error.status === 429 ? 429 : 502).json({
+        error: error.status === 429 ? 'Se llegó al límite gratuito de Gemini, probá en un rato' : 'Error de la IA: ' + error.message,
+      });
+    }
+  }
+
   const archivo = mediaType === 'application/pdf'
     ? { type: 'document', source: { type: 'base64', media_type: mediaType, data } }
     : { type: 'image', source: { type: 'base64', media_type: mediaType, data } };
@@ -97,7 +162,7 @@ export default async function handler(req, res) {
         role: 'user',
         content: [
           archivo,
-          { type: 'text', text: `Proveedores conocidos: ${conocidos.length ? conocidos.join(', ') : '(ninguno todavía)'}\n\nLeé este comprobante.` },
+          { type: 'text', text: pedido },
         ],
       }],
     });
@@ -115,17 +180,7 @@ export default async function handler(req, res) {
       return res.status(502).json({ error: 'El modelo devolvió un formato inválido' });
     }
 
-    const fecha = (s) => (typeof s === 'string' && /^\d{4}-\d{2}-\d{2}$/.test(s) ? s : '');
-    res.json({
-      legible: !!c.legible,
-      tipo: ['factura', 'remito', 'nc'].includes(c.tipo) ? c.tipo : 'factura',
-      numero: String(c.numero || '').trim(),
-      proveedor: String(c.proveedor || '').trim(),
-      fechaEmision: fecha(c.fechaEmision),
-      fechaVencimiento: fecha(c.fechaVencimiento),
-      total: typeof c.total === 'number' && c.total > 0 ? Math.round(c.total * 100) / 100 : 0,
-      observaciones: String(c.observaciones || '').trim(),
-    });
+    res.json(normalizar(c));
   } catch (error) {
     console.error('factura-foto error:', error);
     if (error instanceof Anthropic.RateLimitError) return res.status(429).json({ error: 'Demasiadas consultas, probá en un minuto' });
