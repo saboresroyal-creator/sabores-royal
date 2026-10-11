@@ -6139,6 +6139,7 @@ function cmpOpenPedidoDetail(id){
   const ped=cmpDB.pedidos.find(p=>p.id===id); if(!ped) return;
   const prov=cmpDB.proveedores.find(p=>p.id===ped.provId);
   const statusOpts=['pendiente','enviado','recibido'];
+  cmpLoadPdfLibs().catch(()=>{}); // precarga, para que "Enviar PDF" comparta al primer toque
   cmpOpenModal(`
     <div class="cmp-modal-title">Pedido &mdash; ${cmpEsc(prov?prov.name:'Proveedor eliminado')}</div>
     <div style="font-size:12px;color:rgba(255,255,255,0.4);margin-bottom:12px;">${cmpFmtDate(ped.createdAt)}</div>
@@ -6155,12 +6156,14 @@ function cmpOpenPedidoDetail(id){
         ${statusOpts.map(s=>`<option value="${s}" ${ped.status===s?'selected':''}>${cmpStatusLabel(s)}</option>`).join('')}
       </select>
     </div>
+    <button class="btn-primary" style="width:100%;margin-bottom:8px;" onclick="cmpSendPedidoPDF('${cmpEsc(id)}')">${ic('wa')} Enviar PDF por WhatsApp</button>
     <div style="display:flex;gap:8px;margin-bottom:8px;">
-      <button class="btn-primary" style="flex:1;" onclick="cmpSendPedidoWA('${cmpEsc(id)}')">${ic('wa')} WhatsApp</button>
-      <button class="btn-secondary" style="flex:1;" onclick="cmpPrintPedido('${cmpEsc(id)}')">Imprimir</button>
+      <button class="btn-secondary" style="flex:1;" onclick="cmpDownloadPedidoPDF('${cmpEsc(id)}')">Descargar PDF</button>
+      <button class="btn-secondary" style="flex:1;" onclick="cmpExportPedidoExcel('${cmpEsc(id)}')">Descargar Excel</button>
     </div>
-    <div style="margin-bottom:8px;">
-      <button class="btn-secondary" style="width:100%;" onclick="cmpExportPedidoExcel('${cmpEsc(id)}')">Descargar Excel</button>
+    <div style="display:flex;gap:8px;margin-bottom:8px;">
+      <button class="btn-secondary" style="flex:1;font-size:12.5px;" onclick="cmpSendPedidoWA('${cmpEsc(id)}')">Mandar como texto</button>
+      <button class="btn-secondary" style="flex:1;font-size:12.5px;" onclick="cmpPrintPedido('${cmpEsc(id)}')">Imprimir</button>
     </div>
     <button style="width:100%;background:var(--danger);color:#fff;border-radius:10px;padding:10px;font-weight:700;" onclick="cmpConfirmDelPedido('${cmpEsc(id)}')">Eliminar pedido</button>
   `);
@@ -6200,12 +6203,124 @@ function cmpPedidoWAText(ped,prov){
   msg+=`\nTOTAL: ${cmpMoney(ped.total)}`;
   return msg;
 }
+// Teléfono del proveedor para wa.me: si se cargó como número local de 10
+// dígitos (ej. 3415551234) se le agrega el 549 de Argentina.
+function cmpProvWaPhone(prov){
+  let d=(prov&&prov.phone)?prov.phone.replace(/\D/g,''):'';
+  if(!d) return WA_NUMBER;
+  if(d.length===10) d='549'+d;
+  return d;
+}
 function cmpSendPedidoWA(id){
   const ped=cmpDB.pedidos.find(p=>p.id===id); if(!ped) return;
   const prov=cmpDB.proveedores.find(p=>p.id===ped.provId);
   const msg=cmpPedidoWAText(ped,prov);
-  const phone=(prov&&prov.phone)?prov.phone.replace(/\D/g,''):WA_NUMBER;
-  window.open('https://wa.me/'+phone+'?text='+encodeURIComponent(msg),'_blank');
+  window.open('https://wa.me/'+cmpProvWaPhone(prov)+'?text='+encodeURIComponent(msg),'_blank');
+}
+
+// ── PEDIDO EN PDF ───────────────────────────────────────
+// El PDF se arma en el navegador con jsPDF (+ autotable para la tabla),
+// que se cargan de cdnjs recién cuando hacen falta. Se precargan al abrir
+// el detalle del pedido: compartir un archivo (navigator.share) tiene que
+// pasar "dentro" del toque del usuario, y si en el medio se espera la
+// descarga de la librería el navegador puede rechazarlo.
+let _cmpPdfLibs=null;
+function cmpLoadPdfLibs(){
+  if(window.jspdf && window.jspdf.jsPDF && window.jspdf.jsPDF.API.autoTable) return Promise.resolve();
+  if(_cmpPdfLibs) return _cmpPdfLibs;
+  const load=src=>new Promise((res,rej)=>{ const s=document.createElement('script'); s.src=src; s.onload=res; s.onerror=()=>rej(new Error('No se pudo cargar '+src)); document.head.appendChild(s); });
+  _cmpPdfLibs=load('https://cdnjs.cloudflare.com/ajax/libs/jspdf/2.5.1/jspdf.umd.min.js')
+    .then(()=>load('https://cdnjs.cloudflare.com/ajax/libs/jspdf-autotable/3.8.2/jspdf.plugin.autotable.min.js'))
+    .catch(e=>{ _cmpPdfLibs=null; throw e; });
+  return _cmpPdfLibs;
+}
+function cmpFmtDateFull(iso){ const d=new Date(iso); return d.toLocaleDateString('es-AR',{day:'2-digit',month:'2-digit',year:'numeric'}); }
+function cmpPedidoPdfName(ped,prov){
+  const provName=(prov?prov.name:'proveedor').replace(/[^a-z0-9]+/gi,'_');
+  return 'Pedido_Sabores_Royal_'+provName+'_'+cmpFmtDateFull(ped.createdAt).replace(/\//g,'-')+'.pdf';
+}
+// Las fuentes base de jsPDF no tienen guiones largos ni viñetas.
+function cmpPdfTxt(s){ return String(s||'').replace(/[–—]/g,'-').replace(/[•·]/g,'-').replace(/[“”]/g,'"').replace(/[‘’]/g,"'"); }
+function cmpBuildPedidoPdf(ped,prov){
+  const { jsPDF }=window.jspdf;
+  const doc=new jsPDF({unit:'mm',format:'a4'});
+  const navy=[15,28,69], gold=[197,160,40];
+  doc.setFillColor(...navy); doc.rect(0,0,210,26,'F');
+  doc.setTextColor(...gold); doc.setFont('helvetica','bold'); doc.setFontSize(18);
+  doc.text('Sabores Royal',14,13);
+  doc.setTextColor(255,255,255); doc.setFont('helvetica','normal'); doc.setFontSize(9.5);
+  doc.text('Maipú 734 - Rosario',14,20);
+  doc.setTextColor(30,30,30); doc.setFont('helvetica','bold'); doc.setFontSize(14);
+  doc.text(cmpPdfTxt('Pedido para '+(prov?prov.name:'Proveedor')),14,38);
+  doc.setFont('helvetica','normal'); doc.setFontSize(10); doc.setTextColor(90,90,90);
+  doc.text('Fecha: '+cmpFmtDateFull(ped.createdAt),14,45);
+  doc.text(ped.items.length+' producto(s)',196,45,{align:'right'});
+  const body=ped.items.map(it=>{
+    const pack=cmpItemPack(it);
+    const cant=pack>1?Math.round(it.qty/pack)+' bulto(s) x'+pack+'u':it.qty+' u';
+    return [cmpPdfTxt(it.code||''), cmpPdfTxt(it.name), cant, cmpMoney(it.price), cmpMoney(it.price*it.qty)];
+  });
+  doc.autoTable({
+    startY:50,
+    head:[['Código','Producto','Cantidad','Precio u.','Subtotal']],
+    body,
+    foot:[['','','','TOTAL',cmpMoney(ped.total)]],
+    theme:'grid',
+    styles:{font:'helvetica',fontSize:9,cellPadding:2.2,textColor:[30,30,30],lineColor:[220,220,220],lineWidth:0.2,overflow:'linebreak'},
+    headStyles:{fillColor:navy,textColor:[255,255,255],fontStyle:'bold'},
+    footStyles:{fillColor:[246,239,217],textColor:[30,30,30],fontStyle:'bold',fontSize:10.5},
+    columnStyles:{0:{cellWidth:22},2:{cellWidth:30,halign:'center'},3:{cellWidth:28,halign:'right'},4:{cellWidth:30,halign:'right'}},
+    didParseCell:d=>{ if(d.section!=='body' && (d.column.index===3||d.column.index===4)) d.cell.styles.halign='right'; },
+    margin:{left:14,right:14},
+  });
+  const pages=doc.getNumberOfPages();
+  for(let i=1;i<=pages;i++){
+    doc.setPage(i); doc.setFontSize(8); doc.setTextColor(150,150,150);
+    doc.text('Pedido generado desde Sabores Royal'+(pages>1?' - página '+i+' de '+pages:''),105,290,{align:'center'});
+  }
+  return doc.output('blob');
+}
+function cmpDownloadBlob(blob,name){
+  const a=document.createElement('a');
+  a.href=URL.createObjectURL(blob); a.download=name;
+  document.body.appendChild(a); a.click(); document.body.removeChild(a);
+  setTimeout(()=>URL.revokeObjectURL(a.href),60000);
+}
+async function cmpDownloadPedidoPDF(id){
+  const ped=cmpDB.pedidos.find(p=>p.id===id); if(!ped) return;
+  const prov=cmpDB.proveedores.find(p=>p.id===ped.provId);
+  try{ await cmpLoadPdfLibs(); }catch(e){ toast('No se pudo preparar el PDF. Revisá la conexión y probá de nuevo.','err'); return; }
+  cmpDownloadBlob(cmpBuildPedidoPdf(ped,prov), cmpPedidoPdfName(ped,prov));
+  toast('PDF descargado');
+}
+// Manda el PDF por WhatsApp. En el celular (y en compus que lo permiten)
+// se abre "Compartir" con el PDF adjunto: se elige WhatsApp y el chat del
+// proveedor. Si el dispositivo no puede compartir archivos, se descarga el
+// PDF y se abre el chat del proveedor para adjuntarlo a mano.
+async function cmpSendPedidoPDF(id){
+  const ped=cmpDB.pedidos.find(p=>p.id===id); if(!ped) return;
+  const prov=cmpDB.proveedores.find(p=>p.id===ped.provId);
+  if(!(window.jspdf && window.jspdf.jsPDF && window.jspdf.jsPDF.API.autoTable)){
+    toast('Preparando el PDF...');
+    try{ await cmpLoadPdfLibs(); }catch(e){ toast('No se pudo preparar el PDF. Revisá la conexión y probá de nuevo.','err'); return; }
+  }
+  const name=cmpPedidoPdfName(ped,prov);
+  const blob=cmpBuildPedidoPdf(ped,prov);
+  const text=`Hola${prov?' '+prov.name:''}, te paso el pedido de Sabores Royal del ${cmpFmtDateFull(ped.createdAt)}. Total: ${cmpMoney(ped.total)}`;
+  let file=null;
+  try{ file=new File([blob],name,{type:'application/pdf'}); }catch(e){}
+  if(file && navigator.canShare && navigator.canShare({files:[file]})){
+    try{
+      await navigator.share({files:[file], text, title:name});
+      return;
+    }catch(e){
+      if(e.name==='AbortError') return; // cerró la ventana de compartir
+      if(e.name==='NotAllowedError'){ toast('Listo el PDF: tocá de nuevo "Enviar PDF por WhatsApp"'); return; }
+    }
+  }
+  cmpDownloadBlob(blob,name);
+  window.open('https://wa.me/'+cmpProvWaPhone(prov)+'?text='+encodeURIComponent(text+' (te adjunto el PDF)'),'_blank');
+  toast('PDF descargado: adjuntalo en el chat de WhatsApp que se abrió');
 }
 function cmpPrintPedido(id){
   const ped=cmpDB.pedidos.find(p=>p.id===id); if(!ped) return;
