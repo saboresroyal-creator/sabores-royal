@@ -11,9 +11,11 @@ function key(){
 }
 
 async function request(path, { method = 'GET', body, prefer } = {}){
+  // La clave vieja (service_role, un JWT) va también como Bearer; las
+  // nuevas claves secretas de Supabase (sb_secret_...) van solo en apikey.
   const headers = {
     apikey: key(),
-    Authorization: 'Bearer ' + key(),
+    ...(key().startsWith('sb_') ? {} : { Authorization: 'Bearer ' + key() }),
     'Content-Type': 'application/json',
   };
   if(prefer) headers.Prefer = prefer;
