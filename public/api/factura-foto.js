@@ -1,10 +1,13 @@
 import Anthropic from '@anthropic-ai/sdk';
+import { getVercelOidcToken } from '@vercel/functions/oidc';
 
 // Deuda Proveedores (caja-diaria.html): el usuario saca una foto de la
 // factura/remito/nota de crédito que le dejó el proveedor y esta función le
 // pide a Claude que lea los datos. Devuelve solo los campos del formulario;
 // el usuario los revisa antes de guardar — acá no se escribe nada.
-// Usa Claude si está ANTHROPIC_API_KEY; si no, Gemini con GEMINI_API_KEY.
+// Qué IA usa, en orden: Claude directo (ANTHROPIC_API_KEY), Gemini
+// (GEMINI_API_KEY) o Claude a través del AI Gateway de Vercel, que se
+// autentica solo con el token OIDC del proyecto (no hace falta copiar claves).
 
 export const config = { maxDuration: 60 };
 
@@ -67,7 +70,7 @@ function normalizar(c) {
 // Gemini por REST. El formato de la respuesta se pide en el texto (y en
 // JSON con responseMimeType) para no depender de los parámetros de esquema,
 // que cambiaron de nombre entre versiones de la API.
-const GEMINI_FORMATO = `\n\nRespondé SOLO con un objeto JSON con estas claves exactas: legible (boolean), tipo ("factura" | "remito" | "nc"), numero (string), proveedor (string), fechaEmision (string AAAA-MM-DD o ""), fechaVencimiento (string AAAA-MM-DD o ""), total (number), observaciones (string).`;
+const FORMATO_JSON = `\n\nRespondé SOLO con un objeto JSON con estas claves exactas: legible (boolean), tipo ("factura" | "remito" | "nc"), numero (string), proveedor (string), fechaEmision (string AAAA-MM-DD o ""), fechaVencimiento (string AAAA-MM-DD o ""), total (number), observaciones (string).`;
 
 async function leerConGemini(data, mediaType, pedido) {
   const modelo = process.env.GEMINI_MODEL || 'gemini-flash-latest';
@@ -77,7 +80,7 @@ async function leerConGemini(data, mediaType, pedido) {
       method: 'POST',
       headers: { 'Content-Type': 'application/json', 'x-goog-api-key': process.env.GEMINI_API_KEY },
       body: JSON.stringify({
-        systemInstruction: { parts: [{ text: SYSTEM_PROMPT + GEMINI_FORMATO }] },
+        systemInstruction: { parts: [{ text: SYSTEM_PROMPT + FORMATO_JSON }] },
         contents: [{ role: 'user', parts: [{ inline_data: { mime_type: mediaType, data } }, { text: pedido }] }],
         ...(generationConfig ? { generationConfig } : {}),
       }),
@@ -94,6 +97,26 @@ async function leerConGemini(data, mediaType, pedido) {
   const texto = (((body.candidates || [])[0] || {}).content || {}).parts?.map((p) => p.text || '').join('') || '';
   const json = texto.slice(texto.indexOf('{'), texto.lastIndexOf('}') + 1);
   if (!json) throw new Error('Respuesta vacía de Gemini');
+  return JSON.parse(json);
+}
+
+// Claude a través del AI Gateway de Vercel (API compatible con la de Anthropic).
+async function leerConGateway(data, mediaType, pedido) {
+  const token = process.env.AI_GATEWAY_API_KEY || await getVercelOidcToken();
+  const client = new Anthropic({ apiKey: token, baseURL: 'https://ai-gateway.vercel.sh' });
+  const archivo = mediaType === 'application/pdf'
+    ? { type: 'document', source: { type: 'base64', media_type: mediaType, data } }
+    : { type: 'image', source: { type: 'base64', media_type: mediaType, data } };
+  const response = await client.messages.create({
+    model: process.env.AI_GATEWAY_MODEL || 'anthropic/claude-opus-5.5',
+    max_tokens: 4000,
+    system: SYSTEM_PROMPT + FORMATO_JSON,
+    messages: [{ role: 'user', content: [archivo, { type: 'text', text: pedido }] }],
+  });
+  if (response.stop_reason === 'refusal') throw Object.assign(new Error('No se pudo leer este comprobante'), { status: 422 });
+  const texto = response.content.filter((b) => b.type === 'text').map((b) => b.text).join('');
+  const json = texto.slice(texto.indexOf('{'), texto.lastIndexOf('}') + 1);
+  if (!json) throw new Error('Respuesta vacía de la IA');
   return JSON.parse(json);
 }
 
@@ -121,16 +144,24 @@ export default async function handler(req, res) {
   }
   if (!data || typeof data !== 'string') return res.status(400).json({ error: 'Falta la foto' });
   if (!MEDIA_TYPES.includes(mediaType)) return res.status(400).json({ error: 'Formato no soportado (usá foto o PDF)' });
-  if (!process.env.ANTHROPIC_API_KEY && !process.env.GEMINI_API_KEY) {
-    return res.status(503).json({ error: 'La lectura de fotos todavía no está activada (falta la clave de IA en Vercel)' });
-  }
-
   const conocidos = Array.isArray(proveedores)
     ? proveedores.filter((p) => typeof p === 'string' && p.trim()).slice(0, 300)
     : [];
   const pedido = `Proveedores conocidos: ${conocidos.length ? conocidos.join(', ') : '(ninguno todavía)'}\n\nLeé este comprobante.`;
 
-  // Sin clave de Anthropic se usa Gemini (Google), que tiene plan gratuito.
+  // Sin clave de Anthropic: Gemini si hay clave; si no, el AI Gateway de Vercel.
+  if (!process.env.ANTHROPIC_API_KEY && !process.env.GEMINI_API_KEY) {
+    try {
+      return res.json(normalizar(await leerConGateway(data, mediaType, pedido)));
+    } catch (error) {
+      console.error('factura-foto gateway error:', error);
+      const msg = String(error.message || '');
+      if (error.status === 401 || /oidc|token/i.test(msg)) return res.status(503).json({ error: 'La lectura de fotos todavía no está activada (falta activar el AI Gateway en Vercel)' });
+      if (error.status === 403) return res.status(503).json({ error: 'El AI Gateway de Vercel pide una tarjeta o saldo cargado para usarlo: ' + msg });
+      if (error.status === 429) return res.status(429).json({ error: 'Demasiadas consultas, probá en un minuto' });
+      return res.status(502).json({ error: 'Error de la IA: ' + msg });
+    }
+  }
   if (!process.env.ANTHROPIC_API_KEY) {
     try {
       return res.json(normalizar(await leerConGemini(data, mediaType, pedido)));
