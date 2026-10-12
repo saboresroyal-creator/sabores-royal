@@ -4519,13 +4519,88 @@ function renderAdminComparador(){
   if(!cmpLoaded){ cmpLoadData(); return `<div style="padding:40px;text-align:center;color:rgba(255,255,255,0.4);">Cargando...</div>`; }
   const tab=state.cmpTab||'comparar';
   const cartCount=Object.values(state.cmpCart||{}).reduce((s,arr)=>s+(arr?arr.length:0),0);
-  const tabs=[{k:'comparar',l:'Comparar'},{k:'importar',l:'Importar'},{k:'proveedores',l:'Proveedores'},{k:'pedidos',l:'Pedidos'+(cartCount?' ('+cartCount+')':'')}];
+  const tabs=[{k:'comparar',l:'Comparar'},{k:'listas',l:'Listas'},{k:'importar',l:'Importar'},{k:'proveedores',l:'Proveedores'},{k:'pedidos',l:'Pedidos'+(cartCount?' ('+cartCount+')':'')}];
   let html=`<div class="cmp-tabs-bar">${tabs.map(t=>`<button class="cmp-tab-btn${tab===t.k?' active':''}" onclick="state.cmpTab='${t.k}';render()">${t.l}</button>`).join('')}</div>`;
-  if(tab==='proveedores') html+=cmpHtmlProveedores();
+  if(tab==='listas') html+=cmpHtmlListas();
+  else if(tab==='proveedores') html+=cmpHtmlProveedores();
   else if(tab==='importar') html+=cmpHtmlImportar();
   else if(tab==='pedidos') html+=cmpHtmlPedidos();
   else html+=cmpHtmlComparar();
   return html;
+}
+
+// ── LISTAS (una por proveedor) ──────────────────────────
+// La lista completa de un proveedor, con buscador, precios por unidad /
+// display / caja y el + para armar el pedido directo desde ahí (el mismo
+// carrito que Comparar). Se dibujan como máximo 100 filas: Tyna tiene más
+// de 10.000 y dibujarlas todas trabaría el celular.
+const CMP_LIST_MAX=100;
+let _cmpListQ='', _cmpListSt=null;
+function cmpOpenLista(pid){ state.cmpListProv=pid; _cmpListQ=''; state.cmpTab='listas'; render(); }
+function cmpHtmlListas(){
+  const provs=cmpDB.proveedores.filter(p=>cmpCountProds(p.id)>0);
+  if(!provs.length) return `<div style="padding:40px 20px;text-align:center;color:rgba(255,255,255,0.4);">Todav&iacute;a no hay listas cargadas.<br>Import&aacute; la lista de un proveedor en <b>Importar</b>.</div>`;
+  if(!provs.some(p=>p.id===state.cmpListProv)) state.cmpListProv=provs[0].id;
+  const pid=state.cmpListProv;
+  setTimeout(cmpListRender,0);
+  return `
+    <div style="display:flex;gap:6px;overflow-x:auto;padding:14px 16px 4px;">
+      ${provs.map(p=>`<button class="chip ${p.id===pid?'active':''}" style="flex:none;padding:7px 14px;" onclick="state.cmpListProv='${cmpEsc(p.id)}';_cmpListQ='';render()">${cmpEsc(p.name)} <span style="opacity:.55;font-size:11px;">${cmpCountProds(p.id)}</span></button>`).join('')}
+    </div>
+    <div id="cmp-list-cart"></div>
+    <div class="cmp-search-wrap">
+      <input id="cmp-list-q" placeholder="Buscar en esta lista..." value="${cmpEsc(_cmpListQ)}" oninput="_cmpListQ=this.value;clearTimeout(_cmpListSt);_cmpListSt=setTimeout(cmpListRender,200)" autocomplete="off">
+    </div>
+    <div id="cmp-list-res"></div>`;
+}
+// Resumen del pedido en curso de este proveedor (arriba de la lista).
+function cmpListCartHtml(pid){
+  const items=(state.cmpCart&&state.cmpCart[pid])||[];
+  if(!items.length) return '';
+  return `<div style="margin:10px 16px 0;padding:10px 12px;border-radius:12px;background:var(--glass);border:1px solid var(--gold);display:flex;align-items:center;gap:10px;">
+    <div style="flex:1;min-width:0;font-size:13px;">Pedido en curso: <b>${items.length} producto(s)</b> &middot; <b style="color:var(--gold2);">${cmpMoney(cmpCartTotal(items))}</b></div>
+    <button class="btn-primary" style="font-size:12px;padding:6px 12px;flex:none;width:auto;white-space:nowrap;" onclick="state.cmpTab='pedidos';render()">Ver pedido</button>
+  </div>`;
+}
+function cmpListRender(){
+  const el=document.getElementById('cmp-list-res'); if(!el) return;
+  const pid=state.cmpListProv;
+  const prov=cmpDB.proveedores.find(p=>p.id===pid);
+  const lista=cmpDB.listas.find(l=>l.provId===pid);
+  const cartEl=document.getElementById('cmp-list-cart');
+  if(cartEl) cartEl.innerHTML=cmpListCartHtml(pid);
+  if(!prov||!lista){ el.innerHTML=''; return; }
+  const qt=cmpTokenize(_cmpListQ);
+  let rows;
+  if(qt.length){
+    rows=lista.rows.map(r=>({r,s:cmpQScore(r.norm,qt)})).filter(x=>x.s>0)
+      .sort((a,b)=>b.s-a.s||a.r.name.localeCompare(b.r.name)).map(x=>x.r);
+  }else{
+    rows=lista.rows.slice().sort((a,b)=>a.name.localeCompare(b.name));
+  }
+  const total=rows.length;
+  rows=rows.slice(0,CMP_LIST_MAX);
+  const cart=(state.cmpCart&&state.cmpCart[pid])||[];
+  _cmpRowIdx.length=0;
+  let h=`<div style="font-size:11px;color:rgba(255,255,255,0.45);margin:0 16px 8px;">${qt.length?total+' resultado(s)':total+' productos'}${total>rows.length?` &middot; mostrando ${rows.length}, busc&aacute; para encontrar el resto`:''}${prov.lastImport?' &middot; lista del '+cmpFmtDateFull(prov.lastImport):''}</div>`;
+  if(!rows.length){ el.innerHTML=h+`<div style="padding:30px 20px;text-align:center;color:rgba(255,255,255,0.4);">No hay productos que coincidan.</div>`; return; }
+  h+=`<div style="margin:0 16px 24px;background:var(--glass);border:1px solid var(--glass-bd);border-radius:14px;">`;
+  rows.forEach(r=>{
+    const pr=cmpRowPricing(r,prov);
+    const idx=_cmpRowIdx.push({provId:pid,name:r.name,price:r.price,unit:r.unit,unitQty:r.unitQty||1,code:r.code,pricing:pr})-1;
+    const key=(r.code||r.name).toLowerCase();
+    const inCart=cart.find(it=>it.key===key);
+    h+=`<div style="display:flex;align-items:center;gap:10px;padding:10px 12px;border-bottom:1px solid rgba(255,255,255,0.06);">
+      <div style="flex:1;min-width:0;">
+        <div style="font-size:13px;font-weight:600;word-break:break-word;">${r.code?`<span style="color:rgba(255,255,255,0.4);font-weight:400;">${cmpEsc(r.code)} &middot; </span>`:''}${cmpEsc(r.name)}</div>
+        <div style="font-size:12px;margin-top:3px;"><b>${cmpMoney(pr.unit)}</b><span style="color:rgba(255,255,255,0.4)">/u</span>${pr.levels.slice(1).map(lv=>` <span style="color:rgba(255,255,255,0.45);">&middot; ${lv.label}: ${lv.key===pr.listLevel?'<b style="color:rgba(255,255,255,0.75)">'+cmpMoney(lv.price)+'</b>':cmpMoney(lv.price)}</span>`).join('')}</div>
+        ${inCart?`<div style="font-size:11px;color:var(--ok);margin-top:3px;">En el pedido: ${cmpItemQtyText(inCart)}</div>`:''}
+      </div>
+      <button class="cmp-add-btn" style="flex:none;" onclick="cmpCartAdd(${idx});cmpListRender()" title="Agregar al pedido">+</button>
+    </div>`;
+  });
+  h+=`</div>`;
+  el.innerHTML=h;
 }
 
 // ── PROVEEDORES ─────────────────────────────────────────
@@ -4564,6 +4639,7 @@ function cmpHtmlProveedores(){
           <div style="font-size:12px;color:rgba(255,255,255,0.4);margin-top:2px;">${prod} productos &middot; ${fecha}</div>
         </div>
         <div style="display:flex;gap:6px;">
+          ${prod?`<button class="btn-secondary" style="font-size:12px;padding:5px 10px;" onclick="cmpOpenLista('${cmpEsc(p.id)}')">Ver lista</button>`:''}
           <button class="btn-secondary" style="font-size:12px;padding:5px 10px;" onclick="cmpModalProv('${cmpEsc(p.id)}')">Editar</button>
           <button style="font-size:12px;padding:5px 10px;background:var(--danger);color:#fff;border-radius:8px;font-weight:600;" onclick="cmpConfirmDelProv('${cmpEsc(p.id)}')">Borrar</button>
         </div>
