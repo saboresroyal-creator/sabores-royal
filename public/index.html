@@ -755,6 +755,10 @@ function productCategoriesInUse(){
 function productSubcatsInUse(cat){
   return [...new Set(state.products.filter(p=>!cat || p.cat===cat).map(p=>p.sub).filter(Boolean))].sort((a,b)=>a.localeCompare(b,'es'));
 }
+// Dirección fija de la app de clientes para el QR. No se arma con
+// location.origin porque, si el admin se abre desde un link de prueba de
+// Vercel, el QR queda apuntando a ese link y deja de andar cuando se borra.
+const CLIENT_APP_URL = 'https://qr-sabores-royal.vercel.app';
 const SECTION_META = {
   natural:{label:"Tienda Natural", sub:"Frutos secos, dietética y más", icon:"leaf", cls:"natural"},
   golosinas:{label:"Golosinas", sub:"Chocolates, caramelos y chicles", icon:"candy", cls:"golosinas"},
@@ -10382,7 +10386,7 @@ function renderAdminConfig(){
       <p style="font-size:12.5px; color:rgba(255,255,255,0.6); margin-bottom:12px;">Mostrá este código para que tus clientes descarguen la app en su celular.</p>
       <div style="display:flex; flex-direction:column; align-items:center; gap:10px;">
         <div style="background:#fff; padding:10px; border-radius:14px; display:inline-block;">
-          <img id="qr-img" src="https://api.qrserver.com/v1/create-qr-code/?size=220x220&qzone=1&data=${encodeURIComponent((()=>{ try{ return window.location.origin + window.location.pathname.replace('admin.html','index.html').replace(/\?.*$/,''); }catch(e){ return ''; } })())}" alt="QR" style="width:220px; height:220px; display:block; border-radius:6px;">
+          <img id="qr-img" src="https://api.qrserver.com/v1/create-qr-code/?size=220x220&qzone=1&data=${encodeURIComponent(CLIENT_APP_URL)}" alt="QR" style="width:220px; height:220px; display:block; border-radius:6px;">
         </div>
         <p style="font-size:11.5px; color:rgba(255,255,255,0.45); text-align:center;">El cliente escanea el QR → abre la app → la agrega al inicio</p>
         <button class="btn-secondary" style="font-size:12.5px;" onclick="(()=>{ const a=document.createElement('a'); a.href=document.getElementById('qr-img').src; a.download='qr-sabores-royal.png'; a.target='_blank'; a.click(); })()">Descargar QR</button>
