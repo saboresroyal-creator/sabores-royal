@@ -709,6 +709,8 @@ function ic(name){
     chat:'<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z"/></svg>',
     cake:'<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><rect x="4" y="12" width="16" height="8" rx="1.5"/><path d="M4 16c1.3 1 2.7 1 4 0s2.7-1 4 0 2.7 1 4 0 2.7-1 4 0"/><path d="M8 12V9M12 12V9M16 12V9"/><path d="M8 7c-.6-.6-.6-1.4 0-2 .6.6.6 1.4 0 2zM12 7c-.6-.6-.6-1.4 0-2 .6.6.6 1.4 0 2zM16 7c-.6-.6-.6-1.4 0-2 .6.6.6 1.4 0 2z"/></svg>',
     gift:'<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><rect x="4" y="9" width="16" height="11" rx="1"/><path d="M4 13h16"/><path d="M12 9v11"/><path d="M12 9C9.5 9 8 7.8 8 6.2 8 4.9 9 4 10.2 4 11.7 4 12 6.5 12 9z"/><path d="M12 9c2.5 0 4-1.2 4-2.8C16 4.9 15 4 13.8 4 12.3 4 12 6.5 12 9z"/></svg>',
+    eye:'<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><path d="M2 12s3.6-7 10-7 10 7 10 7-3.6 7-10 7S2 12 2 12z"/><circle cx="12" cy="12" r="3"/></svg>',
+    close:'<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M6 6l12 12M18 6L6 18"/></svg>',
   };
   return I[name] || '';
 }
@@ -850,6 +852,12 @@ let state = {
   vouchers: [],
   voucherCounters:{factura:0, remito:0, ticket:0, presupuesto:0},
   suggestions: [],
+  rewards: [],
+  signQueue: [],
+  signSize: 'gondola',
+  signPriceMode: 'minorista',
+  rewardRedemptions: [],
+  myRedemptions: [],
   chatMessages: [],
   chatUnread: 0,
   adminChatPhone: null,
@@ -1268,7 +1276,7 @@ function normalizeHomeBackground(parsed){
 }
 async function apiSyncContent(){
   try{
-    const data = await supaFetch('/app_settings?setting_key=in.(novedades,ofertas,banner_novedades,banner_ofertas,catalog_ribbons,home_background,client_discounts,wholesale_clients,categories,store_config,fiscal_config,banners,pos_config,pos_banner)&select=setting_key,setting_value', 'GET');
+    const data = await supaFetch('/app_settings?setting_key=in.(novedades,ofertas,banner_novedades,banner_ofertas,catalog_ribbons,home_background,client_discounts,wholesale_clients,categories,store_config,fiscal_config,banners,pos_config,pos_banner,rewards)&select=setting_key,setting_value', 'GET');
     if(!data || data.length===0) return;
     let changed = false;
     data.forEach(row=>{
@@ -1279,6 +1287,9 @@ async function apiSyncContent(){
         }
         if(row.setting_key==='ofertas' && JSON.stringify(parsed)!==JSON.stringify(state.ofertas)){
           state.ofertas = parsed||[]; changed = true;
+        }
+        if(row.setting_key==='rewards' && JSON.stringify(parsed||[])!==JSON.stringify(state.rewards)){
+          state.rewards = parsed||[]; changed = true;
         }
         if(row.setting_key==='banner_novedades' && JSON.stringify(parsed)!==JSON.stringify(state.bannerNovedades)){
           state.bannerNovedades = parsed; changed = true;
@@ -2576,6 +2587,7 @@ function render(){
   else if(r.screen==="search") html = renderGlobalSearch();
   else if(r.screen==="chat") html = needsLogin ? renderClientWelcome() : renderChat();
   else if(r.screen==="suggestions") html = renderSuggestions();
+  else if(r.screen==="premios") html = renderPremios();
   else if(r.screen==="mayorista") html = renderMayoristaSignup();
   else html = renderHome();
   app.innerHTML = html + (["admin","voucher-view","price-list-view","mayorista"].includes(r.screen) ? "" : renderBottomNav());
@@ -2801,9 +2813,10 @@ function renderHome(){
         `).join('')}
       </div>
     ` : ''}
-    <div class="offers-banner">
+    <div class="offers-banner" style="cursor:pointer;" onclick="nav('premios')">
       <div class="ob-icon"><img src="${CROWN_DATA_URL}" style="width:100%; height:100%; object-fit:contain;"></div>
-      <div><b>Puntos Royal</b> — sumás 1 corona por cada $100 en compras, canjealos por premios</div>
+      <div style="flex:1;"><b>Puntos Royal</b> — sumás 1 corona por cada $100 en compras, canjealos por premios</div>
+      <div style="flex:none; opacity:.6;">${ic('chevron')}</div>
     </div>
     ${(()=>{ const cl = state.currentClientPhone ? state.clients[state.currentClientPhone] : null; if(wholesaleModeActive(cl)) return ''; return `
     <div class="offers-banner" style="cursor:pointer;" onclick="nav('mayorista')">
@@ -3701,6 +3714,9 @@ function renderAccount(){
       <button class="btn-secondary" onclick="openEditProfileModal()">Editar mis datos</button>
     </div>
     <div style="padding:0 16px 16px;">
+      <button class="btn-primary" onclick="nav('premios')">👑 Canjear premios</button>
+    </div>
+    <div style="padding:0 16px 16px;">
       <button class="btn-secondary" onclick="nav('orders')">Ver mis pedidos</button>
     </div>
     <div style="padding:0 16px 16px;">
@@ -3911,6 +3927,123 @@ async function submitSuggestion(){
   }
 }
 
+/* ---------- PREMIOS (canje de Puntos Royal) ---------- */
+// El catálogo (state.rewards) se edita en Admin > Premios y se baja con
+// apiSyncContent. El canje lo hace el servidor (redeem_reward): toma el
+// costo del catálogo guardado allá, descuenta los puntos y devuelve un
+// código que el cliente muestra en el local para retirar el premio.
+const REDEMPTION_STATUS = {
+  pendiente: {label:'Para retirar', cls:'status-pendiente'},
+  entregado: {label:'Entregado',    cls:'status-entregado'},
+  cancelado: {label:'Cancelado',    cls:'status-cancelado'},
+};
+async function loadMyRedemptions(){
+  const phone = state.currentClientPhone;
+  if(!phone) return;
+  try{
+    const rows = await rpcFetch('client_reward_redemptions', {p_phone: phone});
+    if(JSON.stringify(rows||[]) !== JSON.stringify(state.myRedemptions)){
+      state.myRedemptions = rows||[];
+      if(state.route.screen==='premios') render();
+    }
+  }catch(e){ console.warn('Canjes del cliente:', e); }
+}
+function renderPremios(){
+  const phone = state.currentClientPhone;
+  const client = phone ? state.clients[phone] : null;
+  if(client && !state.route.redemptionsLoaded){ state.route.redemptionsLoaded = true; loadMyRedemptions(); }
+  const points = client ? (client.points||0) : 0;
+  const rewards = (state.rewards||[]).filter(r=>r.active!==false).sort((a,b)=>(a.points||0)-(b.points||0));
+  const lastCode = state.route.lastRedemptionCode;
+  const mine = client ? (state.myRedemptions||[]) : [];
+  return `
+  <div class="screen">
+    <div class="topbar"><button class="back" onclick="nav('home')">${ic('chevron')}</button><h2>Premios Royal</h2></div>
+    <div class="cart-summary" style="margin-top:14px;">
+      ${client ? `
+      <div class="summary-row"><span>Tus puntos</span><span style="display:inline-flex; align-items:center; gap:5px; color:var(--gold2); font-weight:700; font-size:17px;">${points} <img src="${CROWN_DATA_URL}" style="width:18px; height:18px; object-fit:contain;"></span></div>
+      <p style="font-size:11.5px; color:rgba(255,255,255,0.5); padding:0 0 8px;">Sumás 1 corona por cada $100 en compras. Canjeá un premio y retiralo en el local mostrando el código.</p>
+      ` : `
+      <p style="font-size:13px; color:rgba(255,255,255,0.75); padding:4px 0 10px;">Ingresá a tu cuenta para ver tus puntos y canjear premios.</p>
+      <button class="btn-primary" onclick="nav('account')">Ingresar con mi teléfono</button>
+      `}
+    </div>
+    ${lastCode ? `
+    <div style="margin:0 16px 16px; padding:18px; border-radius:16px; text-align:center; background:linear-gradient(120deg, rgba(197,160,40,0.25), rgba(197,160,40,0.08)); border:1px solid rgba(224,187,74,0.6);">
+      <div style="font-size:12.5px; color:rgba(255,255,255,0.8);">¡Canje listo! Mostrá este código en el local</div>
+      <div style="font-family:monospace; font-size:34px; font-weight:700; letter-spacing:6px; color:var(--goldlight); margin:8px 0 2px;">${escapeHtml(lastCode)}</div>
+      <div style="font-size:11.5px; color:rgba(255,255,255,0.55);">También queda guardado abajo, en "Mis canjes".</div>
+    </div>` : ''}
+    <div class="home-sec-header"><span class="home-sec-label">Premios disponibles</span></div>
+    <div style="display:flex; flex-direction:column; gap:10px; padding:0 16px 16px;">
+      ${rewards.length===0 ? `<div class="empty-state">${ic('gift')}<p>Muy pronto vas a ver acá los premios para canjear.</p></div>` : rewards.map(r=>{
+        const cost = r.points||0;
+        const can = client && points >= cost;
+        const missing = Math.max(0, cost - points);
+        return `
+        <div class="glass" style="display:flex; gap:12px; align-items:center; padding:12px;">
+          <div style="width:64px; height:64px; flex:none; border-radius:12px; overflow:hidden; background:rgba(255,255,255,0.06); display:flex; align-items:center; justify-content:center; color:var(--gold2);">
+            ${r.photo ? `<img src="${escapeHtml(r.photo)}" alt="" style="width:100%; height:100%; object-fit:cover;">` : ic('gift')}
+          </div>
+          <div style="flex:1; min-width:0;">
+            <div style="font-weight:700; color:var(--white); font-size:14.5px;">${escapeHtml(r.name||'')}</div>
+            ${r.desc ? `<div style="font-size:12px; color:rgba(255,255,255,0.6); margin-top:2px;">${escapeHtml(r.desc)}</div>` : ''}
+            <div style="display:inline-flex; align-items:center; gap:4px; margin-top:5px; color:var(--gold2); font-weight:700; font-size:13px;">${cost} <img src="${CROWN_DATA_URL}" style="width:14px; height:14px; object-fit:contain;"></div>
+          </div>
+          <div style="flex:none; text-align:center; max-width:96px;">
+            ${!client ? '' : can
+              ? `<button class="btn-primary" style="padding:9px 14px; font-size:13px; width:auto;" onclick="redeemReward('${escapeHtml(r.id)}')">Canjear</button>`
+              : `<div style="font-size:11px; color:rgba(255,255,255,0.5); line-height:1.3;">Te faltan<br><b style="color:rgba(255,255,255,0.8);">${missing}</b> puntos</div>`}
+          </div>
+        </div>`;
+      }).join('')}
+    </div>
+    ${mine.length ? `
+    <div class="home-sec-header"><span class="home-sec-label">Mis canjes</span></div>
+    <div style="padding:0 0 90px;">
+      ${mine.map(m=>{
+        const st = REDEMPTION_STATUS[m.status] || REDEMPTION_STATUS.pendiente;
+        return `
+        <div class="order-card">
+          <div class="oc-head">
+            <span class="oc-id">${escapeHtml(m.reward_name)}</span>
+            <span class="status-pill ${st.cls}">${st.label}</span>
+          </div>
+          <div style="display:flex; justify-content:space-between; align-items:center; margin-top:6px; font-size:12.5px; color:rgba(255,255,255,0.65);">
+            <span>Código <b style="font-family:monospace; letter-spacing:2px; color:var(--goldlight); font-size:15px;">${escapeHtml(m.code)}</b></span>
+            <span>${m.points} pts · ${new Date(m.created_at).toLocaleDateString('es-AR')}</span>
+          </div>
+        </div>`;
+      }).join('')}
+    </div>` : '<div style="height:90px;"></div>'}
+  </div>`;
+}
+let redeemingReward = false;
+async function redeemReward(rewardId){
+  const phone = state.currentClientPhone;
+  const client = phone ? state.clients[phone] : null;
+  const reward = (state.rewards||[]).find(r=>r.id===rewardId);
+  if(!client || !reward || redeemingReward) return;
+  if(!confirm(`¿Canjear "${reward.name}" por ${reward.points} puntos?\n\nTe vamos a dar un código para retirarlo en el local.`)) return;
+  redeemingReward = true;
+  try{
+    const row = await rpcFetch('redeem_reward', {p_phone: phone, p_reward_id: rewardId});
+    const saved = Array.isArray(row) ? row[0] : row;
+    client.points = Math.max(0, (client.points||0) - (saved && saved.points || reward.points));
+    if(saved) state.myRedemptions = [saved, ...(state.myRedemptions||[]).filter(m=>m.id!==saved.id)];
+    state.route.lastRedemptionCode = saved ? saved.code : null;
+    saveState(); render(); window.scrollTo(0,0);
+    refreshCurrentClient();
+  }catch(e){
+    const msg = String(e.message||'');
+    toast(msg.includes('puntos_insuficientes') ? 'No te alcanzan los puntos para este premio.'
+        : msg.includes('premio_no_disponible') ? 'Ese premio ya no está disponible.'
+        : msg.includes('cliente_no_encontrado') ? 'No encontramos tu cuenta. Volvé a ingresar con tu teléfono.'
+        : 'No se pudo canjear. Probá de nuevo en un momento.', 'err');
+    refreshCurrentClient(); apiSyncContent();
+  }finally{ redeemingReward = false; }
+}
+
 /* ---------- DYNAMIC BINDINGS (after render) ---------- */
 function bindDynamic(){
   // placeholder for future event delegation needs
@@ -3945,6 +4078,7 @@ function renderAdmin(){
     </div>`;
   }
   const unreadCount = state.suggestions.filter(s=>!s.read).length;
+  const pendingRedemptionsCount = (state.rewardRedemptions||[]).filter(r=>r.status==='pendiente').length;
   const chatUnreadTotal = Object.values(state.adminChatUnread||{}).reduce((s,n)=>s+n,0);
   const lowStockCount = state.products.filter(isLowStock).length;
   const noBarcodeCount = state.products.filter(p=>!p.barcode).length;
@@ -3963,7 +4097,9 @@ function renderAdmin(){
     {key:"chats",         label:"Chats", badge:chatUnreadTotal},
     {key:"comprobantes",  label:"Comprobantes"},
     {key:"listaprecios",  label:"Listas de Precios"},
+    {key:"carteles",      label:"Carteles"},
     {key:"banners",       label:"Novedades/Ofertas"},
+    {key:"premios",       label:"Premios", badge:pendingRedemptionsCount},
     {key:"sugerencias",   label:"Sugerencias", badge:unreadCount},
     {key:"config",        label:"Configuración"},
     {key:"comparador",    label:"Comparador"},
@@ -4045,7 +4181,9 @@ function renderAdmin(){
       ${tab==="chats" ? renderAdminChats() : ""}
       ${tab==="comprobantes" ? renderAdminComprobantes() : ""}
       ${tab==="listaprecios" ? renderAdminListaPrecios() : ""}
+      ${tab==="carteles" ? renderAdminCarteles() : ""}
       ${tab==="banners" ? renderAdminBanners() : ""}
+      ${tab==="premios" ? renderAdminPremios() : ""}
       ${tab==="sugerencias" ? renderAdminSugerencias() : ""}
       ${tab==="config" ? renderAdminConfig() : ""}
       ${tab==="comparador" ? renderAdminComparador() : ""}
@@ -4056,6 +4194,7 @@ function renderAdmin(){
     ${tab==="comprobantes" ? `<button class="fab" onclick="openManualVoucherModal()">${ic('plus')}</button>` : ""}
     ${tab==="banners" && (state.adminBannerSub||'banners')!=='fondo' ? `<button class="fab" onclick="${(state.adminBannerSub||'banners')==='novedades'?'openContentModal(\'novedad\',null)':(state.adminBannerSub||'banners')==='ofertas'?'openContentModal(\'oferta\',null)':'openBannerModal(null)'}">${ic('plus')}</button>` : ""}
     ${tab==="chats" && !state.adminChatPhone ? `<button class="fab" onclick="openNewChatPicker()">${ic('plus')}</button>` : ""}
+    ${tab==="premios" && state.adminPremiosSub==='catalogo' ? `<button class="fab" onclick="openRewardModal(null)">${ic('plus')}</button>` : ""}
   </div>`;
 }
 async function tryAdminLogin(){
@@ -7079,8 +7218,10 @@ const PERM_OPTIONS = [
   {key:"chats",         label:"Ver y responder chats"},
   {key:"comprobantes",  label:"Ver y crear comprobantes"},
   {key:"listaprecios",  label:"Generar listas de precios"},
+  {key:"carteles",      label:"Imprimir carteles de precios"},
   {key:"banners",       label:"Editar novedades y ofertas"},
   {key:"sugerencias",   label:"Ver sugerencias"},
+  {key:"premios",       label:"Entregar premios y editar el catálogo"},
 ];
 let subAdminDraft = { user_id:null, name:"", email:"", perms:[] };
 function openSubAdminModal(idx){
@@ -11517,6 +11658,806 @@ function deleteSuggestion(id){
   adminFetch('/suggestions?id=eq.'+id, 'DELETE').catch(e=>console.warn('Error eliminando sugerencia:', e));
 }
 
+/* ---------- ADMIN: PREMIOS (canjes + catálogo) ---------- */
+async function apiSyncRewardRedemptions(){
+  if(!IS_ADMIN_APP || !state.adminAuthed) return;
+  try{
+    const rows = await adminFetch('/reward_redemptions?select=*&order=created_at.desc&limit=200', 'GET');
+    if(JSON.stringify(rows||[]) !== JSON.stringify(state.rewardRedemptions)){
+      state.rewardRedemptions = rows||[];
+      saveState();
+      if(!document.getElementById('reward-modal-overlay')) render();
+    }
+  }catch(e){ console.warn('Sync canjes de premios:', e); }
+}
+function setAdminPremiosSub(sub){ state.adminPremiosSub = sub; render(); }
+function setRedemptionSearch(v){
+  state.adminRedemptionQuery = v;
+  const list = document.getElementById('redemptions-list');
+  if(list) list.innerHTML = renderAdminRedemptionsList();
+}
+function renderAdminPremios(){
+  const sub = state.adminPremiosSub || 'canjes';
+  return `
+    <div style="display:flex; gap:8px; padding:12px 16px 4px; overflow-x:auto;">
+      <button class="chip ${sub==='canjes'?'active':''}" onclick="setAdminPremiosSub('canjes')">Canjes</button>
+      <button class="chip ${sub==='catalogo'?'active':''}" onclick="setAdminPremiosSub('catalogo')">Catálogo de premios</button>
+    </div>
+    ${sub==='catalogo' ? renderAdminRewardsCatalog() : `
+      <div class="form-group" style="margin-top:10px;"><input id="redemption-search" type="search" placeholder="Buscar por código, cliente o teléfono" value="${escapeHtml(state.adminRedemptionQuery||'')}" oninput="setRedemptionSearch(this.value)" autocapitalize="characters"></div>
+      <div id="redemptions-list">${renderAdminRedemptionsList()}</div>
+    `}`;
+}
+function renderAdminRedemptionsList(){
+  const q = normText(state.adminRedemptionQuery||'').trim();
+  let list = state.rewardRedemptions||[];
+  if(q) list = list.filter(r=>normText(r.code).includes(q) || normText(r.client_name).includes(q) || (r.client_phone||'').includes(q) || normText(r.reward_name).includes(q));
+  // pendientes primero, después el resto por fecha
+  list = [...list].sort((a,b)=>(a.status==='pendiente'?0:1)-(b.status==='pendiente'?0:1) || new Date(b.created_at)-new Date(a.created_at));
+  if(!list.length) return `<div class="empty-state">${ic('gift')}<p>${q?'No hay canjes con esa búsqueda.':'Todavía no hay canjes de premios.'}</p></div>`;
+  return list.map(r=>{
+    const st = REDEMPTION_STATUS[r.status] || REDEMPTION_STATUS.pendiente;
+    const d = new Date(r.created_at);
+    return `
+    <div class="order-card" style="${r.status!=='pendiente'?'opacity:.6;':''}">
+      <div class="oc-head">
+        <span class="oc-id" style="font-family:monospace; letter-spacing:2px; font-size:16px; color:var(--goldlight);">${escapeHtml(r.code)}</span>
+        <span class="status-pill ${st.cls}">${st.label==='Para retirar'?'Pendiente':st.label}</span>
+      </div>
+      <div style="font-size:14px; color:var(--white); font-weight:600; margin-top:4px;">${escapeHtml(r.reward_name)} <span style="color:var(--gold2); font-weight:700;">· ${r.points} pts</span></div>
+      <div style="font-size:12.5px; color:rgba(255,255,255,0.6); margin-top:2px;">${escapeHtml(r.client_name||'Cliente')} · ${escapeHtml(r.client_phone||'')}</div>
+      <div style="font-size:11px; color:rgba(255,255,255,0.4); margin-top:2px;">${fmtDmy(d)} ${d.toLocaleTimeString('es-AR',{hour:'2-digit',minute:'2-digit'})}${r.resolved_at?` · ${r.status==='entregado'?'entregado':'cancelado'} ${fmtDmy(new Date(r.resolved_at))}`:''}</div>
+      ${r.status==='pendiente' ? `
+      <div style="display:flex; gap:8px; margin-top:10px;">
+        <button class="btn-secondary" style="flex:1; padding:10px;" onclick="cancelRedemption(${r.id})">Cancelar y devolver puntos</button>
+        <button class="btn-primary" style="flex:1; padding:10px;" onclick="deliverRedemption(${r.id})">Entregado</button>
+      </div>` : ''}
+    </div>`;
+  }).join('');
+}
+function fmtDmy(d){
+  return String(d.getDate()).padStart(2,'0')+'/'+String(d.getMonth()+1).padStart(2,'0')+'/'+d.getFullYear();
+}
+async function deliverRedemption(id){
+  const r = (state.rewardRedemptions||[]).find(x=>x.id===id);
+  if(!r || !confirm(`¿Confirmás que entregaste "${r.reward_name}" a ${r.client_name||'el cliente'}? (código ${r.code})`)) return;
+  try{
+    const rows = await adminFetch('/reward_redemptions?id=eq.'+id+'&status=eq.pendiente', 'PATCH', {status:'entregado', resolved_at:new Date().toISOString()});
+    if(!rows || !rows.length){ toast('Ese canje ya no estaba pendiente', 'err'); }
+    else toast('Premio entregado', 'ok');
+  }catch(e){ toast('No se pudo guardar: '+e.message, 'err'); }
+  apiSyncRewardRedemptions();
+}
+async function cancelRedemption(id){
+  const r = (state.rewardRedemptions||[]).find(x=>x.id===id);
+  if(!r || !confirm(`¿Cancelar el canje ${r.code}? Se le devuelven ${r.points} puntos a ${r.client_name||'el cliente'}.`)) return;
+  try{
+    await adminFetch('/rpc/admin_cancel_reward_redemption', 'POST', {p_id: id});
+    toast('Canje cancelado y puntos devueltos', 'ok');
+  }catch(e){
+    toast(String(e.message).includes('canje_no_pendiente') ? 'Ese canje ya no estaba pendiente' : 'No se pudo cancelar: '+e.message, 'err');
+  }
+  apiSyncRewardRedemptions(); apiSyncClients();
+}
+function renderAdminRewardsCatalog(){
+  const rewards = state.rewards||[];
+  if(!rewards.length) return `<div class="empty-state">${ic('gift')}<p>Todavía no cargaste premios. Tocá + para agregar el primero.</p></div>`;
+  return `<div style="padding:8px 0 80px;">` + rewards.map((r,idx)=>`
+    <div class="order-card" style="display:flex; gap:12px; align-items:center; ${r.active===false?'opacity:.5;':''}">
+      <div style="width:54px; height:54px; flex:none; border-radius:10px; overflow:hidden; background:rgba(255,255,255,0.06); display:flex; align-items:center; justify-content:center; color:var(--gold2);">
+        ${r.photo ? `<img src="${escapeHtml(r.photo)}" alt="" style="width:100%; height:100%; object-fit:cover;">` : ic('gift')}
+      </div>
+      <div style="flex:1; min-width:0;">
+        <div style="font-weight:700; color:var(--white);">${escapeHtml(r.name||'')}</div>
+        <div style="font-size:12.5px; color:var(--gold2); font-weight:700;">${r.points} puntos${r.active===false?' <span style="color:rgba(255,255,255,0.5); font-weight:500;">· oculto</span>':''}</div>
+        ${r.desc?`<div style="font-size:12px; color:rgba(255,255,255,0.55);">${escapeHtml(r.desc)}</div>`:''}
+      </div>
+      <button class="icon-btn" onclick="openRewardModal(${idx})">${ic('edit')}</button>
+      <button class="icon-btn" onclick="deleteReward(${idx})">${ic('trash')}</button>
+    </div>`).join('') + `</div>`;
+}
+let rewardDraft = {photo:''};
+function openRewardModal(idx){
+  const item = (idx!==null && idx!==undefined) ? state.rewards[idx] : null;
+  rewardDraft = item ? Object.assign({}, item) : {id:null, name:'', desc:'', points:'', photo:'', active:true};
+  const overlay = document.createElement('div');
+  overlay.className = 'modal-overlay';
+  overlay.id = 'reward-modal-overlay';
+  overlay.innerHTML = `
+    <div class="modal-sheet">
+      <div class="modal-handle"></div>
+      <h3 class="modal-title">${item?'Editar premio':'Nuevo premio'}</h3>
+      <div id="reward-photo-preview">${rewardDraft.photo?`<div class="photo-preview-wrap"><img src="${rewardDraft.photo}" style="width:100%; height:180px; object-fit:cover; border-radius:12px;"></div>`:''}</div>
+      <div class="photo-upload-row">
+        <div class="photo-upload-box">${ic('upload')}<span>Galería</span><input type="file" accept="image/*" onchange="onRewardPhotoSelected(event)"></div>
+        <div class="photo-upload-box">${ic('camera')}<span>Cámara</span><input type="file" accept="image/*" capture="environment" onchange="onRewardPhotoSelected(event)"></div>
+      </div>
+      <div class="form-group"><label>Nombre del premio</label><input id="rw-name" value="${escapeHtml(rewardDraft.name||'')}" placeholder="Ej: Alfajor triple"></div>
+      <div class="form-group"><label>Descripción (opcional)</label><input id="rw-desc" value="${escapeHtml(rewardDraft.desc||'')}" placeholder="Ej: Uno por canje, sujeto a stock"></div>
+      <div class="form-group"><label>Puntos necesarios</label><input id="rw-points" type="number" inputmode="numeric" min="1" step="1" value="${rewardDraft.points||''}" placeholder="Ej: 500"></div>
+      <div class="form-group" style="display:flex; align-items:center; justify-content:space-between;">
+        <label style="margin:0;">Visible para los clientes</label>
+        <button type="button" class="toggle ${rewardDraft.active!==false?'on':''}" id="rw-active" onclick="this.classList.toggle('on')"></button>
+      </div>
+      <div style="display:flex; gap:10px; margin-top:8px;">
+        <button class="btn-secondary" style="flex:1;" onclick="closeRewardModal()">Cancelar</button>
+        <button class="btn-primary" style="flex:1;" id="rw-save" onclick="saveRewardModal(${item?idx:'null'})">Guardar</button>
+      </div>
+    </div>`;
+  document.body.appendChild(overlay);
+}
+function onRewardPhotoSelected(event){
+  const file = event.target.files[0];
+  if(!file) return;
+  const reader = new FileReader();
+  reader.onload = async (e)=>{
+    rewardDraft.photo = await downscaleImageDataUrl(e.target.result);
+    const preview = document.getElementById('reward-photo-preview');
+    if(preview) preview.innerHTML = `<div class="photo-preview-wrap"><img src="${rewardDraft.photo}" style="width:100%; height:180px; object-fit:cover; border-radius:12px;"></div>`;
+  };
+  reader.readAsDataURL(file);
+}
+function closeRewardModal(){
+  const el = document.getElementById('reward-modal-overlay');
+  if(el) el.remove();
+}
+async function saveRewardModal(idx){
+  const name = document.getElementById('rw-name').value.trim();
+  const desc = document.getElementById('rw-desc').value.trim();
+  const points = parseInt(document.getElementById('rw-points').value, 10);
+  const active = document.getElementById('rw-active').classList.contains('on');
+  if(!name){ toast('Poné el nombre del premio', 'err'); return; }
+  if(!(points > 0)){ toast('Poné cuántos puntos cuesta (un número mayor a 0)', 'err'); return; }
+  const btn = document.getElementById('rw-save'); if(btn){ btn.disabled = true; btn.textContent = 'Guardando...'; }
+  let photo = rewardDraft.photo || '';
+  if(photo.startsWith('data:')){
+    try{ photo = await uploadPhoto(photo, 'reward'); }
+    catch(pe){ toast('La foto no se pudo subir: '+pe.message, 'err'); photo = ''; }
+  }
+  const item = {id: rewardDraft.id || ('r'+Date.now()), name, desc, points, photo, active};
+  if(!state.rewards) state.rewards = [];
+  if(idx!==null && idx!==undefined && state.rewards[idx]) state.rewards[idx] = item;
+  else state.rewards.push(item);
+  saveState(); closeRewardModal(); render();
+  await apiSaveSetting('rewards', state.rewards);
+  toast('Premio guardado', 'ok');
+}
+function deleteReward(idx){
+  const r = state.rewards[idx];
+  if(!r || !confirm(`¿Eliminar el premio "${r.name}"? Los canjes ya hechos no se borran.`)) return;
+  state.rewards.splice(idx, 1);
+  saveState(); render();
+  apiSaveSetting('rewards', state.rewards);
+}
+
+/* ---------- ADMIN: CARTELES DE PRECIOS (PDF para imprimir) ---------- */
+// Se arma una lista (state.signQueue: [{id, copies}]) escaneando códigos o
+// buscando por nombre, y se genera un PDF A4 con jsPDF (cmpLoadPdfLibs) con
+// líneas de corte. Los precios salen de las mismas reglas que la app
+// (activePromo) y siempre con 2 decimales.
+const SIGN_SIZES = {
+  gondola: {label:'Góndola · 16 por hoja', cols:2, rows:8},
+  grande:  {label:'Grande · 4 por hoja',  cols:1, rows:4},
+};
+// Cartel de oferta: se elige por producto y va en hojas aparte. Ocupa lo
+// mismo que 3 carteles de góndola apilados (99 x 106.8 mm), 4 por hoja.
+const SIGN_OFERTA = {cols:2, rows:2, w:99, h:106.8};
+// Barras Code 128 para códigos que no son EAN (internos, cortos, con letras).
+// Si son solo dígitos y en cantidad par se usa el juego C (más compacto).
+const C128 = ['212222','222122','222221','121223','121322','131222','122213','122312','132212','221213','221312','231212','112232','122132','122231','113222','123122','123221','223211','221132','221231','213212','223112','312131','311222','321122','321221','312212','322112','322211','212123','212321','232121','111323','131123','131321','112313','132113','132311','211313','231113','231311','112133','112331','132131','113123','113321','133121','313121','211331','231131','213113','213311','213131','311123','311321','331121','312113','312311','332111','314111','221411','431111','111224','111422','121124','121421','141122','141221','112214','112412','122114','122411','142112','142211','241211','221114','413111','241112','134111','111242','121142','121241','114212','124112','124211','411212','421112','421211','212141','214121','412121','111143','111341','131141','114113','114311','411113','411311','113141','114131','311141','411131','211412','211214','211232'];
+function code128Bits(code){
+  const c = String(code||'').trim();
+  if(!c || /[^\x20-\x7e]/.test(c)) return null;
+  let vals;
+  if(/^\d+$/.test(c) && c.length%2===0){ vals = [105]; for(let i=0;i<c.length;i+=2) vals.push(parseInt(c.substr(i,2),10)); }
+  else { vals = [104]; for(const ch of c) vals.push(ch.charCodeAt(0)-32); }
+  let sum = vals[0]; for(let i=1;i<vals.length;i++) sum += vals[i]*i;
+  vals.push(sum % 103);
+  const widths = vals.map(v=>C128[v]).join('') + '2331112';
+  let bits = '';
+  for(let i=0;i<widths.length;i++) bits += (i%2===0 ? '1' : '0').repeat(+widths[i]);
+  return bits;
+}
+// Barras para el cartel: EAN si el código es EAN válido, si no Code 128.
+function signBarcodeBits(code){ return eanBits(code) || code128Bits(code); }
+// Barras EAN-13 / EAN-8 (UPC-A de 12 dígitos se toma como EAN-13 con un 0
+// adelante). Devuelve la secuencia de módulos ("1" = barra) o null si el
+// código no es EAN válido; en ese caso el cartel muestra solo el número.
+function eanBits(code){
+  let c = String(code||'').replace(/\D/g,'');
+  if(c.length===12) c = '0'+c;
+  if(c.length!==13 && c.length!==8) return null;
+  const d = c.split('').map(Number);
+  const body = d.slice(0,-1), w = c.length===13 ? [1,3] : [3,1];
+  const sum = body.reduce((s,n,i)=>s + n*w[i%2], 0);
+  if((10 - sum%10)%10 !== d[d.length-1]) return null;
+  const L=['0001101','0011001','0010011','0111101','0100011','0110001','0101111','0111011','0110111','0001011'];
+  const G=['0100111','0110011','0011011','0100001','0011101','0111001','0000101','0010001','0001001','0010111'];
+  const R=['1110010','1100110','1101100','1000010','1011100','1001110','1010000','1000100','1001000','1110100'];
+  if(c.length===8) return '101'+d.slice(0,4).map(n=>L[n]).join('')+'01010'+d.slice(4).map(n=>R[n]).join('')+'101';
+  const par=['LLLLLL','LLGLGG','LLGGLG','LLGGGL','LGLLGG','LGGLLG','LGGGLL','LGLGLG','LGLGGL','LGGLGL'][d[0]];
+  return '101'+d.slice(1,7).map((n,i)=>(par[i]==='L'?L:G)[n]).join('')+'01010'+d.slice(7).map(n=>R[n]).join('')+'101';
+}
+function signPriceInfo(p, mode){
+  const weight = !!p.sellByWeight;
+  if(mode==='mayorista'){
+    const price = weight ? (p.wholesalePricePerKg || p.pricePerKg) : (p.wholesalePrice || p.price);
+    return {price: Number(price)||0, oldPrice:null, until:null, weight};
+  }
+  const base = Number(weight ? p.pricePerKg : p.price) || 0;
+  const promo = activePromo(p);
+  const out = (promo !== null && Number(promo) < base)
+    ? {price: Number(promo), oldPrice: base, until: p.superOffer ? null : (p.promoUntil||null), weight}
+    : {price: base, oldPrice:null, until:null, weight};
+  // Precio por cantidad ("display"): mismo cálculo que el carrito.
+  if(!weight && p.displayQty && p.displayDiscount){
+    out.qty = p.displayQty;
+    out.qtyPrice = Math.round(out.price * (1 - p.displayDiscount/100));
+  }
+  return out;
+}
+function signMoney(n){
+  return '$ ' + Number(n||0).toLocaleString('es-AR',{minimumFractionDigits:2, maximumFractionDigits:2});
+}
+function findProductForSign(code){
+  const c = String(code||'').trim();
+  if(!c) return null;
+  const strip = v => String(v||'').trim().replace(/^0+/, '');
+  return state.products.find(p=>p.barcode && (p.barcode.trim()===c || strip(p.barcode)===strip(c)))
+      || state.products.find(p=>p.barcode && p.barcode.split(/[,;\s]+/).some(b=>b && strip(b)===strip(c)));
+}
+function addProductToSigns(id){
+  const q = state.signQueue || (state.signQueue = []);
+  const it = q.find(x=>x.id===id);
+  if(it) it.copies = (it.copies||1) + 1; else q.push({id, copies:1});
+  saveState();
+}
+function scanProductForSign(){
+  openBarcodeScannerModal(code=>{
+    const p = findProductForSign(code);
+    if(!p){ toast('No hay ningún producto con el código '+code, 'err'); render(); return; }
+    addProductToSigns(p.id);
+    toast('Agregado: '+p.name, 'ok');
+    render();
+    // Sigue escaneando: el siguiente producto sin tocar nada más.
+    setTimeout(scanProductForSign, 600);
+  });
+}
+function setSignSearch(v){
+  state.signSearch = v;
+  const box = document.getElementById('sign-search-results');
+  if(box) box.innerHTML = renderSignSearchResults();
+}
+function renderSignSearchResults(){
+  const q = normText(state.signSearch||'').trim();
+  if(q.length < 2) return '';
+  const res = state.products.filter(p=>normText(p.name).includes(q) || (p.barcode||'').includes(q)).slice(0,12);
+  if(!res.length) return `<p style="padding:6px 16px; font-size:12.5px; color:rgba(255,255,255,0.5);">No encontré productos con "${escapeHtml(state.signSearch)}".</p>`;
+  return res.map(p=>{
+    const info = signPriceInfo(p, state.signPriceMode);
+    return `<div class="order-card" style="display:flex; align-items:center; gap:10px; padding:10px 12px; margin-top:6px; margin-bottom:0; cursor:pointer;" onclick="addProductToSigns('${p.id}'); state.signSearch=''; render();">
+      <div style="flex:1; min-width:0;"><div style="font-size:13.5px; color:var(--white); font-weight:600;">${escapeHtml(p.name)}</div>
+      <div style="font-size:11.5px; color:rgba(255,255,255,0.5);">${signMoney(info.price)}${info.weight?' x kg':''}${p.barcode?' · '+escapeHtml(p.barcode):''}</div></div>
+      <span style="color:var(--gold2); font-weight:700; font-size:20px;">+</span>
+    </div>`;
+  }).join('');
+}
+function setSignCopies(id, delta){
+  const q = state.signQueue||[];
+  const it = q.find(x=>x.id===id); if(!it) return;
+  it.copies = Math.max(0, (it.copies||1) + delta);
+  if(!it.copies) state.signQueue = q.filter(x=>x.id!==id);
+  saveState(); render();
+}
+function setSignPromo(id, field, value){
+  const it = (state.signQueue||[]).find(x=>x.id===id); if(!it) return;
+  if(field==='promoOpen'){ it.promoOpen = true; it.promoQty = it.promoQty || 2; }
+  else if(field==='promoQty'){ const n = parseInt(value,10); it.promoQty = n>=2 ? n : 2; }
+  else if(field==='promoTotal'){ const n = parseFloat(String(value).replace(',','.')); it.promoTotal = n>0 ? Math.round(n*100)/100 : null; }
+  saveState(); render();
+}
+function toggleSignOferta(id){
+  const it = (state.signQueue||[]).find(x=>x.id===id); if(!it) return;
+  it.oferta = !it.oferta;
+  saveState(); render();
+}
+function setSignOfertaPrice(id, value){
+  const it = (state.signQueue||[]).find(x=>x.id===id); if(!it) return;
+  const n = parseFloat(String(value).replace(',','.'));
+  it.ofertaPrice = n>0 ? Math.round(n*100)/100 : null;
+  saveState(); render();
+}
+function toggleSignOfertaSimple(id){
+  const it = (state.signQueue||[]).find(x=>x.id===id); if(!it) return;
+  it.ofertaSimple = !it.ofertaSimple;
+  saveState(); render();
+}
+function clearSignPromo(id){
+  const it = (state.signQueue||[]).find(x=>x.id===id); if(!it) return;
+  delete it.promoQty; delete it.promoTotal; delete it.promoOpen;
+  saveState(); render();
+}
+function clearSigns(){
+  if(!(state.signQueue||[]).length || !confirm('¿Vaciar la lista de carteles?')) return;
+  state.signQueue = []; saveState(); render();
+}
+function renderAdminCarteles(){
+  const q = (state.signQueue||[]).filter(x=>state.products.some(p=>p.id===x.id));
+  const total = q.reduce((s,x)=>s+(x.copies||1),0);
+  const size = SIGN_SIZES[state.signSize] ? state.signSize : 'gondola';
+  const perPage = SIGN_SIZES[size].cols * SIGN_SIZES[size].rows;
+  const nOferta = q.filter(x=>x.oferta).reduce((s,x)=>s+(x.copies||1),0);
+  const sheets = size==='gondola'
+    ? Math.max(1, Math.ceil((nOferta*3 + (total-nOferta)) / perPage))        // aproximado: cada oferta = 3 lugares
+    : Math.ceil((total-nOferta)/perPage) + Math.ceil(nOferta/(SIGN_OFERTA.cols*SIGN_OFERTA.rows));
+  const os = 'background:var(--navy2); color:var(--white);';
+  return `
+    <div style="padding:14px 16px 4px;">
+      <p style="font-size:12.5px; color:rgba(255,255,255,0.6); margin-bottom:12px;">Escaneá los productos (o buscalos por nombre), elegí el tamaño y generá el PDF para imprimir en hojas A4.</p>
+      <button class="btn-primary" onclick="scanProductForSign()">${ic('camera')} Escanear productos</button>
+    </div>
+    <div class="form-group" style="margin-top:12px;"><input id="sign-search" type="search" placeholder="O buscá por nombre o código..." value="${escapeHtml(state.signSearch||'')}" oninput="setSignSearch(this.value)"></div>
+    <div id="sign-search-results" style="padding:0 0 6px;">${renderSignSearchResults()}</div>
+    <div style="display:flex; gap:10px; padding:4px 16px 0;">
+      <div class="form-group" style="flex:1; margin:0;"><label>Tamaño</label>
+        <select onchange="state.signSize=this.value; saveState(); render();">${Object.entries(SIGN_SIZES).map(([k,v])=>`<option value="${k}" style="${os}" ${size===k?'selected':''}>${v.label}</option>`).join('')}</select>
+      </div>
+      <div class="form-group" style="flex:1; margin:0;"><label>Precio</label>
+        <select onchange="state.signPriceMode=this.value; saveState(); render();">
+          <option value="minorista" style="${os}" ${state.signPriceMode!=='mayorista'?'selected':''}>Minorista</option>
+          <option value="mayorista" style="${os}" ${state.signPriceMode==='mayorista'?'selected':''}>Mayorista</option>
+        </select>
+      </div>
+    </div>
+    <div class="home-sec-header" style="margin-top:14px;"><span class="home-sec-label">Carteles a imprimir (${total})</span>
+      ${q.length?`<button style="font-size:12px; color:var(--danger);" onclick="clearSigns()">Vaciar</button>`:''}</div>
+    ${!q.length ? `<div class="empty-state">${ic('tag')}<p>Todavía no agregaste productos.</p></div>` : q.map(x=>{
+      const p = state.products.find(pp=>pp.id===x.id);
+      const info = signPriceInfo(p, state.signPriceMode);
+      const combo = !!x.promoQty;
+      const comboTotal = x.promoTotal || (x.promoQty||2)*info.price;   // vacío = cantidad × precio actual
+      const inp = 'width:64px; padding:7px 8px; border-radius:8px; background:var(--glass); border:1px solid var(--glass-bd); color:var(--cream); text-align:center;';
+      return `<div class="order-card">
+        <div style="display:flex; align-items:center; gap:10px;">
+          <div style="flex:1; min-width:0;">
+            <div style="font-size:13.5px; color:var(--white); font-weight:600;">${escapeHtml(p.name)}</div>
+            <div style="font-size:12px; color:${info.oldPrice?'var(--ok)':'var(--gold2)'}; font-weight:700;">${signMoney(info.price)}${info.weight?' x kg':''}${info.oldPrice?` <span style="color:rgba(255,255,255,0.45); font-weight:500; text-decoration:line-through;">${signMoney(info.oldPrice)}</span> OFERTA`:''}</div>
+            ${(p.barcode||'').trim() ? '' : `<div style="font-size:11.5px; color:var(--warn); margin-top:2px;">Sin código de barras cargado: el cartel sale sin barras</div>`}
+          </div>
+          <button onclick="setSignCopies('${p.id}',-1)" style="width:30px; height:30px; border-radius:50%; border:1px solid var(--glass-bd); background:var(--glass); color:var(--cream); font-size:16px;">−</button>
+          <span style="min-width:22px; text-align:center; font-weight:700;">${x.copies||1}</span>
+          <button onclick="setSignCopies('${p.id}',1)" style="width:30px; height:30px; border-radius:50%; border:1px solid var(--glass-bd); background:var(--glass); color:var(--cream); font-size:16px;">+</button>
+        </div>
+        <button onclick="toggleSignOferta('${p.id}')" style="margin-top:8px; padding:5px 11px; border-radius:20px; font-size:12px; font-weight:700; ${x.oferta?'background:var(--gold); color:var(--navy);':'background:transparent; color:var(--gold2); border:1px solid rgba(224,187,74,0.5);'}">${x.oferta?'✓ Cartel de OFERTA (grande)':'Cartel de oferta grande'}</button>
+        ${x.oferta ? `<button onclick="toggleSignOfertaSimple('${p.id}')" style="margin:8px 0 0 6px; padding:5px 11px; border-radius:20px; font-size:12px; font-weight:700; ${x.ofertaSimple?'background:var(--gold); color:var(--navy);':'background:transparent; color:var(--gold2); border:1px solid rgba(224,187,74,0.5);'}">${x.ofertaSimple?'✓ Sin % ni precio anterior':'Sin % ni precio anterior'}</button>` : ''}
+        ${x.oferta && !combo ? (()=>{
+          const regular = info.oldPrice || info.price;
+          const op = x.ofertaPrice;
+          const pct = op && op < regular ? Math.round((1 - op/regular)*100) : 0;
+          return `<div style="display:flex; align-items:center; gap:6px; margin-top:8px; font-size:13px; color:rgba(255,255,255,0.75); flex-wrap:wrap;">
+            <span>Precio de oferta $</span>
+            <input type="number" inputmode="decimal" min="0" step="0.01" placeholder="${info.oldPrice?info.price:''}" value="${op||''}" style="${inp} width:100px;" onchange="setSignOfertaPrice('${p.id}',this.value)">
+            ${pct && !x.ofertaSimple ? `<span style="padding:3px 9px; border-radius:10px; background:var(--ok); color:#06261a; font-weight:800; font-size:12.5px;">-${pct}%</span>` : ''}
+          </div>
+          <div style="font-size:11.5px; color:${op && op >= regular ? 'var(--warn)' : 'rgba(255,255,255,0.5)'}; margin-top:4px;">${
+            op ? (op < regular ? `Antes ${signMoney(regular)} → ahora ${signMoney(op)} · ahorrás ${signMoney(regular-op)}` : `Ojo: el precio de oferta no es menor que el normal (${signMoney(regular)}).`)
+               : (info.oldPrice ? `Sin precio manual: usa la oferta del sistema (${signMoney(info.price)}).` : `Escribí el precio de oferta y calculo el % solo (normal: ${signMoney(regular)}).`)
+          }</div>`;
+        })() : ''}
+        ${x.promoOpen || combo ? `
+        <div style="display:flex; align-items:center; gap:6px; margin-top:10px; font-size:13px; color:rgba(255,255,255,0.75); flex-wrap:wrap;">
+          <span>Promo</span>
+          <input type="number" inputmode="numeric" min="2" step="1" placeholder="2" value="${x.promoQty||''}" style="${inp}" onchange="setSignPromo('${p.id}','promoQty',this.value)">
+          <span>x $</span>
+          <input type="number" inputmode="decimal" min="0" step="0.01" placeholder="${Math.round((x.promoQty||2)*info.price*100)/100}" value="${x.promoTotal||''}" style="${inp} width:92px;" onchange="setSignPromo('${p.id}','promoTotal',this.value)">
+          <button style="margin-left:auto; font-size:12px; color:var(--danger);" onclick="clearSignPromo('${p.id}')">Quitar</button>
+        </div>
+        ${combo ? `<div style="font-size:11.5px; color:rgba(255,255,255,0.5); margin-top:4px;">Cartel: ${x.promoQty} x ${signMoney(comboTotal)}${x.promoTotal?'':` (${x.promoQty} × ${signMoney(info.price)})`} · sale ${signMoney(comboTotal/x.promoQty)} c/u</div>${comboTotal > x.promoQty*info.price + 0.001 ? `<div style="font-size:11.5px; color:var(--warn); margin-top:3px;">Ojo: la promo sale más cara que llevar ${x.promoQty} sueltos (${signMoney(x.promoQty*info.price)}).</div>` : ''}` : ''}
+        ` : `<button style="margin-top:8px; font-size:12.5px; color:var(--gold2); font-weight:600;" onclick="setSignPromo('${p.id}','promoOpen',true)">+ Promo por cantidad (ej: 2 x ...)</button>`}
+      </div>`;
+    }).join('')}
+    ${q.length ? `<div style="padding:10px 16px 90px;">
+      <button class="btn-secondary" style="margin-bottom:10px;" onclick="previewSignsPdf()">${ic('eye')} Vista previa (${sheets} hoja${sheets===1?'':'s'})</button>
+      <button class="btn-primary" id="sign-pdf-btn" onclick="generateSignsPdf()">${ic('download')} Generar PDF (${total} cartel${total===1?'':'es'} · ${sheets} hoja${sheets===1?'':'s'})</button>
+    </div>` : ''}`;
+}
+// Arma el PDF con la lista actual. Devuelve {blob, name} o null.
+async function buildCurrentSignsPdf(){
+  const q = (state.signQueue||[]).filter(x=>state.products.some(p=>p.id===x.id));
+  if(!q.length) return null;
+  await cmpLoadPdfLibs();
+  const items = [], ofertas = [];
+  q.forEach(x=>{
+    const p = state.products.find(pp=>pp.id===x.id);
+    let item = x.promoQty ? Object.assign({}, p, {_combo:{qty:x.promoQty, total:x.promoTotal||null}}) : p;
+    if(x.oferta && !x.promoQty && x.ofertaPrice) item = Object.assign({}, item, {_oferta:{price:x.ofertaPrice}});
+    if(x.oferta && x.ofertaSimple) item = Object.assign({}, item, {_simple:true});
+    for(let i=0;i<(x.copies||1);i++) (x.oferta ? ofertas : items).push(item);
+  });
+  const blob = buildSignsPdf(items, SIGN_SIZES[state.signSize] ? state.signSize : 'gondola', state.signPriceMode, ofertas);
+  const name = 'Carteles_Sabores_Royal_'+fmtDmy(new Date()).replace(/\//g,'-')+'.pdf';
+  return {blob, name};
+}
+async function generateSignsPdf(){
+  const btn = document.getElementById('sign-pdf-btn'); if(btn){ btn.disabled = true; btn.textContent = 'Preparando el PDF...'; }
+  let pdf;
+  try{ pdf = await buildCurrentSignsPdf(); }
+  catch(e){ toast('No se pudo preparar el PDF. Revisá la conexión y probá de nuevo.', 'err'); render(); return; }
+  if(!pdf){ render(); return; }
+  cmpDownloadBlob(pdf.blob, pdf.name);
+  toast('PDF listo: abrilo e imprimilo en A4 a tamaño real (100%)', 'ok');
+  render();
+}
+// Vista previa: dibuja cada hoja del PDF con pdf.js (cdnjs, se carga solo
+// la primera vez) en una pantalla encima del admin. Lo que se ve es
+// exactamente el mismo PDF que se descarga desde ahí.
+let _pdfJsPromise = null;
+function loadPdfJs(){
+  if(window.pdfjsLib) return Promise.resolve(window.pdfjsLib);
+  if(_pdfJsPromise) return _pdfJsPromise;
+  // El "worker" de pdf.js se carga como script común (queda en
+  // window.pdfjsWorker) y pdf.js lo usa en la misma página: no depende de
+  // poder crear un Worker aparte, que en algunos navegadores falla.
+  const base = 'https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/';
+  const load = src=>new Promise((res, rej)=>{ const sc = document.createElement('script'); sc.src = src; sc.onload = res; sc.onerror = ()=>rej(new Error('No se pudo cargar el visor de PDF')); document.head.appendChild(sc); });
+  _pdfJsPromise = load(base+'pdf.min.js')
+    .then(()=>load(base+'pdf.worker.min.js'))
+    .then(()=>{ window.pdfjsLib.GlobalWorkerOptions.workerSrc = base+'pdf.worker.min.js'; return window.pdfjsLib; })
+    .catch(e=>{ _pdfJsPromise = null; throw e; });
+  return _pdfJsPromise;
+}
+let _signPreviewPdf = null;
+async function previewSignsPdf(){
+  closeSignPreview();
+  const overlay = document.createElement('div');
+  overlay.id = 'sign-preview-overlay';
+  overlay.style.cssText = 'position:fixed; inset:0; z-index:1000; background:#0b1433; display:flex; flex-direction:column;';
+  overlay.innerHTML = `
+    <div style="display:flex; align-items:center; gap:10px; padding:12px 16px; padding-top:calc(12px + env(safe-area-inset-top, 0px)); border-bottom:1px solid var(--glass-bd);">
+      <button class="icon-btn" onclick="closeSignPreview()" aria-label="Cerrar">${ic('close')}</button>
+      <div style="flex:1; min-width:0;">
+        <div style="font-weight:700; color:var(--white);">Vista previa</div>
+        <div id="sign-preview-info" style="font-size:11.5px; color:rgba(255,255,255,0.55);">Preparando…</div>
+      </div>
+      <button class="btn-primary" style="width:auto; padding:9px 14px; font-size:13px;" id="sign-preview-dl" disabled onclick="downloadSignPreview()">${ic('download')} Descargar</button>
+    </div>
+    <div id="sign-preview-pages" style="flex:1; overflow:auto; padding:16px; display:flex; flex-direction:column; align-items:center; gap:16px;"></div>`;
+  document.body.appendChild(overlay);
+  const info = document.getElementById('sign-preview-info');
+  try{
+    const [pdf, pdfjs] = await Promise.all([buildCurrentSignsPdf(), loadPdfJs()]);
+    if(!pdf){ closeSignPreview(); return; }
+    _signPreviewPdf = pdf;
+    const doc = await pdfjs.getDocument({data: await pdf.blob.arrayBuffer(), isEvalSupported:false}).promise;
+    const total = (state.signQueue||[]).reduce((s,x)=>s+(x.copies||1),0);
+    if(info) info.textContent = `${total} cartel${total===1?'':'es'} · ${doc.numPages} hoja${doc.numPages===1?'':'s'} A4 · tocá la hoja para agrandar`;
+    const btn = document.getElementById('sign-preview-dl'); if(btn) btn.disabled = false;
+    const box = document.getElementById('sign-preview-pages');
+    const cssW = Math.min((box ? box.clientWidth : 360) - 32, 820);
+    for(let n=1; n<=doc.numPages; n++){
+      if(!document.getElementById('sign-preview-overlay')) return;   // la cerraron
+      const page = await doc.getPage(n);
+      const base = page.getViewport({scale:1});
+      const dpr = Math.min(window.devicePixelRatio||1, 2);
+      const vp = page.getViewport({scale: cssW*2.5/base.width*dpr});
+      const canvas = document.createElement('canvas');
+      canvas.width = vp.width; canvas.height = vp.height;
+      canvas.style.cssText = `width:${cssW}px; max-width:100%; height:auto; background:#fff; box-shadow:0 6px 20px rgba(0,0,0,0.45); border-radius:2px; cursor:zoom-in; flex:none;`;
+      // Tocar la hoja la agranda (x2.5) para revisar el detalle; tocar de nuevo la achica.
+      canvas.onclick = ()=>{
+        const zoomed = canvas.dataset.zoom === '1';
+        canvas.dataset.zoom = zoomed ? '' : '1';
+        canvas.style.width = zoomed ? cssW+'px' : (cssW*2.5)+'px';
+        canvas.style.maxWidth = zoomed ? '100%' : 'none';
+        canvas.style.cursor = zoomed ? 'zoom-in' : 'zoom-out';
+        box.style.alignItems = zoomed ? 'center' : 'flex-start';
+      };
+      const label = document.createElement('div');
+      label.style.cssText = 'font-size:11.5px; color:rgba(255,255,255,0.5); margin-bottom:-8px;';
+      label.textContent = `Hoja ${n} de ${doc.numPages}`;
+      box.appendChild(label); box.appendChild(canvas);
+      await page.render({canvasContext: canvas.getContext('2d'), viewport: vp}).promise;
+    }
+  }catch(e){
+    console.warn('Vista previa de carteles:', e);
+    if(info) info.textContent = 'No se pudo mostrar la vista previa. Revisá la conexión, o descargá el PDF directamente.';
+    const btn = document.getElementById('sign-preview-dl'); if(btn && _signPreviewPdf) btn.disabled = false;
+  }
+}
+function downloadSignPreview(){
+  if(!_signPreviewPdf) return;
+  cmpDownloadBlob(_signPreviewPdf.blob, _signPreviewPdf.name);
+  toast('PDF listo: abrilo e imprimilo en A4 a tamaño real (100%)', 'ok');
+}
+function closeSignPreview(){
+  const el = document.getElementById('sign-preview-overlay');
+  if(el) el.remove();
+  _signPreviewPdf = null;
+}
+// products: lista de carteles comunes (tamaño sizeKey); ofertas: lista de
+// carteles de oferta, que van después en sus propias hojas.
+function buildSignsPdf(products, sizeKey, mode, ofertas){
+  const { jsPDF } = window.jspdf;
+  const doc = new jsPDF({unit:'mm', format:'a4'});
+  const M = 6;
+  let pages = 0;
+  const layout = (list, grid, draw)=>{
+    const {cols, rows} = grid, W = grid.w || (210-2*M)/cols, H = grid.h || (297-2*M)/rows;
+    list.forEach((p, i)=>{
+      const slot = i % (cols*rows);
+      if(slot===0){ if(pages>0) doc.addPage(); pages++; }
+      draw(p, M + (slot % cols)*W, M + Math.floor(slot/cols)*H, W, H);
+    });
+  };
+  const drawNormal = (p,x,y,W,H)=>{ if(p._combo) drawCombo(doc, p, x, y, W, H); else drawGondola(doc, p, x, y, W, H); };
+  if(sizeKey==='gondola'){
+    // Misma hoja: la página son 2 columnas de 8 lugares de 35.6 mm; una oferta
+    // ocupa 3 lugares seguidos. Cada columna se llena primero con ofertas
+    // (entran 2) y el resto con carteles comunes.
+    const {cols, rows} = SIGN_SIZES.gondola, W = (210-2*M)/cols, H = (297-2*M)/rows;
+    const normals = (products||[]).slice(), offers = (ofertas||[]).slice();
+    while(normals.length || offers.length){
+      if(pages>0) doc.addPage(); pages++;
+      for(let c=0; c<cols; c++){
+        let r = 0;
+        while(offers.length && r+3 <= rows){ drawOferta(doc, offers.shift(), M + c*W, M + r*H, W, 3*H); r += 3; }
+        while(normals.length && r < rows){ drawNormal(normals.shift(), M + c*W, M + r*H, W, H); r += 1; }
+      }
+    }
+  }else{
+    layout(products||[], SIGN_SIZES[sizeKey], drawNormal);
+    layout(ofertas||[], SIGN_OFERTA, (p,x,y,W,H)=>drawOferta(doc, p, x, y, W, H));
+  }
+  // Precio con "$" chico y centavos arriba, alineado a la derecha en rx.
+  // Devuelve el ancho usado.
+  function priceRight(value, rx, base, big){
+    const CAP = 0.72*0.3528;
+    const [ent, cents] = Number(value||0).toLocaleString('es-AR',{minimumFractionDigits:2, maximumFractionDigits:2}).split(',');
+    const entTxt = ent.replace(/\./g,'');               // como los carteles actuales: 3499
+    doc.setFont('helvetica','bold');
+    doc.setFontSize(big*0.42); const cw = doc.getTextWidth(cents);
+    doc.setFontSize(big);      const ew = doc.getTextWidth(entTxt);
+    doc.setFontSize(big*0.45); const sw = doc.getTextWidth('$ ');
+    const x0 = rx - cw - ew - sw - 0.4;
+    doc.setFontSize(big*0.45); doc.text('$', x0, base - big*CAP*0.05);
+    doc.setFontSize(big);      doc.text(entTxt, x0+sw, base);
+    doc.setFontSize(big*0.42); doc.text(cents, rx - cw, base - big*CAP*0.5);
+    return cw+ew+sw+0.4;
+  }
+  // Cartel de góndola en blanco y negro, igual a los del local: nombre
+  // arriba, precio grande a la derecha, código de barras abajo a la
+  // izquierda y recuadro negro con el precio por cantidad.
+  // Cartel de OFERTA (99 x 106.8 mm = 3 de góndola apilados): franja negra
+  // con "OFERTA" bien grande, nombre, precio anterior tachado con el % de
+  // descuento, precio de oferta enorme y abajo barras y vigencia. Con promo
+  // por cantidad muestra el "2x".
+  function drawOferta(doc, p, x, y, w, h){
+    const info = signPriceInfo(p, mode);
+    const MM = 0.3528, CAP = 0.72*MM;
+    const s = Math.min(w/99, h/106.8), pad = 4*s, rx = x + w - pad;
+    doc.setDrawColor(190,190,190); doc.setLineWidth(0.2); doc.setLineDashPattern([1.5,1.5],0);
+    doc.rect(x, y, w, h); doc.setLineDashPattern([],0);
+    const combo = p._combo ? {qty:p._combo.qty, total: p._combo.total || Math.round(p._combo.qty*info.price*100)/100} : null;
+    // precio de oferta cargado a mano en la lista: se compara contra el
+    // precio normal del producto (sin la oferta del sistema)
+    const manual = p._oferta ? p._oferta.price : null;
+    const regular = info.oldPrice || info.price;
+    const price = combo ? combo.total : (manual || info.price);
+    // modo simple: solo OFERTA, nombre y precio (sin "Antes" ni %)
+    const ref = p._simple ? null : (combo ? combo.qty*info.price : (manual ? regular : info.oldPrice));
+    const pct = ref && price < ref ? Math.round((1 - price/ref)*100) : 0;
+    const until = manual ? null : info.until;
+    // franja OFERTA: la palabra ocupa todo el ancho
+    // la franja deja un borde blanco para que no se pegue con la del cartel vecino
+    const inset = 2.5*s, bandH = 30*s;
+    doc.setFillColor(0,0,0); doc.roundedRect(x+inset, y+inset, w-2*inset, bandH-inset, 1.5*s, 1.5*s, 'F');
+    doc.setTextColor(255,255,255); doc.setFont('helvetica','bold');
+    let of = 90*s; doc.setFontSize(of);
+    while(of > 20 && (doc.getTextWidth('OFERTA') > w - 2*inset - 6*s || of*CAP > bandH - inset - 8*s)){ of -= 1; doc.setFontSize(of); }
+    doc.text('OFERTA', x + w/2, y + inset + (bandH-inset)/2 + of*CAP/2, {align:'center'});
+    doc.setTextColor(0,0,0);
+    // nombre
+    const name = cmpPdfTxt(p.name||'').toUpperCase();
+    let fs = 17*s, lines;
+    for(;;){ doc.setFontSize(fs); lines = doc.splitTextToSize(name, w-2*pad); if(lines.length<=2 || fs<=11*s) break; fs -= 0.5; }
+    lines = lines.slice(0,3);
+    let ty = y + bandH + 4*s + fs*MM*0.75;
+    lines.forEach(l=>{ doc.text(l, x+w/2, ty, {align:'center'}); ty += fs*MM*1.15; });
+    let cy = ty - fs*MM*1.15 + fs*MM*0.3 + 3*s;
+    // fila: "Antes $..." tachado + recuadro con el %
+    if(ref && price < ref){
+      const rowH = 9*s;
+      doc.setFont('helvetica','normal'); doc.setFontSize(13*s);
+      const label = 'Antes ', old = signMoney(ref);
+      const ly = cy + rowH/2 + 13*s*CAP/2;
+      doc.text(label+old, x+pad, ly);
+      const lw = doc.getTextWidth(label), ow = doc.getTextWidth(label+old);
+      doc.setLineWidth(0.5*s); doc.setDrawColor(0,0,0);
+      doc.line(x+pad+lw, ly-1.6*s, x+pad+ow, ly-1.6*s);
+      if(pct > 0){
+        doc.setFont('helvetica','bold'); doc.setFontSize(20*s);
+        const t = '-'+pct+'%', tw = doc.getTextWidth(t) + 5*s;
+        doc.setFillColor(0,0,0); doc.roundedRect(rx - tw, cy, tw, rowH, 1.5*s, 1.5*s, 'F');
+        doc.setTextColor(255,255,255); doc.text(t, rx - tw/2, cy + rowH/2 + 20*s*CAP/2, {align:'center'});
+        doc.setTextColor(0,0,0);
+      }
+      cy += rowH + 2*s;
+    }
+    if(combo && !p._simple){
+      doc.setFont('helvetica','normal'); doc.setFontSize(10*s);
+      let t = 'Precio unitario '+signMoney(info.price);
+      if(combo.total < combo.qty*info.price - 0.001) t += '  ·  Llevando '+combo.qty+': '+signMoney(combo.total/combo.qty)+' c/u';
+      doc.text(t, x+w/2, cy + 10*s*CAP, {align:'center'}); cy += 6*s;
+    }
+    // pie: barras a la izquierda, vigencia a la derecha
+    const footTop = y + h - pad - 13*s;
+    const bits = signBarcodeBits(p.barcode);
+    const bw = 30*s, bh = 6.5*s, bx = x+pad, by = y + h - pad - 3*s - bh;
+    if(bits){
+      const mw = Math.min(bw*1.5, Math.max(bw, bits.length*0.2))/bits.length; doc.setFillColor(0,0,0);
+      for(let i=0;i<bits.length;){
+        if(bits[i]==='1'){ let j=i; while(j<bits.length && bits[j]==='1') j++; doc.rect(bx+i*mw, by, (j-i)*mw, bh, 'F'); i=j; }
+        else i++;
+      }
+    }
+    doc.setFont('helvetica','normal');
+    if(p.barcode){ doc.setFontSize(7.5*s); doc.text(cmpPdfTxt(p.barcode), bx, y+h-pad); }
+    if(until){ doc.setFontSize(9*s); doc.text('Válido hasta '+fmtDmy(new Date(until+'T00:00:00')), rx, y+h-pad, {align:'right'}); }
+    // precio enorme, centrado en el espacio que queda
+    let base = footTop - 2*s;
+    const tag = combo ? combo.qty+'x' : '';
+    const widthOf = b=>{
+      const [ent, cents] = Number(price).toLocaleString('es-AR',{minimumFractionDigits:2, maximumFractionDigits:2}).split(',');
+      doc.setFont('helvetica','bold');
+      doc.setFontSize(b); const ew = doc.getTextWidth(ent.replace(/\./g,''));
+      doc.setFontSize(b*0.42); const cw = doc.getTextWidth(cents);
+      doc.setFontSize(b*0.45); const sw = doc.getTextWidth('$ ');
+      let tw = 0; if(tag){ doc.setFontSize(b*0.7); tw = doc.getTextWidth(tag) + 4*s + 3*s; }
+      return ew+cw+sw+0.4+tw;
+    };
+    let big = Math.min(130*s, (base - cy - 2*s)/CAP);
+    while(big > 18*s && widthOf(big) > w - 2*pad) big -= 1;
+    // si el ancho limitó el tamaño, el precio queda centrado en el alto libre
+    base = Math.min(base, cy + (base - cy + big*CAP)/2);
+    const totalW = widthOf(big);
+    const priceRx = x + w/2 + totalW/2;                                  // centrado
+    const pw = priceRight(price, priceRx, base, big);
+    if(info.weight){ doc.setFont('helvetica','bold'); doc.setFontSize(Math.min(16*s, big*0.3)); doc.text('x kg', priceRx, base, {align:'right'}); }
+    if(tag){
+      doc.setFont('helvetica','bold'); doc.setFontSize(big*0.7);
+      const tw = doc.getTextWidth(tag), boxW = tw + 4*s;
+      const boxX = priceRx - pw - 3*s - boxW, boxTop = base - big*CAP - 1.6*s, boxH = big*CAP + 3.2*s;
+      doc.setFillColor(0,0,0); doc.roundedRect(boxX, boxTop, boxW, boxH, 1.5*s, 1.5*s, 'F');
+      doc.setTextColor(255,255,255); doc.text(tag, boxX + boxW/2, base - (big*CAP - big*0.7*CAP)/2, {align:'center'});
+      doc.setTextColor(0,0,0);
+    }
+  }
+  // Cartel de promo por cantidad ("2 x $1000"): el "2x" en un recuadro
+  // negro y el total grande en la misma línea; abajo el código de barras y,
+  // a la derecha, el precio unitario y cuánto sale cada uno con la promo.
+  function drawCombo(doc, p, x, y, w, h){
+    const info = signPriceInfo(p, mode);
+    const qty = p._combo.qty, total = p._combo.total || Math.round(qty*info.price*100)/100;   // sin total = cantidad × precio actual
+    const s = Math.min(w/99, h/35.6), MM = 0.3528, CAP = 0.72*MM;
+    const pad = 3*s, rx = x + w - pad;
+    doc.setDrawColor(190,190,190); doc.setLineWidth(0.2); doc.setLineDashPattern([1.5,1.5],0);
+    doc.rect(x, y, w, h); doc.setLineDashPattern([],0);
+    doc.setTextColor(0,0,0);
+    const name = cmpPdfTxt(p.name||'').toUpperCase();
+    doc.setFont('helvetica','bold');
+    let fs = 11*s, lines;
+    for(;;){ doc.setFontSize(fs); lines = doc.splitTextToSize(name, w-2*pad); if(lines.length<=1 || fs<=8*s) break; fs -= 0.5; }
+    lines = lines.slice(0,2);
+    let ty = y + pad + fs*MM*0.75;
+    lines.forEach(l=>{ doc.text(l, x+w/2, ty, {align:'center'}); ty += fs*MM*1.15; });
+    const nameBottom = ty - fs*MM*1.15 + fs*MM*0.3;
+    // franja de abajo: barras a la izquierda, detalle a la derecha
+    const stripH = 8.6*s;
+    const bits = signBarcodeBits(p.barcode);
+    const bx = x+pad, bw = 26*s, bh = 4.6*s, by = y + h - pad - 2.6*s - bh;
+    if(bits){
+      const mw = Math.min(bw*1.5, Math.max(bw, bits.length*0.2))/bits.length; doc.setFillColor(0,0,0);
+      for(let i=0;i<bits.length;){
+        if(bits[i]==='1'){ let j=i; while(j<bits.length && bits[j]==='1') j++; doc.rect(bx+i*mw, by, (j-i)*mw, bh, 'F'); i=j; }
+        else i++;
+      }
+    }
+    if(p.barcode){ doc.setFont('helvetica','normal'); doc.setFontSize(6.5*s); doc.text(cmpPdfTxt(p.barcode), bx, y+h-pad); }
+    // si la promo no tiene descuento (2 x el precio de 2), "Llevando 2: ... c/u" repetiría el precio unitario
+    const discounted = total < qty*info.price - 0.001;
+    doc.setFont('helvetica','normal'); doc.setFontSize(7*s);
+    doc.text('Precio unitario '+signMoney(info.price)+(info.weight?' x kg':''), rx, discounted ? y+h-pad-3.4*s : y+h-pad, {align:'right'});
+    if(discounted){ doc.setFont('helvetica','bold'); doc.text('Llevando '+qty+': '+signMoney(total/qty)+' c/u', rx, y+h-pad, {align:'right'}); }
+    // línea principal: [2x] $ 1000,00
+    const base = y + h - pad - stripH - 1*s;
+    let big = Math.max(14*s, Math.min(40*s, (base - nameBottom - 2.5*s)/CAP));
+    const tag = qty+'x';
+    let pw, tw, boxW;
+    for(;;){
+      doc.setFont('helvetica','bold'); doc.setFontSize(big*0.8); tw = doc.getTextWidth(tag);
+      boxW = tw + 4*s;
+      doc.setFontSize(big); // medir el precio sin dibujarlo
+      const [ent, cents] = Number(total).toLocaleString('es-AR',{minimumFractionDigits:2, maximumFractionDigits:2}).split(',');
+      const ew = doc.getTextWidth(ent.replace(/\./g,''));
+      doc.setFontSize(big*0.42); const cw = doc.getTextWidth(cents);
+      doc.setFontSize(big*0.45); const sw = doc.getTextWidth('$ ');
+      pw = cw+ew+sw+0.4;
+      if(pw + boxW + 3*s <= w - 2*pad || big <= 12*s) break;
+      big -= 1;
+    }
+    priceRight(total, rx, base, big);
+    const boxX = rx - pw - 3*s - boxW, boxTop = base - big*CAP - 1.6*s, boxH = big*CAP + 3.2*s;
+    doc.setFillColor(0,0,0); doc.roundedRect(boxX, boxTop, boxW, boxH, 1.2*s, 1.2*s, 'F');
+    doc.setTextColor(255,255,255); doc.setFont('helvetica','bold'); doc.setFontSize(big*0.8);
+    doc.text(tag, boxX + boxW/2, base - (big*CAP - big*0.8*CAP)/2, {align:'center'});
+    doc.setTextColor(0,0,0);
+  }
+  // Cartel en blanco y negro, igual a los del local: nombre arriba, precio
+  // grande a la derecha, código de barras abajo a la izquierda y recuadro
+  // negro con el precio por cantidad. Diseñado para 99 x 35.6 mm; en otros
+  // tamaños se escala todo con s.
+  function drawGondola(doc, p, x, y, w, h){
+    const info = signPriceInfo(p, mode);
+    const s = Math.min(w/99, h/35.6), MM = 0.3528, CAP = 0.72*MM;
+    const pad = 3*s;
+    doc.setDrawColor(190,190,190); doc.setLineWidth(0.2); doc.setLineDashPattern([1.5,1.5],0);
+    doc.rect(x, y, w, h); doc.setLineDashPattern([],0);
+    doc.setTextColor(0,0,0);
+    // nombre (1 renglón; si no entra, achica y después pasa a 2)
+    const name = cmpPdfTxt(p.name||'').toUpperCase();
+    doc.setFont('helvetica','bold');
+    let fs = 11*s, lines;
+    for(;;){ doc.setFontSize(fs); lines = doc.splitTextToSize(name, w-2*pad); if(lines.length<=1 || fs<=8*s) break; fs -= 0.5; }
+    lines = lines.slice(0,2);
+    let ty = y + pad + fs*MM*0.75;
+    lines.forEach(l=>{ doc.text(l, x+w/2, ty, {align:'center'}); ty += fs*MM*1.15; });
+    const nameBottom = ty - fs*MM*1.15 + fs*MM*0.3;
+    // código de barras
+    const bits = signBarcodeBits(p.barcode);
+    const bx = x+pad, bw = 30*s, bh = 6.5*s, by = y + h - pad - 2.8*s - bh;
+    if(bits){
+      const mw = Math.min(bw*1.5, Math.max(bw, bits.length*0.2))/bits.length; doc.setFillColor(0,0,0);
+      for(let i=0;i<bits.length;){
+        if(bits[i]==='1'){ let j=i; while(j<bits.length && bits[j]==='1') j++; doc.rect(bx+i*mw, by, (j-i)*mw, bh, 'F'); i=j; }
+        else i++;
+      }
+    }
+    if(p.barcode){ doc.setFont('helvetica','normal'); doc.setFontSize(7*s); doc.text(cmpPdfTxt(p.barcode), bx, y+h-pad); }
+    // recuadro por cantidad
+    const rx = x + w - pad;
+    const hasQty = !!(info.qty && info.qtyPrice);
+    const boxH = 10*s, boxW = Math.min(w*0.56, 56*s), boxY = y + h - pad - boxH;
+    if(hasQty){
+      doc.setFillColor(20,20,20); doc.roundedRect(rx-boxW, boxY, boxW, boxH, 1*s, 1*s, 'F');
+      doc.setTextColor(255,255,255); doc.setFont('helvetica','normal'); doc.setFontSize(6.5*s);
+      ['A partir de', info.qty+' unidades', 'iguales'].forEach((t,i)=>doc.text(t, rx-boxW+1.5*s, boxY+2.8*s+i*2.7*s));
+      priceRight(info.qtyPrice, rx-1.5*s, boxY+boxH-2.2*s, 20*s);
+      doc.setTextColor(0,0,0);
+    }
+    // precio principal, lo más grande que entre entre el nombre y el pie
+    const bottom = hasQty ? boxY - 1.2*s : y + h - pad - 1*s;
+    const big = Math.max(14*s, Math.min(40*s, (bottom - nameBottom - 1*s)/CAP));
+    priceRight(info.price, rx, bottom, big);
+    if(info.weight){ doc.setFont('helvetica','bold'); doc.setFontSize(Math.min(11*s, big*0.3)); doc.text('x kg', rx, bottom, {align:'right'}); }
+    if(info.oldPrice){
+      // OFERTA arriba a la izquierda, debajo del nombre (no pisa las barras)
+      const tx = x+pad, t0 = nameBottom + 1*s;
+      doc.setFont('helvetica','bold'); doc.setFontSize(8*s);
+      const tw = doc.getTextWidth('OFERTA')+3*s;
+      doc.setFillColor(0,0,0); doc.rect(tx, t0, tw, 4.2*s, 'F');
+      doc.setTextColor(255,255,255); doc.text('OFERTA', tx+1.5*s, t0+3.1*s);
+      doc.setTextColor(0,0,0); doc.setFont('helvetica','normal'); doc.setFontSize(7.5*s);
+      const old = 'Antes '+signMoney(info.oldPrice);
+      doc.text(old, tx+tw+2*s, t0+3.1*s);
+      const lw = doc.getTextWidth('Antes ');
+      doc.setLineWidth(0.25*s); doc.setDrawColor(0,0,0);
+      doc.line(tx+tw+2*s+lw, t0+2.2*s, tx+tw+2*s+doc.getTextWidth(old), t0+2.2*s);
+      if(info.until){ doc.setFontSize(6.5*s); doc.text('Válido hasta '+fmtDmy(new Date(info.until+'T00:00:00')), tx, t0+7.4*s); }
+    }
+  }
+  return doc.output('blob');
+}
+
 /* ---------- ADMIN: BANNERS (ofertas / novedades en el home) ---------- */
 function renderAdminBanners(){
   const sub = state.adminBannerSub || 'banners';
@@ -12478,7 +13419,7 @@ apiSyncProducts();
 apiSyncContent();
 if(IS_ADMIN_APP){
   tryRestoreAdminSession().then(()=>{
-    if(state.adminAuthed){ apiSyncClients(); apiSyncOrders(); apiSyncPosSales(); apiSyncSuggestions(); apiSyncVouchers(); syncAdminChats(); }
+    if(state.adminAuthed){ apiSyncClients(); apiSyncOrders(); apiSyncPosSales(); apiSyncSuggestions(); apiSyncRewardRedemptions(); apiSyncVouchers(); syncAdminChats(); }
   });
 }else if(state.currentClientPhone){ syncClientChat(); refreshCurrentClient(); }
 startChatPoll();
@@ -12502,7 +13443,7 @@ function autoSync(returning){
     if(IS_ADMIN_APP) apiSyncClients();
   }
   if(IS_ADMIN_APP){
-    if(due('admin')){ _lastSync.admin = now; apiSyncOrders(); apiSyncPosSales(); apiSyncSuggestions(); apiSyncVouchers(); }
+    if(due('admin')){ _lastSync.admin = now; apiSyncOrders(); apiSyncPosSales(); apiSyncSuggestions(); apiSyncRewardRedemptions(); apiSyncVouchers(); }
   }else if(due('client')){
     _lastSync.client = now; refreshCurrentClient();
   }
