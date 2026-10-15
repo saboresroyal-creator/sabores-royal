@@ -2392,18 +2392,24 @@ function buildCartItemsForOrder(){
     return {id:c.id, name, price:p?effectivePrice(p):0, qty:c.qty, lineTotal:cartItemLineTotal(c), ...(c.variant?{variant:c.variant}:{})};
   });
 }
-function orderTotals(items, clientDiscountPct){
+// pointsAmount: descuento fijo por canje de puntos. Al servidor viaja como
+// un solo % equivalente (discount_pct) más el monto exacto (discount_amount).
+function orderTotals(items, clientDiscountPct, pointsAmount=0){
   const base = cartTotal();
-  const discPct = Number(clientDiscountPct)||0;
-  const discAmount = discPct > 0 ? Math.round(base * discPct / 100) : 0;
-  return {discPct, discAmount, total: base - discAmount};
+  const pct = Number(clientDiscountPct)||0;
+  const special = pct > 0 ? Math.round(base * pct / 100) : 0;
+  const points = Math.min(Number(pointsAmount)||0, Math.max(0, base - special));
+  const discAmount = special + points;
+  const discPct = discAmount > 0 ? Math.round(discAmount / base * 10000) / 100 : 0;
+  return {discPct, discAmount, total: base - discAmount, specialPct: pct, specialAmount: special, pointsAmount: points};
 }
-async function placeOrder(customer, clientDiscountPct=0){
+async function placeOrder(customer, clientDiscountPct=0, pointsAmount=0){
   const items = buildCartItemsForOrder();
-  const {discPct, discAmount, total} = orderTotals(items, clientDiscountPct);
+  const {discPct, discAmount, total, specialPct, pointsAmount: ptsAmt} = orderTotals(items, clientDiscountPct, pointsAmount);
 
   const saved = await apiSaveOrder({customer, items, clientDiscountPct: discPct||undefined, clientDiscountAmount: discAmount||undefined, total});
   const order = mapOrderRow(saved);
+  if(ptsAmt > 0){ order.pointsDiscount = ptsAmt; order.specialPct = specialPct; }
 
   state.orders.unshift(order);
   // decrement stock local (unit-based products only) — el servidor ya lo
@@ -2444,9 +2450,9 @@ function notifyNewOrderPush(order){
 // stock) igual armamos el pedido localmente para no perder la venta —
 // se manda por WhatsApp igual, pero no queda guardado en `orders` ni
 // descuenta stock server-side; el negocio lo carga a mano si hace falta.
-function placeOrderLocalFallback(customer, clientDiscountPct=0){
+function placeOrderLocalFallback(customer, clientDiscountPct=0, pointsAmount=0){
   const items = buildCartItemsForOrder();
-  const {discPct, discAmount, total} = orderTotals(items, clientDiscountPct);
+  const {discPct, discAmount, total, specialPct, pointsAmount: ptsAmt} = orderTotals(items, clientDiscountPct, pointsAmount);
   const order = {
     id: "SR" + Date.now().toString().slice(-6),
     date: new Date().toISOString(),
@@ -2455,6 +2461,7 @@ function placeOrderLocalFallback(customer, clientDiscountPct=0){
     clientDiscountAmount: discAmount||undefined,
     total, status: "Pendiente",
   };
+  if(ptsAmt > 0){ order.pointsDiscount = ptsAmt; order.specialPct = specialPct; }
   state.orders.unshift(order);
   creditPointsToClient(customer, order.total, order.id);
   state.cart = [];
@@ -2494,16 +2501,19 @@ function tierFor(points){
 }
 
 /* ---------- Canje de Puntos Royal por descuento ---------- */
-// 1000 puntos = 5% de descuento, sin tope: 3000 puntos canjeados en un
-// mismo pedido/comprobante son 15%. Se canjea siempre en bloques enteros
-// de 1000 (no hay canjes parciales de un bloque).
+// Valor fijo: 1000 puntos = $2.000 de descuento (cada punto vale $2, el
+// mismo valor que se usa para los premios). Antes era 5% del pedido por
+// cada 1000 puntos, y el punto valía distinto según el tamaño de la compra.
+// Se canjea en bloques enteros de 1000 y nunca más que el total a pagar.
 const POINTS_REDEEM_BLOCK = 1000;
-const POINTS_REDEEM_PCT_PER_BLOCK = 5;
-function maxRedeemablePoints(points){
-  return Math.floor((points||0)/POINTS_REDEEM_BLOCK) * POINTS_REDEEM_BLOCK;
+const POINTS_REDEEM_AMOUNT_PER_BLOCK = 2000;
+function maxRedeemablePoints(points, amountCap){
+  let blocks = Math.floor((points||0)/POINTS_REDEEM_BLOCK);
+  if(amountCap !== undefined) blocks = Math.min(blocks, Math.floor(Math.max(0, amountCap)/POINTS_REDEEM_AMOUNT_PER_BLOCK));
+  return blocks * POINTS_REDEEM_BLOCK;
 }
-function pointsRedeemPct(pointsToRedeem){
-  return Math.floor((pointsToRedeem||0)/POINTS_REDEEM_BLOCK) * POINTS_REDEEM_PCT_PER_BLOCK;
+function pointsRedeemAmount(pointsToRedeem){
+  return Math.floor((pointsToRedeem||0)/POINTS_REDEEM_BLOCK) * POINTS_REDEEM_AMOUNT_PER_BLOCK;
 }
 // Resta puntos ya canjeados por un descuento (delta en puntos, no en pesos
 // como creditPointsToClient). Reusa credit_client_points con delta negativo,
@@ -2540,7 +2550,11 @@ function buildOrderWAMessage(order, unsaved){
     const label = it.grams ? `${it.grams}g de` : `${it.qty}x`;
     msg += `• ${label} ${it.name} — ${money(it.lineTotal!=null?it.lineTotal:it.price*it.qty)}\n`;
   });
-  if(order.clientDiscountAmount > 0){
+  if(order.pointsDiscount > 0){
+    const special = order.clientDiscountAmount - order.pointsDiscount;
+    if(special > 0) msg += `\nDescuento especial (${order.specialPct}%): -${money(special)}`;
+    msg += `\nCanje de puntos (${order.pointsRedeemed||''} pts): -${money(order.pointsDiscount)}`;
+  }else if(order.clientDiscountAmount > 0){
     msg += `\nDescuento especial (${order.clientDiscountPct}%): -${money(order.clientDiscountAmount)}`;
   }
   msg += `\nTotal: ${money(order.total)}`;
@@ -3394,12 +3408,12 @@ function renderCheckoutSummaryHtml(){
   const base = cartTotal();
   const specialPct = clientDiscountPct();
   const client = state.currentClientPhone ? state.clients[state.currentClientPhone] : null;
-  const maxRedeemable = maxRedeemablePoints(client ? client.points : 0);
+  const specialAmount = specialPct > 0 ? Math.round(base * specialPct / 100) : 0;
+  const maxRedeemable = maxRedeemablePoints(client ? client.points : 0, base - specialAmount);
   if(state.checkoutPointsRedeemed > maxRedeemable) state.checkoutPointsRedeemed = maxRedeemable;
   const redeemed = state.checkoutPointsRedeemed || 0;
-  const redeemPct = pointsRedeemPct(redeemed);
-  const discPct = specialPct + redeemPct;
-  const discAmount = discPct > 0 ? Math.round(base * discPct / 100) : 0;
+  const redeemAmount = pointsRedeemAmount(redeemed);
+  const discAmount = specialAmount + redeemAmount;
   const finalTotal = base - discAmount;
   const isWholesale = wholesaleModeActive(client);
   return `
@@ -3414,10 +3428,11 @@ function renderCheckoutSummaryHtml(){
         </div>
       </div>
     ` : ''}
-    ${discPct > 0 ? `
+    ${maxRedeemable >= POINTS_REDEEM_BLOCK ? `<p style="font-size:11px; color:rgba(255,255,255,0.45); padding:0 0 8px;">Cada ${POINTS_REDEEM_BLOCK} puntos = ${money(POINTS_REDEEM_AMOUNT_PER_BLOCK)} de descuento</p>` : ''}
+    ${discAmount > 0 ? `
       <div class="summary-row"><span>Subtotal</span><span>${money(base)}</span></div>
-      ${specialPct > 0 ? `<div class="summary-row" style="color:var(--ok);"><span>Descuento especial (${specialPct}%)</span><span>-${money(Math.round(base*specialPct/100))}</span></div>` : ''}
-      ${redeemPct > 0 ? `<div class="summary-row" style="color:var(--ok);"><span>Canje de puntos (${redeemPct}%)</span><span>-${money(Math.round(base*redeemPct/100))}</span></div>` : ''}
+      ${specialAmount > 0 ? `<div class="summary-row" style="color:var(--ok);"><span>Descuento especial (${specialPct}%)</span><span>-${money(specialAmount)}</span></div>` : ''}
+      ${redeemAmount > 0 ? `<div class="summary-row" style="color:var(--ok);"><span>Canje de puntos (${redeemed} pts)</span><span>-${money(redeemAmount)}</span></div>` : ''}
     ` : ''}
     <div class="summary-row total"><span>Total a pagar</span><span>${money(finalTotal)}</span></div>
   `;
@@ -3436,7 +3451,8 @@ function onCheckoutPhoneInput(){
 }
 function adjustCheckoutPoints(delta){
   const client = state.currentClientPhone ? state.clients[state.currentClientPhone] : null;
-  const maxRedeemable = maxRedeemablePoints(client ? client.points : 0);
+  const _base = cartTotal(), _sp = clientDiscountPct();
+  const maxRedeemable = maxRedeemablePoints(client ? client.points : 0, _base - (_sp>0 ? Math.round(_base*_sp/100) : 0));
   state.checkoutPointsRedeemed = Math.min(maxRedeemable, Math.max(0, (state.checkoutPointsRedeemed||0) + delta));
   const summaryEl = document.getElementById("ck-summary");
   if(summaryEl) summaryEl.innerHTML = renderCheckoutSummaryHtml();
@@ -3503,10 +3519,13 @@ async function submitOrder(){
   const specialPct = clientForDiscount && clientForDiscount.discountPct ? Number(clientForDiscount.discountPct) : 0;
   // Recorta contra el saldo real del cliente por si el estado quedó desactualizado
   // (p.ej. el teléfono tipeado nunca disparó onCheckoutPhoneInput).
-  const redeemedPoints = Math.min(state.checkoutPointsRedeemed||0, maxRedeemablePoints(clientForDiscount?clientForDiscount.points:0));
-  const discPct = specialPct + pointsRedeemPct(redeemedPoints);
+  const _base = cartTotal();
+  const redeemedPoints = Math.min(state.checkoutPointsRedeemed||0, maxRedeemablePoints(clientForDiscount?clientForDiscount.points:0, _base - (specialPct>0 ? Math.round(_base*specialPct/100) : 0)));
+  const pointsAmount = pointsRedeemAmount(redeemedPoints);
+  const discPct = specialPct;
   try{
-    const order = await placeOrder({name, phone, address}, discPct);
+    const order = await placeOrder({name, phone, address}, discPct, pointsAmount);
+    if(pointsAmount > 0) order.pointsRedeemed = redeemedPoints;
     // notes no viaja al servidor (create_order no tiene ese parámetro) — se
     // manda igual por WhatsApp, que es donde realmente se coordina el
     // pedido, así no se pierde lo que el cliente aclaró.
@@ -3532,7 +3551,8 @@ async function submitOrder(){
     // se bloquea con un modal que hay que cerrar a propósito, y recién
     // ahí se abre WhatsApp.
     console.warn('No se pudo guardar el pedido en el servidor, se manda igual por WhatsApp:', e);
-    const order = placeOrderLocalFallback({name, phone, address}, discPct);
+    const order = placeOrderLocalFallback({name, phone, address}, discPct, pointsAmount);
+    if(pointsAmount > 0) order.pointsRedeemed = redeemedPoints;
     order.notes = notes;
     order.belowWholesaleMin = belowWholesaleMin;
     order.wholesaleSignupFailed = wholesaleSignupFailed;
@@ -10795,10 +10815,9 @@ async function createVoucher(type, items, customer, orderId, includeIVA, general
   const manualDiscountAmount = gd.value>0
     ? (gd.type==="percent" ? afterItemDiscounts*(gd.value/100) : Math.min(gd.value, afterItemDiscounts))
     : 0;
-  // Canje de Puntos Royal: siempre un % sobre afterItemDiscounts, se suma al
+  // Canje de Puntos Royal: monto fijo (1000 pts = $2.000), se suma al
   // descuento general que haya cargado el admin en vez de reemplazarlo.
-  const pointsPct = pointsRedeemPct(pointsRedeemed);
-  const pointsDiscountAmount = pointsPct > 0 ? afterItemDiscounts * (pointsPct/100) : 0;
+  const pointsDiscountAmount = Math.min(pointsRedeemAmount(pointsRedeemed), Math.max(0, afterItemDiscounts - manualDiscountAmount));
   const generalDiscountAmount = manualDiscountAmount + pointsDiscountAmount;
   const total = Math.max(0, afterItemDiscounts - generalDiscountAmount);
   const showIVA = type === "factura" && !!includeIVA;
@@ -10817,7 +10836,7 @@ async function createVoucher(type, items, customer, orderId, includeIVA, general
     date: (manualDate && type!=='factura') ? manualDate : new Date().toISOString(),
     items, customer: customer||{name:"Consumidor Final", phone:"", address:""},
     total,
-    generalDiscount: (gd.value>0 || pointsPct>0) ? {...gd, pointsRedeemed: pointsRedeemed||0, pointsDiscountPct: pointsPct, pointsDiscountAmount} : null,
+    generalDiscount: (gd.value>0 || pointsDiscountAmount>0) ? {...gd, pointsRedeemed: pointsRedeemed||0, pointsDiscountAmount} : null,
     generalDiscountAmount,
     showIVA,
     ivaPct: ivaCalc.pct, iva: ivaCalc.iva, neto: ivaCalc.neto,
@@ -11099,7 +11118,7 @@ function manualVoucherRedeemUiHtml(){
       <label>👑 Canjear puntos de ${escapeHtml(client.name)} (tiene ${client.points})</label>
       <div style="display:flex; align-items:center; gap:10px;">
         <button onclick="adjustManualVoucherPoints(-${POINTS_REDEEM_BLOCK})" ${redeemed<=0?'disabled':''} style="width:30px; height:30px; border-radius:50%; border:1px solid var(--glass-bd); background:var(--glass); color:var(--cream); font-size:16px; line-height:1;">−</button>
-        <span style="min-width:100px; text-align:center;">${redeemed} pts (${pointsRedeemPct(redeemed)}%)</span>
+        <span style="min-width:100px; text-align:center;">${redeemed} pts (-${money(pointsRedeemAmount(redeemed))})</span>
         <button onclick="adjustManualVoucherPoints(${POINTS_REDEEM_BLOCK})" ${redeemed>=maxRedeemable?'disabled':''} style="width:30px; height:30px; border-radius:50%; border:1px solid var(--glass-bd); background:var(--glass); color:var(--cream); font-size:16px; line-height:1;">+</button>
       </div>
     </div>
@@ -11128,8 +11147,8 @@ function computeManualVoucherTotal(d){
   if(gdValue > 0){
     generalDiscountAmount = gdType === "percent" ? afterItemDiscounts*(gdValue/100) : Math.min(gdValue, afterItemDiscounts);
   }
-  const pointsDiscountPct = pointsRedeemPct(d.pointsRedeemed);
-  const pointsDiscountAmount = pointsDiscountPct > 0 ? afterItemDiscounts*(pointsDiscountPct/100) : 0;
+  const pointsDiscountPct = 0;
+  const pointsDiscountAmount = Math.min(pointsRedeemAmount(d.pointsRedeemed), Math.max(0, afterItemDiscounts - generalDiscountAmount));
   const total = Math.max(0, afterItemDiscounts - generalDiscountAmount - pointsDiscountAmount);
   return { subtotal, afterItemDiscounts, generalDiscountAmount, pointsDiscountPct, pointsDiscountAmount, total };
 }
@@ -11146,7 +11165,7 @@ function renderManualVoucherTotals(){
     rows += `<div class="summary-row"><span>Descuento general</span><span>-${money(breakdown.generalDiscountAmount)}</span></div>`;
   }
   if(breakdown.pointsDiscountAmount > 0){
-    rows += `<div class="summary-row" style="color:var(--ok);"><span>Canje de puntos (${breakdown.pointsDiscountPct}%)</span><span>-${money(breakdown.pointsDiscountAmount)}</span></div>`;
+    rows += `<div class="summary-row" style="color:var(--ok);"><span>Canje de puntos (${manualVoucherDraft.pointsRedeemed||0} pts)</span><span>-${money(breakdown.pointsDiscountAmount)}</span></div>`;
   }
   if(d.type==="factura" && d.includeIVA){
     const c = calcIVADiscriminado(breakdown.total);
@@ -11444,7 +11463,7 @@ function buildVoucherDocHTML(voucher){
             html += `<div class="row"><span>Descuento ${gd.type==='percent'?`(${gd.value}%)`:'general'}</span><span>-${money(manualAmount)}</span></div>`;
           }
           if(pointsAmount > 0){
-            html += `<div class="row"><span>👑 Canje de puntos (${gd.pointsDiscountPct}%)</span><span>-${money(pointsAmount)}</span></div>`;
+            html += `<div class="row"><span>👑 Canje de puntos (${gd.pointsDiscountPct ? gd.pointsDiscountPct+'%' : (gd.pointsRedeemed||0)+' pts'})</span><span>-${money(pointsAmount)}</span></div>`;
           }
           return html;
         })()}
