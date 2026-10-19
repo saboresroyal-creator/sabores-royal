@@ -1335,9 +1335,14 @@ function pushRemoteState({force = false} = {}){
         }
       }
       state.updatedAt = Date.now();
-      localStorage.setItem('cajasApp_v2', JSON.stringify(state));
-      await cajaRpc('save_caja_diaria', {p_pin: CAJA_PIN, p_data: JSON.stringify(state)});
-      setSyncBase(state);
+      // La base tiene que ser exactamente lo que se subió: si se sigue
+      // escribiendo mientras se guarda, el estado vivo ya es otro, y tomarlo
+      // como base hacía que el próximo guardado viera cada versión a medio
+      // escribir de un gasto ("MI", "MIL", "MIL HOJAS") como gastos nuevos.
+      const enviado = JSON.stringify(state);
+      localStorage.setItem('cajasApp_v2', enviado);
+      await cajaRpc('save_caja_diaria', {p_pin: CAJA_PIN, p_data: enviado});
+      setSyncBase(JSON.parse(enviado));
       setSyncStatus(true);
     }catch(e){
       setSyncStatus(false, e.message);
