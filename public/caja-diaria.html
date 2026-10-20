@@ -3011,6 +3011,46 @@ function renderSumaCalQA() {
   if(el) el.innerHTML = sumaBorradorHtml(parseFloat((document.getElementById('calQAMonto')||{}).value)||0, 0);
 }
 
+// Edición de un cheque en borrador ahí mismo, en la fila de la tabla del día.
+let chequeDiaEditandoId = null;
+function filaEdicionBorradorHtml(c) {
+  const inp = (id, tipo, val, extra='') => `<input type="${tipo}" id="${id}" value="${escHtml(val||'')}" ${extra} style="width:100%;min-width:90px;background:var(--surface2);border:1px solid var(--gold);color:var(--text);border-radius:6px;padding:6px 8px;font-size:12px;">`;
+  return `<tr style="border-left:2px dashed var(--gold);background:var(--surface2);">
+    <td>${inp('cdeProveedor','text',c.proveedor,'list="chequesProveedoresList"')}
+      <div style="margin-top:4px;">${inp('cdeNota','text',c.nota,'placeholder="Nota (opcional)"')}</div></td>
+    <td>${inp('cdeNumero','text',c.numero,'placeholder="N°"')}</td>
+    <td>${inp('cdeFechaEmision','date',c.fechaEmision)}</td>
+    <td>${inp('cdeFechaPago','date',c.fechaPago)}</td>
+    <td><span style="color:var(--gold);font-size:11px;font-weight:700;">📝 EDITANDO</span></td>
+    <td class="num">${inp('cdeMonto','number',c.monto,'step="0.01" inputmode="decimal" style="text-align:right;"')}</td>
+    <td style="white-space:nowrap;text-align:right;">
+      <button class="btn btn-green btn-sm" onclick="guardarBorradorEnDia(${c.id})">💾 Guardar</button>
+      <button class="btn btn-ghost btn-sm" onclick="cancelarBorradorEnDia()" title="Cancelar">✕</button>
+    </td>
+  </tr>`;
+}
+function editarBorradorEnDia(id) {
+  chequeDiaEditandoId = id;
+  renderChequesCalendario();
+  const el = document.getElementById('cdeProveedor');
+  if(el) el.focus();
+}
+function cancelarBorradorEnDia() {
+  chequeDiaEditandoId = null;
+  renderChequesCalendario();
+}
+function guardarBorradorEnDia(id) {
+  const c = state.chequesBorrador.find(x=>x.id===id);
+  if(!c) { cancelarBorradorEnDia(); return; }
+  const val = k => document.getElementById(k).value.trim();
+  const proveedor = val('cdeProveedor'), monto = parseFloat(val('cdeMonto'))||0, fechaPago = val('cdeFechaPago');
+  if(!proveedor || !monto || !fechaPago) { alert('Completá proveedor, monto y vencimiento.'); return; }
+  Object.assign(c, {proveedor, monto, numero: val('cdeNumero'), fechaEmision: val('cdeFechaEmision'), fechaPago, nota: val('cdeNota')});
+  chequeDiaEditandoId = null;
+  save();
+  renderChequesCalendario();
+  renderChequesBorrador();
+}
 // Tabla con todos los cheques de un día del calendario (confirmados y en borrador).
 function detalleChequesDiaHtml(cheques, borradores, fechaLinda) {
   if(!cheques.length && !borradores.length) return `<div style="margin-top:14px;font-size:12px;color:var(--muted);">No hay cheques para el ${fechaLinda}.</div>`;
@@ -3031,7 +3071,7 @@ function detalleChequesDiaHtml(cheques, borradores, fechaLinda) {
         </td>
       </tr>`;
     }),
-    ...borradores.map(c=>`<tr style="border-left:2px dashed var(--gold);">
+    ...borradores.map(c=>c.id===chequeDiaEditandoId ? filaEdicionBorradorHtml(c) : `<tr style="border-left:2px dashed var(--gold);">
         <td style="font-family:var(--sans);font-weight:600;">${escHtml(c.proveedor)}${c.nota?`<div style="font-size:10px;color:var(--muted);font-weight:400;">${escHtml(c.nota)}</div>`:''}</td>
         <td>${c.numero?escHtml(c.numero):'—'}</td>
         <td>${c.fechaEmision?fmtFecha(c.fechaEmision):'—'}</td>
@@ -3040,6 +3080,7 @@ function detalleChequesDiaHtml(cheques, borradores, fechaLinda) {
         <td class="num" style="font-weight:700;">${pesos(c.monto)}</td>
         <td style="white-space:nowrap;text-align:right;">
           <button class="btn btn-green btn-sm" onclick="confirmarChequeBorrador(${c.id});renderChequesCalendario();">✓ Confirmar</button>
+          <button class="btn btn-ghost btn-sm" onclick="editarBorradorEnDia(${c.id})" title="Editar">✎</button>
           <button class="btn btn-ghost btn-sm" onclick="removeChequeBorrador(${c.id})" title="Eliminar del borrador">🗑</button>
         </td>
       </tr>`)
