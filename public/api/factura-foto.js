@@ -72,28 +72,76 @@ function normalizar(c) {
 // que cambiaron de nombre entre versiones de la API.
 const FORMATO_JSON = `\n\nRespondé SOLO con un objeto JSON con estas claves exactas: legible (boolean), tipo ("factura" | "remito" | "nc"), numero (string), proveedor (string), fechaEmision (string AAAA-MM-DD o ""), fechaVencimiento (string AAAA-MM-DD o ""), total (number), observaciones (string).`;
 
-// Modelos a probar en orden: en el plan gratuito a veces uno está saturado
-// ("high demand") o sin cupo, y otro responde bien.
-const GEMINI_MODELOS = ['gemini-flash-latest', 'gemini-3.8-flash', 'gemini-3.7-flash', 'gemini-3.6-flash', 'gemini-3.5-flash', 'gemini-flash-lite-latest'];
+// En el plan gratuito a veces un modelo está saturado ("high demand") o sin
+// cupo, y otro responde bien. Cada modelo tiene su propio cupo, así que
+// conviene tener varios. Los alias "-latest" siempre existen; además se le
+// pide a Google la lista real de modelos (los nombres cambian con cada
+// versión) y se suman todos los "flash" que lean imágenes.
+const GEMINI_ALIAS = ['gemini-flash-latest', 'gemini-flash-lite-latest'];
+let _modelosCache = null, _modelosCacheHasta = 0;
+// Modelo sin cupo (429) o inexistente (404): no se vuelve a probar por un rato.
+const _enPausa = new Map();
 
+async function modelosGemini() {
+  if (_modelosCache && Date.now() < _modelosCacheHasta) return _modelosCache;
+  let descubiertos = [];
+  try {
+    const r = await fetch('https://generativelanguage.googleapis.com/v1beta/models?pageSize=200', {
+      headers: { 'x-goog-api-key': process.env.GEMINI_API_KEY },
+      signal: AbortSignal.timeout(4000),
+    });
+    const body = await r.json();
+    descubiertos = (body.models || [])
+      .filter((m) => (m.supportedGenerationMethods || []).includes('generateContent'))
+      .map((m) => String(m.name || '').replace(/^models\//, ''))
+      .filter((n) => /^gemini-[\d.]+-flash/.test(n) && !/image|tts|audio|live|embedding/.test(n))
+      // Versión más nueva primero; los "lite" (más flojos para leer) al final.
+      .sort((a, b) => (/lite/.test(a) - /lite/.test(b)) || parseFloat(b.slice(7)) - parseFloat(a.slice(7)));
+  } catch (e) { /* sin lista: quedan los alias */ }
+  const pref = process.env.GEMINI_MODEL ? [process.env.GEMINI_MODEL] : [];
+  const lista = [...new Set([...pref, GEMINI_ALIAS[0], ...descubiertos.filter((n) => !/lite/.test(n)), GEMINI_ALIAS[1], ...descubiertos.filter((n) => /lite/.test(n))])];
+  _modelosCache = lista;
+  _modelosCacheHasta = Date.now() + 3600000;
+  return lista;
+}
+
+// Prueba de a dos modelos a la vez y se queda con el primero que responde:
+// si uno está saturado no hay que esperarlo para pasar al siguiente.
 async function leerConGemini(data, mediaType, pedido) {
-  const modelos = process.env.GEMINI_MODEL ? [process.env.GEMINI_MODEL, ...GEMINI_MODELOS] : GEMINI_MODELOS;
-  // Vercel corta la función a los 60 s: cada modelo tiene un tope de espera
-  // y se deja margen para responder.
+  const todos = await modelosGemini();
+  const ahora = Date.now();
+  const modelos = todos.filter((m) => !(_enPausa.get(m) > ahora));
+  if (!modelos.length) modelos.push(...todos);
+  // Vercel corta la función a los 60 s: se deja margen para responder.
   const limite = Date.now() + 50000;
-  let ultimoError;
-  for (const modelo of [...new Set(modelos)]) {
-    const resta = limite - Date.now();
-    if (resta < 5000) break;
-    try {
-      return await geminiUnModelo(modelo, data, mediaType, pedido, Math.min(22000, resta));
-    } catch (e) {
-      ultimoError = e;
-      // Saturado, sin cupo o inexistente: probar el siguiente. Otro error: cortar.
-      if (![404, 429, 500, 503].includes(e.status)) throw e;
-    }
-  }
-  throw ultimoError;
+  const PARALELO = 2;
+  return new Promise((resolve, reject) => {
+    let siguiente = 0, enCurso = 0, terminado = false, ultimoError = null;
+    const lanzar = () => {
+      while (!terminado && enCurso < PARALELO && siguiente < modelos.length) {
+        const resta = limite - Date.now();
+        if (resta < 5000) break;
+        const modelo = modelos[siguiente++];
+        enCurso++;
+        geminiUnModelo(modelo, data, mediaType, pedido, Math.min(25000, resta))
+          .then((r) => { if (!terminado) { terminado = true; resolve(r); } })
+          .catch((e) => {
+            ultimoError = e;
+            if (e.status === 429) _enPausa.set(modelo, Date.now() + 60000);
+            if (e.status === 404) _enPausa.set(modelo, Date.now() + 3600000);
+            // Saturado, sin cupo o inexistente: probar el siguiente. Otro error: cortar.
+            if (![404, 429, 500, 503].includes(e.status) && !terminado) { terminado = true; reject(e); }
+          })
+          .finally(() => {
+            enCurso--;
+            lanzar();
+            if (!terminado && enCurso === 0) { terminado = true; reject(ultimoError || Object.assign(new Error('Sin modelos disponibles'), { status: 503 })); }
+          });
+      }
+    };
+    lanzar();
+    if (enCurso === 0 && !terminado) { terminado = true; reject(Object.assign(new Error('Sin tiempo para probar modelos'), { status: 503 })); }
+  });
 }
 
 async function geminiUnModelo(modelo, data, mediaType, pedido, espera) {
@@ -113,7 +161,9 @@ async function geminiUnModelo(modelo, data, mediaType, pedido, espera) {
   );
   let r;
   try {
-    r = await llamar({ responseMimeType: 'application/json', temperature: 0 });
+    // Sin "pensar" responde bastante más rápido y para leer un comprobante no hace falta.
+    r = await llamar({ responseMimeType: 'application/json', temperature: 0, thinkingConfig: { thinkingBudget: 0 } });
+    if (r.status === 400) r = await llamar({ responseMimeType: 'application/json', temperature: 0 });
     if (r.status === 400) r = await llamar(null); // por si esta versión no acepta esa config
   } catch (e) {
     // Tardó demasiado (modelo saturado): se trata igual que un 503 para probar el siguiente.

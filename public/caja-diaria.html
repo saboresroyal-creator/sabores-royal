@@ -3621,13 +3621,28 @@ async function leerFotoFactura(input) {
       archivo = await achicarImagen(file, 1800, 0.85);
     }
     const proveedores = [...new Set([...(state.facturas||[]), ...(state.cheques||[])].map(x=>(x.proveedor||'').trim()).filter(Boolean))];
-    const res = await fetch('/api/factura-foto', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ pin: CAJA_PIN, data: archivo.data, mediaType: archivo.mediaType, proveedores }),
-    });
-    const r = await res.json().catch(()=>({}));
-    if(!res.ok) throw new Error(r.error || ('Error ' + res.status));
+    // La IA gratuita de Google a veces está saturada: se reintenta sola
+    // unas veces (esperando un poco más cada vez) en vez de que haya que
+    // volver a sacar la foto.
+    const ESPERAS = [3, 8, 15, 25];
+    let res, r;
+    for(let intento = 0; ; intento++) {
+      res = await fetch('/api/factura-foto', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ pin: CAJA_PIN, data: archivo.data, mediaType: archivo.mediaType, proveedores }),
+      }).catch(()=>null);
+      r = res ? await res.json().catch(()=>({})) : {};
+      const reintentable = !res || [429, 502, 503, 504].includes(res.status);
+      if((res && res.ok) || !reintentable || intento >= ESPERAS.length) break;
+      for(let s = ESPERAS[intento]; s > 0; s--) {
+        estadoFotoFactura(`⏳ La IA está ocupada, reintento automático ${intento+2} de ${ESPERAS.length+1} en ${s} s… no hace falta tocar nada.`, 'var(--yellow)');
+        await new Promise(ok=>setTimeout(ok, 1000));
+      }
+      estadoFotoFactura(`⏳ Leyendo el comprobante (intento ${intento+2} de ${ESPERAS.length+1})…`);
+    }
+    if(!res) throw new Error('Sin conexión: revisá internet y probá de nuevo');
+    if(!res.ok) throw new Error((r.error || ('Error ' + res.status)) + (res.status===503 ? ' (ya se reintentó solo varias veces)' : ''));
     if(!r.legible) { estadoFotoFactura('⚠ No pude leer un comprobante en esa foto. Probá con más luz, de frente y que se vea entero el total.', 'var(--yellow)'); return; }
 
     // Completa el formulario como comprobante nuevo
