@@ -4248,6 +4248,14 @@ function renderDeudaPorProveedor() {
   </div>`;
 }
 
+// Número de comprobante sin importar ceros adelante, guiones ni espacios:
+// "3-12345", "0003 00012345" y "12345" encuentran "0003-00012345".
+function partesNumero(s) { return String(s||'').split(/[^0-9]+/).filter(Boolean).map(x=>String(parseInt(x,10))); }
+function mismoNumeroComprobante(numero, busqueda) {
+  const q = partesNumero(busqueda);
+  if(!q.length || q.join('').length < 3) return false;
+  return partesNumero(numero).join('-').includes(q.join('-'));
+}
 function renderDeuda() {
   deudaSeleccion.forEach(id=>{ const f=state.facturas.find(x=>x.id===id); if(!f || f.estado==='pagada') deudaSeleccion.delete(id); });
   renderDeudaPagoPanel();
@@ -4262,11 +4270,14 @@ function renderDeuda() {
   const container = document.getElementById('facturasList');
   if(!container) return;
   let list = state.facturas;
-  if(deudaFiltro==='pendiente') list = list.filter(f=>f.estado!=='pagada');
-  else if(deudaFiltro==='pagada') list = list.filter(f=>f.estado==='pagada');
-  else if(deudaFiltro==='vencida') list = list.filter(facturaVencida);
+  // Al buscar se busca en TODAS (pendientes y pagadas), sin importar el filtro elegido.
+  if(!deudaBusqueda) {
+    if(deudaFiltro==='pendiente') list = list.filter(f=>f.estado!=='pagada');
+    else if(deudaFiltro==='pagada') list = list.filter(f=>f.estado==='pagada');
+    else if(deudaFiltro==='vencida') list = list.filter(facturaVencida);
+  }
   if(deudaProveedorSel) list = list.filter(f=>f.proveedor.trim().toUpperCase()===deudaProveedorSel.toUpperCase());
-  if(deudaBusqueda) list = list.filter(f=>(f.proveedor||'').toLowerCase().includes(deudaBusqueda) || (f.numero||'').toLowerCase().includes(deudaBusqueda) || compLabel(f).toLowerCase().includes(deudaBusqueda));
+  if(deudaBusqueda) list = list.filter(f=>(f.proveedor||'').toLowerCase().includes(deudaBusqueda) || (f.numero||'').toLowerCase().includes(deudaBusqueda) || compLabel(f).toLowerCase().includes(deudaBusqueda) || mismoNumeroComprobante(f.numero, deudaBusqueda));
   if(!list.length) {
     const hayFiltro = deudaFiltro!=='todas' || deudaProveedorSel || deudaBusqueda;
     container.innerHTML = `<div class="card" style="text-align:center;color:var(--muted);padding:40px;">No hay facturas${hayFiltro?' para este filtro':' cargadas'}.</div>`;
@@ -4279,7 +4290,7 @@ function renderDeuda() {
     return a.fechaVence.localeCompare(b.fechaVence);
   });
   const total = sumaNeta(list);
-  container.innerHTML = `<div style="font-size:12px;color:var(--muted);margin-bottom:10px;">${list.length} comprobante(s) · total ${pesos2(total)}</div>
+  container.innerHTML = `<div style="font-size:12px;color:var(--muted);margin-bottom:10px;">${deudaBusqueda?'🔍 Buscando en todas (pendientes y pagadas) · ':''}${list.length} comprobante(s) · total ${pesos2(total)}</div>
   <div class="grid3">${sorted.map(f=>{
     const diff = diasHasta(f.fechaVence);
     let cls='imp-card', status='', statusColor='var(--muted)';
