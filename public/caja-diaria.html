@@ -429,6 +429,7 @@ tr:hover td { background:var(--surface2); }
   <div class="tab" onclick="switchTab('cheques',this)" id="tabCheques">💳 Cheques</div>
   <div class="tab" onclick="switchTab('deuda',this)" id="tabDeuda">📑 Deuda Proveedores</div>
   <div class="tab" onclick="switchTab('bancos',this)" id="tabBancos">🏦 Bancos</div>
+  <div class="tab" onclick="switchTab('fondos',this)">🐷 Fondos</div>
   <div class="tab" onclick="switchTab('finales',this)">📈 Finales</div>
   <div class="tab" onclick="switchTab('ajustes',this)">⚙ Ajustes</div>
 </div>
@@ -984,6 +985,34 @@ tr:hover td { background:var(--surface2); }
 </div>
 
 <!-- ══════════════════════════════════════════
+     PANEL: FONDOS (plata apartada para EPE, La Serenísima, Obra Social)
+══════════════════════════════════════════ -->
+<div class="panel" id="panel-fondos">
+  <p class="hint" style="margin-bottom:16px;">Las salidas de Caja Central con concepto <b>EPE</b>, <b>La Serenísima</b> u <b>Obra Social</b> se suman solas a su fondo. Cuando pagás la factura con esa plata, registrá el pago acá y se descuenta del fondo.</p>
+
+  <div class="grid3 mb16" id="fondosResumen"></div>
+
+  <div class="card mb16">
+    <div class="card-title"><div class="dot"></div>REGISTRAR PAGO DESDE UN FONDO</div>
+    <div style="display:flex;flex-wrap:wrap;gap:10px;align-items:flex-end;">
+      <div style="min-width:160px;"><label>Fondo</label><select id="fpFondo"></select></div>
+      <div><label>Fecha</label><input type="date" id="fpFecha" style="width:auto;"></div>
+      <div style="min-width:140px;"><label>Monto ($)</label><input type="number" step="0.01" inputmode="decimal" id="fpMonto" placeholder="0,00"></div>
+      <div style="flex:1;min-width:180px;"><label>Nota (opcional)</label><input type="text" id="fpNota" placeholder="Ej: factura septiembre"></div>
+      <button class="btn btn-gold" onclick="guardarPagoFondo()">💾 Registrar pago</button>
+    </div>
+  </div>
+
+  <div class="card mb16">
+    <div class="card-title" style="justify-content:space-between;">
+      <span style="display:flex;align-items:center;gap:8px;"><div class="dot"></div>MOVIMIENTOS</span>
+      <select id="fondosFiltro" onchange="renderFondos()" style="width:auto;"></select>
+    </div>
+    <div id="fondosMovimientos" style="overflow-x:auto;"></div>
+  </div>
+</div>
+
+<!-- ══════════════════════════════════════════
      PANEL: FINALES (deuda total día a día)
 ══════════════════════════════════════════ -->
 <div class="panel" id="panel-finales">
@@ -1284,6 +1313,7 @@ function rerenderAll(){
   if(name==='cheques') { renderCheques(); renderChequesBorrador(); }
   if(name==='deuda') renderDeuda();
   if(name==='bancos') renderBancos();
+  if(name==='fondos') renderFondos();
   if(name==='finales') renderFinales();
   if(name==='ajustes') renderCajeros();
   if(name==='gastos') { updateConceptosDatalist(); renderBusquedaGastos(); }
@@ -1400,6 +1430,7 @@ function normalizeState(){
   if(!state.finales || Array.isArray(state.finales)) state.finales = {};
   if(!state.prestamos || Array.isArray(state.prestamos)) state.prestamos = {};
   if(!state.descubiertos || Array.isArray(state.descubiertos)) state.descubiertos = {};
+  if(!Array.isArray(state.fondosPagos)) state.fondosPagos = [];
   if(!state.cajeros) state.cajeros = ['Gastón','Matías','Gabriel','Emanuel'];
   if(!state.dias) state.dias = {};
   if(!state.updatedAt) state.updatedAt = 0;
@@ -1716,6 +1747,7 @@ function renderCajas(day, d) {
         <div class="stat" style="flex:1;min-width:130px;">
           <div class="stat-label">Salidas</div>
           <div class="stat-value red" id="gastosCajaTotal_${i}">$0</div>
+          <div id="fondosHoyCentral" style="font-size:11px;color:var(--gold);margin-top:4px;"></div>
         </div>
         <div class="stat" style="flex:2;min-width:180px;border:1px solid color-mix(in srgb, var(--gold) 30%, transparent);background:var(--gold-dim);">
           <div class="stat-label" style="color:var(--gold)">Saldo disponible (acumulado)</div>
@@ -1927,6 +1959,11 @@ function updateGastosCajaTotal(d,i) {
     if(elTotal) elTotal.textContent = pesos(efReal+tar);
     const elNeto = document.getElementById(`netoCaja_${i}`);
     if(elNeto) elNeto.textContent = pesos(efReal - total);
+  }
+  if(i === 2) {
+    const elF = document.getElementById('fondosHoyCentral');
+    const aFondos = gastos.filter(g=>fondoDeConcepto(g.concepto)).reduce((s,g)=>s+(parseFloat(g.monto)||0),0);
+    if(elF) elF.textContent = aFondos ? `🐷 ${pesos(aFondos)} a fondos` : '';
   }
   // siempre recalcular central
   updateEfectivoRealCentral(d);
@@ -4371,6 +4408,98 @@ function updateBancosBadge() {
 }
 
 // ============================================================
+// FONDOS — plata que se retira de Caja Central para guardar y pagar
+// EPE, La Serenísima y Obra Social. Lo apartado sale solo de las
+// salidas de Caja Central; los pagos se cargan a mano.
+// state.fondosPagos = [{id, fondo, fecha, monto, nota}]
+// ============================================================
+const FONDOS = [
+  {key:'epe',        nombre:'EPE',            re:/\bepe\b/},
+  {key:'serenisima', nombre:'La Serenísima',  re:/serenisima/},
+  {key:'obrasocial', nombre:'Obra Social',    re:/obra\s*social/},
+];
+function fondoDeConcepto(concepto) {
+  const c = String(concepto||'').normalize('NFD').replace(/[̀-ͯ]/g,'').toLowerCase();
+  const f = FONDOS.find(f=>f.re.test(c));
+  return f ? f.key : null;
+}
+function nombreFondo(key) { const f = FONDOS.find(f=>f.key===key); return f ? f.nombre : key; }
+
+function movimientosFondos() {
+  const movs = [];
+  Object.keys(state.dias||{}).forEach(fecha=>{
+    const cc = state.dias[fecha] && state.dias[fecha].cajas && state.dias[fecha].cajas[2];
+    ((cc && cc.gastos) || []).forEach(g=>{
+      const fondo = fondoDeConcepto(g.concepto);
+      const monto = parseFloat(g.monto)||0;
+      if(fondo && monto) movs.push({tipo:'aporte', fondo, fecha, monto, concepto:g.concepto});
+    });
+  });
+  (state.fondosPagos||[]).forEach(p=>movs.push({tipo:'pago', fondo:p.fondo, fecha:p.fecha, monto:+p.monto||0, concepto:p.nota||'Pago', id:p.id}));
+  return movs;
+}
+
+function guardarPagoFondo() {
+  const fondo = document.getElementById('fpFondo').value;
+  const fecha = document.getElementById('fpFecha').value || todayStr();
+  const monto = Math.round((parseFloat(document.getElementById('fpMonto').value)||0)*100)/100;
+  const nota = document.getElementById('fpNota').value.trim();
+  if(!fondo) { alert('Elegí el fondo.'); return; }
+  if(monto <= 0) { alert('Poné el monto pagado.'); return; }
+  state.fondosPagos.push({id:Date.now(), fondo, fecha, monto, nota});
+  document.getElementById('fpMonto').value = '';
+  document.getElementById('fpNota').value = '';
+  save(); renderFondos();
+}
+function eliminarPagoFondo(id) {
+  if(!confirm('¿Borrar este pago? La plata vuelve al fondo.')) return;
+  state.fondosPagos = state.fondosPagos.filter(p=>String(p.id)!==String(id));
+  save(); renderFondos();
+}
+
+function renderFondos() {
+  if(!document.getElementById('panel-fondos')) return;
+  const movs = movimientosFondos();
+  const tot = key => {
+    const ap = movs.filter(m=>m.fondo===key && m.tipo==='aporte').reduce((s,m)=>s+m.monto,0);
+    const pa = movs.filter(m=>m.fondo===key && m.tipo==='pago').reduce((s,m)=>s+m.monto,0);
+    return {ap, pa, saldo: ap-pa};
+  };
+  document.getElementById('fondosResumen').innerHTML = FONDOS.map(f=>{
+    const t = tot(f.key);
+    return `<div class="stat"><div class="stat-label">Fondo ${f.nombre}</div>
+      <div class="stat-value" style="color:${t.saldo<0?'var(--red)':'var(--gold)'}">${pesos(t.saldo)}</div>
+      <div style="font-size:11px;color:var(--muted);margin-top:4px">Apartado ${pesos(t.ap)} · Pagado ${pesos(t.pa)}</div></div>`;
+  }).join('');
+
+  const selF = document.getElementById('fpFondo');
+  const prevF = selF.value;
+  selF.innerHTML = FONDOS.map(f=>`<option value="${f.key}">${f.nombre}</option>`).join('');
+  if(prevF) selF.value = prevF;
+  const fechaEl = document.getElementById('fpFecha');
+  if(!fechaEl.value) fechaEl.value = todayStr();
+
+  const filtroEl = document.getElementById('fondosFiltro');
+  const filtro = filtroEl.value || '';
+  filtroEl.innerHTML = `<option value="">Todos los fondos</option>` + FONDOS.map(f=>`<option value="${f.key}">${f.nombre}</option>`).join('');
+  filtroEl.value = filtro;
+
+  const lista = movs.filter(m=>!filtro || m.fondo===filtro)
+    .sort((a,b)=>b.fecha.localeCompare(a.fecha) || (a.tipo==='pago'?-1:1));
+  document.getElementById('fondosMovimientos').innerHTML = lista.length ? `<table>
+    <thead><tr><th>Fecha</th><th>Fondo</th><th>Detalle</th><th class="num">Apartado</th><th class="num">Pagado</th><th></th></tr></thead>
+    <tbody>${lista.map(m=>`<tr>
+      <td>${fmtFecha(m.fecha)}</td>
+      <td style="font-family:var(--sans);font-weight:600;">${nombreFondo(m.fondo)}</td>
+      <td style="font-family:var(--sans);color:var(--muted);">${escHtml(m.concepto)}${m.tipo==='aporte'?' <span style="font-size:10px;">(salida Caja Central)</span>':''}</td>
+      <td class="num" style="color:var(--green);">${m.tipo==='aporte'?pesos(m.monto):''}</td>
+      <td class="num" style="color:var(--red);">${m.tipo==='pago'?pesos(m.monto):''}</td>
+      <td style="text-align:right;">${m.tipo==='pago'?`<button class="btn btn-ghost btn-sm" onclick="eliminarPagoFondo('${m.id}')">🗑</button>`:''}</td>
+    </tr>`).join('')}</tbody>
+  </table>` : '<div style="color:var(--muted);font-size:13px;">Todavía no hay movimientos. Cargá en Caja Central una salida con concepto EPE, La Serenísima u Obra Social.</div>';
+}
+
+// ============================================================
 // FINALES — deuda total día a día. Proveedores y cheques se
 // guardan solos (foto del día); créditos y descubierto son manuales.
 // state.finales = { 'AAAA-MM-DD': {proveedores, cheques, creditos, descubierto, nota} }
@@ -4860,6 +4989,7 @@ function switchTab(name, el) {
   if(name==='cheques') { renderCheques(); renderChequesBorrador(); }
   if(name==='deuda') renderDeuda();
   if(name==='bancos') renderBancos();
+  if(name==='fondos') renderFondos();
   if(name==='finales') refrescarFinales();
   if(name==='ajustes') renderCajeros();
   if(name==='gastos') { updateConceptosDatalist(); renderBusquedaGastos(); }
