@@ -698,7 +698,7 @@ tr:hover td { background:var(--surface2); }
       </div>
       <div>
         <label>Monto ($)</label>
-        <input type="number" id="chqMonto" placeholder="0">
+        <input type="text" id="chqMonto" placeholder="0,00" inputmode="decimal">
       </div>
       <div>
         <label>N° de cheque</label>
@@ -767,7 +767,7 @@ tr:hover td { background:var(--surface2); }
         </div>
         <div>
           <label>Monto ($)</label>
-          <input type="number" id="chqbMonto" placeholder="0,00" step="0.01" inputmode="decimal" oninput="renderSumaBorrador()">
+          <input type="text" id="chqbMonto" placeholder="0,00" inputmode="decimal" oninput="renderSumaBorrador()">
         </div>
         <div>
           <label>N° de cheque (si ya lo tenés)</label>
@@ -831,7 +831,7 @@ tr:hover td { background:var(--surface2); }
       </div>
       <div>
         <label>Monto ($)</label>
-        <input type="number" id="facMonto" placeholder="0,00" step="0.01" inputmode="decimal">
+        <input type="text" id="facMonto" placeholder="0,00" inputmode="decimal">
       </div>
       <div>
         <label>Fecha de ingreso</label>
@@ -3031,7 +3031,7 @@ function renderChequesCalQuickAdd() {
     </div>
     <div class="grid4 mb16">
       <div><label>Proveedor</label><input type="text" id="calQAProveedor" list="chequesProveedoresList" placeholder="Ej: Emporio"></div>
-      <div><label>Monto ($)</label><input type="number" id="calQAMonto" placeholder="0,00" step="0.01" inputmode="decimal" oninput="renderSumaCalQA()"></div>
+      <div><label>Monto ($)</label><input type="text" id="calQAMonto" placeholder="0,00" inputmode="decimal" oninput="renderSumaCalQA()"></div>
       <div><label>N° de cheque</label><input type="text" id="calQANumero" placeholder="Opcional"></div>
       <div><label>Fecha de emisión (opcional)</label><div style="display:flex;gap:6px;"><input type="date" id="calQAFechaEmision" value="${todayStr()}" style="flex:1;"><button type="button" class="btn btn-ghost btn-sm" onclick="document.getElementById('calQAFechaEmision').value=todayStr()">Hoy</button></div></div>
     </div>
@@ -3049,7 +3049,7 @@ function renderChequesCalQuickAdd() {
 }
 function renderSumaCalQA() {
   const el = document.getElementById('calQASuma');
-  if(el) el.innerHTML = sumaBorradorHtml(parseFloat((document.getElementById('calQAMonto')||{}).value)||0, 0);
+  if(el) el.innerHTML = sumaBorradorHtml(leerMonto((document.getElementById('calQAMonto')||{}).value), 0);
 }
 
 // Edición de un cheque en borrador ahí mismo, en la fila de la tabla del día.
@@ -3063,7 +3063,7 @@ function filaEdicionBorradorHtml(c) {
     <td>${inp('cdeFechaEmision','date',c.fechaEmision)}</td>
     <td>${inp('cdeFechaPago','date',c.fechaPago)}</td>
     <td><span style="color:var(--gold);font-size:11px;font-weight:700;">📝 EDITANDO</span></td>
-    <td class="num">${inp('cdeMonto','number',c.monto,'step="0.01" inputmode="decimal" style="text-align:right;"')}</td>
+    <td class="num">${inp('cdeMonto','text',c.monto,'inputmode="decimal" style="text-align:right;"')}</td>
     <td style="white-space:nowrap;text-align:right;">
       <button class="btn btn-green btn-sm" onclick="guardarBorradorEnDia(${c.id})">💾 Guardar</button>
       <button class="btn btn-ghost btn-sm" onclick="cancelarBorradorEnDia()" title="Cancelar">✕</button>
@@ -3084,7 +3084,7 @@ function guardarBorradorEnDia(id) {
   const c = state.chequesBorrador.find(x=>x.id===id);
   if(!c) { cancelarBorradorEnDia(); return; }
   const val = k => document.getElementById(k).value.trim();
-  const proveedor = val('cdeProveedor'), monto = parseFloat(val('cdeMonto'))||0, fechaPago = val('cdeFechaPago');
+  const proveedor = val('cdeProveedor'), monto = leerMonto(val('cdeMonto')), fechaPago = val('cdeFechaPago');
   if(!proveedor || !monto || !fechaPago) { alert('Completá proveedor, monto y vencimiento.'); return; }
   Object.assign(c, {proveedor, monto, numero: val('cdeNumero'), fechaEmision: val('cdeFechaEmision'), fechaPago, nota: val('cdeNota')});
   chequeDiaEditandoId = null;
@@ -3145,7 +3145,7 @@ function detalleChequesDiaHtml(cheques, borradores, fechaLinda) {
 
 function chequesCalGuardarAltaRapida() {
   const proveedor = document.getElementById('calQAProveedor').value.trim();
-  const monto = parseFloat(document.getElementById('calQAMonto').value)||0;
+  const monto = leerMonto(document.getElementById('calQAMonto').value);
   const numero = document.getElementById('calQANumero').value.trim();
   const fechaEmision = document.getElementById('calQAFechaEmision').value;
   const nota = document.getElementById('calQANota').value.trim();
@@ -3165,7 +3165,7 @@ let chequeEditandoId = null;
 
 function guardarCheque() {
   const proveedor = document.getElementById('chqProveedor').value.trim();
-  const monto = parseFloat(document.getElementById('chqMonto').value)||0;
+  const monto = leerMonto(document.getElementById('chqMonto').value);
   const numero = document.getElementById('chqNumero').value.trim();
   const fechaPago = document.getElementById('chqFechaPago').value;
   const fechaEmision = document.getElementById('chqFechaEmision').value;
@@ -3224,7 +3224,7 @@ let chequeBorradorEditandoId = null;
 
 function guardarChequeBorrador() {
   const proveedor = document.getElementById('chqbProveedor').value.trim();
-  const monto = parseFloat(document.getElementById('chqbMonto').value)||0;
+  const monto = leerMonto(document.getElementById('chqbMonto').value);
   const numero = document.getElementById('chqbNumero').value.trim();
   const fechaPago = document.getElementById('chqbFechaPago').value;
   const fechaEmision = document.getElementById('chqbFechaEmision').value;
@@ -3353,7 +3353,7 @@ function renderSumaBorrador() {
   if(!el) return;
   let enEdicion = 0;
   if(chequeBorradorEditandoId) { const c = state.chequesBorrador.find(x=>x.id===chequeBorradorEditandoId); if(c) enEdicion = c.monto; }
-  el.innerHTML = sumaBorradorHtml(parseFloat(document.getElementById('chqbMonto').value)||0, enEdicion);
+  el.innerHTML = sumaBorradorHtml(leerMonto(document.getElementById('chqbMonto').value), enEdicion);
 }
 // "Llevás N cheques por $X" del borrador entero, y cómo quedaría con el monto que se está tipeando.
 function sumaBorradorHtml(tipeado, enEdicion) {
@@ -3599,9 +3599,21 @@ function saldoGeneradoPor(pagoId) { return pagoId ? state.facturas.find(x=>x.tip
 function facturaVencida(f) { return f.estado!=='pagada' && !esNC(f) && f.fechaVence && diasHasta(f.fechaVence)<0; }
 function pesos2(n) { return (n<0?'−':'') + '$' + Math.abs(n||0).toLocaleString('es-AR',{minimumFractionDigits:2,maximumFractionDigits:2}); }
 
+// Monto escrito a la argentina: "1500,50", "1.500,50", "12.500" o "1500.50".
+function leerMonto(v) {
+  if(typeof v === 'number') return isFinite(v) ? v : 0;
+  let t = String(v||'').trim().replace(/[$\s]/g, '');
+  if(!t) return 0;
+  const coma = t.includes(','), punto = t.includes('.');
+  if(coma && punto) t = t.lastIndexOf(',') > t.lastIndexOf('.') ? t.replace(/\./g, '').replace(',', '.') : t.replace(/,/g, '');
+  else if(coma) t = t.replace(/,/g, (m, i) => i === t.lastIndexOf(',') ? '.' : '');
+  else if(punto) { const partes = t.split('.'); if(partes.length > 2 || partes[1].length === 3) t = t.replace(/\./g, ''); }
+  const n = parseFloat(t);
+  return isFinite(n) ? n : 0;
+}
 function guardarFactura() {
   const proveedor = document.getElementById('facProveedor').value.trim();
-  const monto = parseFloat(document.getElementById('facMonto').value)||0;
+  const monto = leerMonto(document.getElementById('facMonto').value);
   const fechaIngreso = document.getElementById('facFechaIngreso').value;
   let fechaVence = document.getElementById('facFechaVence').value;
   const tipo = document.getElementById('facTipo').value;
@@ -3805,8 +3817,8 @@ function procesarLote() {
 }
 function loteCompleto(it) {
   const r = it.r;
-  return it.estado==='listo' && (r.proveedor||'').trim() && parseFloat(r.total)>0 && r.fechaEmision && (r.fechaVencimiento || r.tipo==='nc')
-    && !avisosComprobante({ ...r, total: parseFloat(r.total)||0 }, it.id).dup;
+  return it.estado==='listo' && (r.proveedor||'').trim() && leerMonto(r.total)>0 && r.fechaEmision && (r.fechaVencimiento || r.tipo==='nc')
+    && !avisosComprobante({ ...r, total: leerMonto(r.total)||0 }, it.id).dup;
 }
 function renderLote() {
   const cont = document.getElementById('facLote');
@@ -3836,7 +3848,7 @@ function renderLoteItem(it) {
   if(!el) return;
   const caja = (borde, html) => `<div style="padding:10px 12px;border:1px solid ${borde};border-radius:8px;margin-bottom:8px;font-size:12px;">${html}</div>`;
   const titulo = `<span style="color:var(--muted);">${escHtml(it.nombre)}</span>`;
-  if(it.estado==='agregado') { el.innerHTML = caja('var(--border)', `✓ Agregada: <b>${escHtml(compLabel(it.r))}</b> de <b>${escHtml(it.r.proveedor)}</b> por <b>${pesos2(parseFloat(it.r.total)||0)}</b>`); return; }
+  if(it.estado==='agregado') { el.innerHTML = caja('var(--border)', `✓ Agregada: <b>${escHtml(compLabel(it.r))}</b> de <b>${escHtml(it.r.proveedor)}</b> por <b>${pesos2(leerMonto(it.r.total)||0)}</b>`); return; }
   if(it.estado==='cola' || it.estado==='leyendo') { el.innerHTML = caja('var(--border)', `${titulo} — ${it.estado==='cola' ? '⏸ En cola…' : it.msg}`); return; }
   if(it.estado==='error' || it.estado==='ilegible') {
     el.innerHTML = caja('var(--red)', `${titulo} — <span style="color:${it.estado==='error'?'var(--red)':'var(--yellow)'}">${it.msg}</span>
@@ -3844,7 +3856,7 @@ function renderLoteItem(it) {
     return;
   }
   const r = it.r;
-  const { avisos, dup } = avisosComprobante({ ...r, total: parseFloat(r.total)||0 }, it.id);
+  const { avisos, dup } = avisosComprobante({ ...r, total: leerMonto(r.total)||0 }, it.id);
   const campo = (lbl, k, tipo, extra='') => `<div><label style="font-size:10px;">${lbl}</label><input type="${tipo}" value="${escHtml(r[k]||'')}" ${extra} oninput="setCampoLote('${it.id}','${k}',this.value)" style="width:100%;"></div>`;
   el.innerHTML = caja(dup ? 'var(--red)' : avisos.length ? 'var(--yellow)' : 'var(--green)', `
     <div style="margin-bottom:6px;">${titulo}</div>
@@ -3853,7 +3865,7 @@ function renderLoteItem(it) {
       <div><label style="font-size:10px;">Comprobante</label><select onchange="setCampoLote('${it.id}','tipo',this.value)" style="width:100%;">
         ${['factura','remito','nc'].map(t=>`<option value="${t}" ${r.tipo===t?'selected':''}>${TIPOS_COMP[t]}</option>`).join('')}</select></div>
       ${campo('N°','numero','text')}
-      ${campo('Total ($)','total','number','step="0.01" inputmode="decimal"')}
+      ${campo('Total ($)','total','text','inputmode="decimal"')}
       ${campo('Fecha','fechaEmision','date')}
       ${campo('Vencimiento','fechaVencimiento','date')}
     </div>
@@ -3875,7 +3887,7 @@ function agregarDelLote(id, silencioso) {
   const it = loteFotos.find(x=>x.id===id);
   if(!it || it.estado!=='listo') return false;
   const r = it.r;
-  const proveedor = (r.proveedor||'').trim(), monto = r2(parseFloat(r.total)||0), fechaIngreso = r.fechaEmision;
+  const proveedor = (r.proveedor||'').trim(), monto = r2(leerMonto(r.total)||0), fechaIngreso = r.fechaEmision;
   let fechaVence = r.fechaVencimiento;
   if(r.tipo==='nc' && !fechaVence) fechaVence = fechaIngreso;
   if(!proveedor || !monto || !fechaIngreso || !fechaVence) { if(!silencioso) alert('Completá proveedor, total, fecha y vencimiento.'); return false; }
@@ -4091,7 +4103,7 @@ function filaMedioHtml(monto) {
       <option value="">Elegí…</option>
       ${Object.entries(FORMAS_PAGO).map(([k,v])=>`<option value="${k}">${v}</option>`).join('')}
     </select>
-    <input class="mp-monto" type="number" step="0.01" inputmode="decimal" placeholder="Monto" value="${monto||''}" oninput="this.closest('[data-medio]').dataset.tocado='1';actualizarAsignadoPago()" style="flex:1;min-width:130px;">
+    <input class="mp-monto" type="text" inputmode="decimal" placeholder="Monto" value="${monto||''}" oninput="this.closest('[data-medio]').dataset.tocado='1';actualizarAsignadoPago()" style="flex:1;min-width:130px;">
     <input class="mp-detalle" type="text" placeholder="Detalle (ej: cheques N° 2037 y 2038)" style="flex:2;min-width:180px;">
     <button class="btn btn-ghost btn-sm" onclick="quitarMedioPago(this)" title="Quitar">🗑</button>
   </div>`;
@@ -4100,7 +4112,7 @@ function totalPagoSeleccion() { return r2(sumaNeta(state.facturas.filter(f=>deud
 function leerMediosPago() {
   return [...document.querySelectorAll('#deudaPagoMedios [data-medio]')].map(row=>({
     forma: row.querySelector('.mp-forma').value,
-    monto: r2(parseFloat(row.querySelector('.mp-monto').value)||0),
+    monto: r2(leerMonto(row.querySelector('.mp-monto').value)),
     detalle: row.querySelector('.mp-detalle').value.trim(),
   }));
 }
