@@ -3611,6 +3611,23 @@ function leerMonto(v) {
   const n = parseFloat(t);
   return isFinite(n) ? n : 0;
 }
+// Busca si una factura ya está cargada: mismo proveedor, tipo y N° (sin
+// importar ceros ni guiones) o, si no tiene N°, mismo monto y fecha.
+function buscarFacturaRepetida(c, excluirId) {
+  const num = partesNumero(c.numero).join('-');
+  const monto = r2(leerMonto(c.monto ?? c.total));
+  return (state.facturas||[]).map(f=>{
+    if(f.id===excluirId || provKey(f.proveedor)!==provKey(c.proveedor) || (f.tipo||'factura')!==(c.tipo||'factura')) return null;
+    const fnum = partesNumero(f.numero).join('-');
+    if(num && fnum) return num===fnum ? {f, seguro:true} : null;
+    if(!num && monto && r2(f.monto)===monto && f.fechaIngreso===(c.fechaIngreso||c.fechaEmision)) return {f, seguro:false};
+    return null;
+  }).find(Boolean) || null;
+}
+function textoRepetida(rep) {
+  const f = rep.f;
+  return `${compLabel(f)} de ${f.proveedor} por ${pesos2(f.monto)} (ingresó el ${fmtFecha(f.fechaIngreso)}, ${f.estado==='pagada' ? 'PAGADA el '+fmtFecha(f.fechaPagada) : 'pendiente'})`;
+}
 function guardarFactura() {
   const proveedor = document.getElementById('facProveedor').value.trim();
   const monto = leerMonto(document.getElementById('facMonto').value);
@@ -3623,6 +3640,9 @@ function guardarFactura() {
   if(tipo==='nc' && !fechaVence) fechaVence = fechaIngreso; // una NC no vence: se aplica en el próximo pago
   if(!proveedor || !monto || !fechaIngreso || !fechaVence) { alert('Completá proveedor, monto, fecha de ingreso y vencimiento.'); return; }
   if(fechaVence < fechaIngreso && !confirm('El vencimiento es anterior a la fecha de ingreso. ¿Guardar igual?')) return;
+  const repetida = buscarFacturaRepetida({proveedor, tipo, numero, monto, fechaIngreso}, facturaEditandoId);
+  if(repetida && !confirm([repetida.seguro ? '⚠ Esta factura YA ESTÁ CARGADA:' : '⚠ Puede estar repetida (mismo proveedor, monto y fecha):',
+    textoRepetida(repetida), '¿Guardarla igual?'].join(String.fromCharCode(10, 10)))) return;
   // Elegir una forma de pago = la factura queda pagada (hoy, o la fecha que ya tenía).
   const pago = f => formaPago
     ? {estado:'pagada', formaPago, fechaPagada: (f && f.fechaPagada) || todayStr()}
@@ -3743,9 +3763,10 @@ function avisosComprobante(r, excluirLoteId) {
   if(!r.fechaVencimiento && r.tipo!=='nc') avisos.push('el comprobante no trae vencimiento de pago: completalo');
   if(!r.fechaEmision) avisos.push('no se leyó la fecha: quedó la de hoy');
   if(r.observaciones) avisos.push(escHtml(r.observaciones));
-  const yaCargado = r.numero && (state.facturas||[]).find(f=>provKey(f.proveedor)===provKey(r.proveedor) && (f.numero||'').trim()===r.numero && f.tipo===r.tipo);
-  const enLote = !yaCargado && r.numero && loteFotos.find(it=>it.id!==excluirLoteId && (it.estado==='listo' || it.estado==='agregado') && it.r && provKey(it.r.proveedor)===provKey(r.proveedor) && (it.r.numero||'').trim()===r.numero && it.r.tipo===r.tipo);
-  if(yaCargado) avisos.push(`<b style="color:var(--red)">ojo: ya tenés cargado este comprobante (${escHtml(compLabel(yaCargado))}, ${pesos2(yaCargado.monto)})</b>`);
+  const repF = buscarFacturaRepetida({proveedor: r.proveedor, tipo: r.tipo, numero: r.numero, total: r.total, fechaEmision: r.fechaEmision});
+  const yaCargado = repF && repF.f;
+  const enLote = !yaCargado && partesNumero(r.numero).length && loteFotos.find(it=>it.id!==excluirLoteId && it.estado==='listo' && it.r && provKey(it.r.proveedor)===provKey(r.proveedor) && partesNumero(it.r.numero).join('-')===partesNumero(r.numero).join('-') && it.r.tipo===r.tipo);
+  if(yaCargado) avisos.push(`<b style="color:var(--red)">ojo: ${repF.seguro ? 'ya tenés cargado este comprobante' : 'puede estar repetido'}: ${escHtml(textoRepetida(repF))}</b>`);
   else if(enLote) avisos.push(`<b style="color:var(--red)">ojo: está repetido en esta tanda de fotos</b>`);
   return { avisos, dup: !!(yaCargado || enLote) };
 }
