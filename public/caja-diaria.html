@@ -4414,7 +4414,7 @@ function updateBancosBadge() {
 // state.fondosPagos = [{id, fondo, fecha, monto, nota}]
 // ============================================================
 const FONDOS = [
-  {key:'epe',        nombre:'EPE',            re:/\bepe\b/},
+  {key:'epe',        nombre:'EPE',            re:/^\s*epe\s*$/}, // solo "EPE" a secas: "EPE Matías" es otra cosa
   {key:'serenisima', nombre:'La Serenísima',  re:/serenisima/},
   {key:'obrasocial', nombre:'Obra Social',    re:/obra\s*social/},
 ];
