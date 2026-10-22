@@ -820,9 +820,10 @@ tr:hover td { background:var(--surface2); }
     <div class="card-title" style="display:flex;align-items:center;justify-content:space-between;flex-wrap:wrap;row-gap:8px;">
       <span style="display:flex;align-items:center;gap:8px;"><div class="dot"></div>NUEVA FACTURA / REMITO</span>
       <button class="btn btn-gold btn-sm" id="btnFotoFactura" onclick="document.getElementById('facFotoInput').click()">📷 Cargar desde foto</button>
-      <input type="file" id="facFotoInput" accept="image/*,application/pdf" style="display:none;" onchange="leerFotoFactura(this)">
+      <input type="file" id="facFotoInput" accept="image/*,application/pdf" multiple style="display:none;" onchange="leerFotoFactura(this)">
     </div>
     <div id="facFotoEstado" style="display:none;font-size:12px;margin:-4px 0 14px;padding:10px 12px;border-radius:8px;background:var(--surface2);border:1px solid var(--border);"></div>
+    <div id="facLote" style="display:none;margin:-4px 0 16px;"></div>
     <div class="grid4 mb16">
       <div>
         <label>Proveedor</label>
@@ -3686,44 +3687,68 @@ function archivoABase64(file) {
     r.readAsDataURL(file);
   });
 }
+// Prepara la foto (achicada) o el PDF para mandar a la IA.
+async function prepararArchivoComprobante(file) {
+  if(file.type === 'application/pdf') {
+    if(file.size > 3 * 1024 * 1024) throw new Error('El PDF es muy pesado (máximo 3 MB). Probá con una foto.');
+    return { data: await archivoABase64(file), mediaType: 'application/pdf' };
+  }
+  return achicarImagen(file, 1800, 0.85);
+}
+function proveedoresConocidos() {
+  return [...new Set([...(state.facturas||[]), ...(state.cheques||[])].map(x=>(x.proveedor||'').trim()).filter(Boolean))];
+}
+// Lee un comprobante con la IA. La IA gratuita de Google a veces está
+// saturada: se reintenta sola unas veces (esperando un poco más cada vez).
+// onEstado(html, color) informa el avance. Devuelve lo leído o tira error.
+async function leerComprobanteIA(file, onEstado) {
+  const archivo = await prepararArchivoComprobante(file);
+  const ESPERAS = [3, 8, 15, 25];
+  let res, r;
+  for(let intento = 0; ; intento++) {
+    res = await fetch('/api/factura-foto', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ pin: CAJA_PIN, data: archivo.data, mediaType: archivo.mediaType, proveedores: proveedoresConocidos() }),
+    }).catch(()=>null);
+    r = res ? await res.json().catch(()=>({})) : {};
+    const reintentable = !res || [429, 502, 503, 504].includes(res.status);
+    if((res && res.ok) || !reintentable || intento >= ESPERAS.length) break;
+    for(let s = ESPERAS[intento]; s > 0; s--) {
+      onEstado(`⏳ La IA está ocupada, reintento automático ${intento+2} de ${ESPERAS.length+1} en ${s} s… no hace falta tocar nada.`, 'var(--yellow)');
+      await new Promise(ok=>setTimeout(ok, 1000));
+    }
+    onEstado(`⏳ Leyendo (intento ${intento+2} de ${ESPERAS.length+1})…`);
+  }
+  if(!res) throw new Error('Sin conexión: revisá internet y probá de nuevo');
+  if(!res.ok) throw new Error((r.error || ('Error ' + res.status)) + (res.status===503 ? ' (ya se reintentó solo varias veces)' : ''));
+  return r;
+}
+// Avisos de lo leído: lo que falta completar y si ya está cargado.
+function avisosComprobante(r, excluirLoteId) {
+  const avisos = [];
+  if(!r.total) avisos.push('no se leyó el total: completalo');
+  if(!r.fechaVencimiento && r.tipo!=='nc') avisos.push('el comprobante no trae vencimiento de pago: completalo');
+  if(!r.fechaEmision) avisos.push('no se leyó la fecha: quedó la de hoy');
+  if(r.observaciones) avisos.push(escHtml(r.observaciones));
+  const yaCargado = r.numero && (state.facturas||[]).find(f=>provKey(f.proveedor)===provKey(r.proveedor) && (f.numero||'').trim()===r.numero && f.tipo===r.tipo);
+  const enLote = !yaCargado && r.numero && loteFotos.find(it=>it.id!==excluirLoteId && (it.estado==='listo' || it.estado==='agregado') && it.r && provKey(it.r.proveedor)===provKey(r.proveedor) && (it.r.numero||'').trim()===r.numero && it.r.tipo===r.tipo);
+  if(yaCargado) avisos.push(`<b style="color:var(--red)">ojo: ya tenés cargado este comprobante (${escHtml(compLabel(yaCargado))}, ${pesos2(yaCargado.monto)})</b>`);
+  else if(enLote) avisos.push(`<b style="color:var(--red)">ojo: está repetido en esta tanda de fotos</b>`);
+  return { avisos, dup: !!(yaCargado || enLote) };
+}
+
 async function leerFotoFactura(input) {
-  const file = input.files && input.files[0];
+  const files = [...(input.files || [])];
   input.value = '';
-  if(!file) return;
+  if(!files.length) return;
+  if(files.length > 1) { agregarAlLote(files); return; }
+  const file = files[0];
   const btn = document.getElementById('btnFotoFactura');
   try {
     btn.disabled = true;
     estadoFotoFactura('⏳ Leyendo el comprobante… puede tardar hasta medio minuto, no cierres la pantalla.');
-    let archivo;
-    if(file.type === 'application/pdf') {
-      if(file.size > 3 * 1024 * 1024) throw new Error('El PDF es muy pesado (máximo 3 MB). Probá con una foto.');
-      archivo = { data: await archivoABase64(file), mediaType: 'application/pdf' };
-    } else {
-      archivo = await achicarImagen(file, 1800, 0.85);
-    }
-    const proveedores = [...new Set([...(state.facturas||[]), ...(state.cheques||[])].map(x=>(x.proveedor||'').trim()).filter(Boolean))];
-    // La IA gratuita de Google a veces está saturada: se reintenta sola
-    // unas veces (esperando un poco más cada vez) en vez de que haya que
-    // volver a sacar la foto.
-    const ESPERAS = [3, 8, 15, 25];
-    let res, r;
-    for(let intento = 0; ; intento++) {
-      res = await fetch('/api/factura-foto', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ pin: CAJA_PIN, data: archivo.data, mediaType: archivo.mediaType, proveedores }),
-      }).catch(()=>null);
-      r = res ? await res.json().catch(()=>({})) : {};
-      const reintentable = !res || [429, 502, 503, 504].includes(res.status);
-      if((res && res.ok) || !reintentable || intento >= ESPERAS.length) break;
-      for(let s = ESPERAS[intento]; s > 0; s--) {
-        estadoFotoFactura(`⏳ La IA está ocupada, reintento automático ${intento+2} de ${ESPERAS.length+1} en ${s} s… no hace falta tocar nada.`, 'var(--yellow)');
-        await new Promise(ok=>setTimeout(ok, 1000));
-      }
-      estadoFotoFactura(`⏳ Leyendo el comprobante (intento ${intento+2} de ${ESPERAS.length+1})…`);
-    }
-    if(!res) throw new Error('Sin conexión: revisá internet y probá de nuevo');
-    if(!res.ok) throw new Error((r.error || ('Error ' + res.status)) + (res.status===503 ? ' (ya se reintentó solo varias veces)' : ''));
+    const r = await leerComprobanteIA(file, estadoFotoFactura);
     if(!r.legible) { estadoFotoFactura('⚠ No pude leer un comprobante en esa foto. Probá con más luz, de frente y que se vea entero el total.', 'var(--yellow)'); return; }
 
     // Completa el formulario como comprobante nuevo
@@ -3734,14 +3759,7 @@ async function leerFotoFactura(input) {
     document.getElementById('facMonto').value = r.total || '';
     document.getElementById('facFechaIngreso').value = r.fechaEmision || todayStr();
     document.getElementById('facFechaVence').value = r.fechaVencimiento || '';
-
-    const avisos = [];
-    if(!r.total) avisos.push('no se leyó el total: completalo');
-    if(!r.fechaVencimiento && r.tipo!=='nc') avisos.push('el comprobante no trae vencimiento de pago: completalo');
-    if(!r.fechaEmision) avisos.push('no se leyó la fecha: quedó la de hoy');
-    if(r.observaciones) avisos.push(escHtml(r.observaciones));
-    const dup = r.numero && (state.facturas||[]).find(f=>provKey(f.proveedor)===provKey(r.proveedor) && (f.numero||'').trim()===r.numero && f.tipo===r.tipo);
-    if(dup) avisos.push(`<b style="color:var(--red)">ojo: ya tenés cargado este comprobante (${escHtml(compLabel(dup))}, ${pesos2(dup.monto)})</b>`);
+    const { avisos, dup } = avisosComprobante(r);
     estadoFotoFactura(`✓ Leído: <b>${escHtml(compLabel(r))}</b> de <b>${escHtml(r.proveedor||'¿proveedor?')}</b> por <b>${pesos2(r.total)}</b>. Revisá los datos y tocá <b>+ Agregar comprobante</b>.`
       + (avisos.length ? `<br><span style="color:var(--yellow)">⚠ ${avisos.join(' · ')}</span>` : ''), dup ? 'var(--red)' : avisos.length ? 'var(--yellow)' : 'var(--green)');
     document.getElementById('facProveedor').scrollIntoView({behavior:'smooth', block:'center'});
@@ -3750,6 +3768,144 @@ async function leerFotoFactura(input) {
   } finally {
     btn.disabled = false;
   }
+}
+
+// ── VARIAS FOTOS JUNTAS ──
+// Cada foto entra a una cola; se leen de a dos en segundo plano y cada una
+// aparece en la lista con sus datos editables para agregarla con un toque.
+let loteFotos = [];        // {id, nombre, file, estado: cola|leyendo|listo|ilegible|error|agregado, msg, color, r}
+let loteActivos = 0;
+const LOTE_PARALELO = 2;
+
+function agregarAlLote(files) {
+  files.forEach((file, k)=>loteFotos.push({ id: 'L' + Date.now() + '_' + k, nombre: file.name || 'foto', file, estado: 'cola', msg: '', r: null }));
+  renderLote();
+  document.getElementById('facLote').scrollIntoView({behavior:'smooth', block:'start'});
+  procesarLote();
+}
+function procesarLote() {
+  while(loteActivos < LOTE_PARALELO) {
+    const it = loteFotos.find(x=>x.estado==='cola');
+    if(!it) break;
+    loteActivos++;
+    it.estado = 'leyendo'; it.msg = '⏳ Leyendo…';
+    renderLoteItem(it);
+    leerComprobanteIA(it.file, (html)=>{ it.msg = html; renderLoteItem(it); })
+      .then(r=>{
+        it.file = null; // ya no hace falta la foto
+        if(!r.legible) { it.estado = 'ilegible'; it.msg = '⚠ No pude leer un comprobante en esa foto. Probá de nuevo con más luz y de frente.'; return; }
+        it.estado = 'listo';
+        it.r = { proveedor: r.proveedor || '', tipo: r.tipo || 'factura', numero: r.numero || '', total: r.total || '', fechaEmision: r.fechaEmision || todayStr(),
+                 fechaVencimiento: r.fechaVencimiento || '', observaciones: r.observaciones || '' };
+      })
+      .catch(e=>{ it.estado = 'error'; it.msg = '✗ ' + escHtml(e.message || 'No se pudo leer la foto'); })
+      .finally(()=>{ loteActivos--; renderLoteItem(it); renderLoteCabecera(); procesarLote(); });
+  }
+  renderLoteCabecera();
+}
+function loteCompleto(it) {
+  const r = it.r;
+  return it.estado==='listo' && (r.proveedor||'').trim() && parseFloat(r.total)>0 && r.fechaEmision && (r.fechaVencimiento || r.tipo==='nc')
+    && !avisosComprobante({ ...r, total: parseFloat(r.total)||0 }, it.id).dup;
+}
+function renderLote() {
+  const cont = document.getElementById('facLote');
+  if(!loteFotos.length) { cont.style.display = 'none'; cont.innerHTML = ''; return; }
+  cont.style.display = 'block';
+  cont.innerHTML = `<div id="facLoteHead"></div>` + loteFotos.map(it=>`<div id="lote_${it.id}"></div>`).join('');
+  renderLoteCabecera();
+  loteFotos.forEach(renderLoteItem);
+}
+function renderLoteCabecera() {
+  const el = document.getElementById('facLoteHead');
+  if(!el) return;
+  const cuenta = e => loteFotos.filter(x=>x.estado===e).length;
+  const pendientes = cuenta('cola') + cuenta('leyendo');
+  const completas = loteFotos.filter(loteCompleto).length;
+  const problemas = cuenta('error') + cuenta('ilegible');
+  el.innerHTML = `<div style="display:flex;align-items:center;justify-content:space-between;flex-wrap:wrap;gap:8px;padding:10px 12px;border:1px solid var(--gold);border-radius:8px;background:var(--surface2);margin-bottom:8px;">
+    <span style="font-size:12px;">📷 <b>${loteFotos.length}</b> foto(s)${pendientes?` · ⏳ leyendo ${pendientes}`:''}${cuenta('listo')?` · ✓ ${cuenta('listo')} para revisar`:''}${cuenta('agregado')?` · ${cuenta('agregado')} agregada(s)`:''}${problemas?` · <span style="color:var(--red)">${problemas} con problema</span>`:''}</span>
+    <span style="display:flex;gap:6px;flex-wrap:wrap;">
+      ${completas?`<button class="btn btn-green btn-sm" onclick="agregarTodasLote()">+ Agregar todas las completas (${completas})</button>`:''}
+      <button class="btn btn-ghost btn-sm" onclick="cerrarLote()" ${pendientes?'disabled title="Esperá a que terminen de leerse"':''}>✕ Cerrar lista</button>
+    </span>
+  </div>`;
+}
+function renderLoteItem(it) {
+  const el = document.getElementById('lote_' + it.id);
+  if(!el) return;
+  const caja = (borde, html) => `<div style="padding:10px 12px;border:1px solid ${borde};border-radius:8px;margin-bottom:8px;font-size:12px;">${html}</div>`;
+  const titulo = `<span style="color:var(--muted);">${escHtml(it.nombre)}</span>`;
+  if(it.estado==='agregado') { el.innerHTML = caja('var(--border)', `✓ Agregada: <b>${escHtml(compLabel(it.r))}</b> de <b>${escHtml(it.r.proveedor)}</b> por <b>${pesos2(parseFloat(it.r.total)||0)}</b>`); return; }
+  if(it.estado==='cola' || it.estado==='leyendo') { el.innerHTML = caja('var(--border)', `${titulo} — ${it.estado==='cola' ? '⏸ En cola…' : it.msg}`); return; }
+  if(it.estado==='error' || it.estado==='ilegible') {
+    el.innerHTML = caja('var(--red)', `${titulo} — <span style="color:${it.estado==='error'?'var(--red)':'var(--yellow)'}">${it.msg}</span>
+      <button class="btn btn-ghost btn-sm" style="margin-left:8px;" onclick="descartarLote('${it.id}')">✕ Quitar</button>`);
+    return;
+  }
+  const r = it.r;
+  const { avisos, dup } = avisosComprobante({ ...r, total: parseFloat(r.total)||0 }, it.id);
+  const campo = (lbl, k, tipo, extra='') => `<div><label style="font-size:10px;">${lbl}</label><input type="${tipo}" value="${escHtml(r[k]||'')}" ${extra} oninput="setCampoLote('${it.id}','${k}',this.value)" style="width:100%;"></div>`;
+  el.innerHTML = caja(dup ? 'var(--red)' : avisos.length ? 'var(--yellow)' : 'var(--green)', `
+    <div style="margin-bottom:6px;">${titulo}</div>
+    <div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(130px,1fr));gap:8px;">
+      ${campo('Proveedor','proveedor','text','list="chequesProveedoresList"')}
+      <div><label style="font-size:10px;">Comprobante</label><select onchange="setCampoLote('${it.id}','tipo',this.value)" style="width:100%;">
+        ${['factura','remito','nc'].map(t=>`<option value="${t}" ${r.tipo===t?'selected':''}>${TIPOS_COMP[t]}</option>`).join('')}</select></div>
+      ${campo('N°','numero','text')}
+      ${campo('Total ($)','total','number','step="0.01" inputmode="decimal"')}
+      ${campo('Fecha','fechaEmision','date')}
+      ${campo('Vencimiento','fechaVencimiento','date')}
+    </div>
+    ${avisos.length ? `<div style="color:var(--yellow);margin-top:6px;">⚠ ${avisos.join(' · ')}</div>` : ''}
+    <div style="display:flex;gap:6px;margin-top:8px;flex-wrap:wrap;">
+      <button class="btn btn-gold btn-sm" onclick="agregarDelLote('${it.id}')">+ Agregar</button>
+      <button class="btn btn-ghost btn-sm" onclick="descartarLote('${it.id}')">✕ Descartar</button>
+    </div>`);
+}
+// Al editar un campo solo se actualizan los datos (no se redibuja, para no perder el cursor).
+function setCampoLote(id, k, v) {
+  const it = loteFotos.find(x=>x.id===id);
+  if(!it || !it.r) return;
+  it.r[k] = v;
+  if(k==='tipo') renderLoteItem(it);
+  renderLoteCabecera();
+}
+function agregarDelLote(id, silencioso) {
+  const it = loteFotos.find(x=>x.id===id);
+  if(!it || it.estado!=='listo') return false;
+  const r = it.r;
+  const proveedor = (r.proveedor||'').trim(), monto = r2(parseFloat(r.total)||0), fechaIngreso = r.fechaEmision;
+  let fechaVence = r.fechaVencimiento;
+  if(r.tipo==='nc' && !fechaVence) fechaVence = fechaIngreso;
+  if(!proveedor || !monto || !fechaIngreso || !fechaVence) { if(!silencioso) alert('Completá proveedor, total, fecha y vencimiento.'); return false; }
+  if(!silencioso && avisosComprobante({ ...r, total: monto }, it.id).dup && !confirm('Este comprobante parece repetido. ¿Agregarlo igual?')) return false;
+  state.facturas.push({ id: Date.now() + Math.floor(Math.random()*1000), proveedor, monto, fechaIngreso, fechaVence, tipo: r.tipo, numero: (r.numero||'').trim(), nota: '',
+    estado:'pendiente', formaPago:'', fechaPagada:'', pagoId:'', pagoDetalle:'', pagoMedios:[] });
+  it.estado = 'agregado';
+  if(!silencioso) { save(); renderDeuda(); renderLoteItem(it); renderLoteCabecera(); }
+  return true;
+}
+function agregarTodasLote() {
+  let n = 0;
+  loteFotos.filter(loteCompleto).forEach(it=>{ if(agregarDelLote(it.id, true)) n++; });
+  save(); renderDeuda();
+  loteFotos.forEach(renderLoteItem); renderLoteCabecera();
+  const faltan = loteFotos.filter(x=>x.estado==='listo').length;
+  if(faltan) alert(`Se agregaron ${n}. Quedan ${faltan} para revisar: les falta algún dato o parecen repetidas.`);
+}
+function descartarLote(id) {
+  const it = loteFotos.find(x=>x.id===id);
+  if(!it) return;
+  if(it.estado==='listo' && !confirm('¿Descartar este comprobante leído?')) return;
+  loteFotos = loteFotos.filter(x=>x!==it);
+  renderLote();
+}
+function cerrarLote() {
+  const sinAgregar = loteFotos.filter(x=>x.estado==='listo').length;
+  if(sinAgregar && !confirm(`Hay ${sinAgregar} comprobante(s) leídos sin agregar. ¿Cerrar la lista igual?`)) return;
+  loteFotos = [];
+  renderLote();
 }
 
 // ── PAGO (uno o varios comprobantes del mismo proveedor juntos) ──
