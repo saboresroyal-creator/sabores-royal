@@ -4205,6 +4205,18 @@ function setDeudaFiltro(f, el) {
   el.classList.add('active');
   renderDeuda();
 }
+// Texto para comparar sin importar mayúsculas, acentos, espacios ni signos:
+// "for factory", "FORFACTORY S.A." y "For-Factory" quedan iguales.
+function textoBusqueda(s) { return String(s||'').normalize('NFD').replace(/[̀-ͯ]/g, '').toLowerCase().replace(/[^a-z0-9ñ]+/g, ''); }
+// Busca en proveedor, tipo y N° de comprobante, nota y monto, en TODAS las
+// facturas (sin importar el filtro ni el proveedor elegido en la tabla).
+function coincideBusquedaDeuda(f, q) {
+  const t = textoBusqueda(q);
+  if(t && [f.proveedor, compLabel(f), f.numero, f.nota].some(x=>textoBusqueda(x).includes(t))) return true;
+  if(mismoNumeroComprobante(f.numero, q)) return true;
+  const m = leerMonto(q);
+  return m >= 100 && Math.abs(r2(f.monto) - r2(m)) < 0.01;
+}
 function setDeudaBusqueda(val) {
   deudaBusqueda = (val||'').trim().toLowerCase();
   renderDeuda();
@@ -4310,7 +4322,7 @@ function renderDeuda() {
     else if(deudaFiltro==='vencida') list = list.filter(facturaVencida);
   }
   if(deudaProveedorSel) list = list.filter(f=>f.proveedor.trim().toUpperCase()===deudaProveedorSel.toUpperCase());
-  if(deudaBusqueda) list = list.filter(f=>(f.proveedor||'').toLowerCase().includes(deudaBusqueda) || (f.numero||'').toLowerCase().includes(deudaBusqueda) || compLabel(f).toLowerCase().includes(deudaBusqueda) || mismoNumeroComprobante(f.numero, deudaBusqueda));
+  if(deudaBusqueda) list = (state.facturas||[]).filter(f=>coincideBusquedaDeuda(f, deudaBusqueda));
   if(!list.length) {
     const hayFiltro = deudaFiltro!=='todas' || deudaProveedorSel || deudaBusqueda;
     container.innerHTML = `<div class="card" style="text-align:center;color:var(--muted);padding:40px;">No hay facturas${hayFiltro?' para este filtro':' cargadas'}.</div>`;
