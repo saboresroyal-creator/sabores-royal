@@ -50,6 +50,56 @@ Devolvé:
 
 No inventes datos: si un campo no se ve, dejalo vacío.`;
 
+// Modo detalle (Ingreso de mercadería en el admin): además de la cabecera,
+// los renglones de productos para sumar stock y actualizar costos.
+const DETALLE_EXTRA = `
+
+Además leé el DETALLE de productos del comprobante. Devolvé también:
+- letra: la letra del comprobante "A", "B", "C" o "" si no figura (en la A los precios suelen ser SIN IVA; en B y C, con IVA).
+- items: un renglón por cada producto facturado, en el orden en que aparecen, con:
+  - descripcion: el texto del producto tal como figura.
+  - codigo: el código del artículo o de barras si aparece; si no, "".
+  - cantidad: la cantidad facturada en ese renglón (número, tal como figura, sea por unidad o por bulto/caja).
+  - unidadesPorBulto: si el renglón se factura por bulto/caja/display y la descripción o una columna indica cuántas unidades trae (ej: "x12", "12x500g", "CAJA 24 UN"), ese número; si se factura por unidad o no se sabe, 1.
+  - precioUnitario: el precio unitario del renglón tal como figura (por la misma unidad que la cantidad), número con "." decimal.
+  - subtotal: el importe total del renglón ya con descuentos/bonificaciones del renglón, número; 0 si no figura.
+No incluyas renglones de impuestos, percepciones, fletes ni subtotales generales. Si no hay detalle de productos, items: [].`;
+const FORMATO_DETALLE = `, letra (string), items (array de objetos con descripcion (string), codigo (string), cantidad (number), unidadesPorBulto (number), precioUnitario (number), subtotal (number)).`;
+const DETALLE_SCHEMA = {
+  ...COMPROBANTE_SCHEMA,
+  properties: {
+    ...COMPROBANTE_SCHEMA.properties,
+    letra: { type: 'string' },
+    items: {
+      type: 'array',
+      items: {
+        type: 'object',
+        properties: {
+          descripcion: { type: 'string' }, codigo: { type: 'string' }, cantidad: { type: 'number' },
+          unidadesPorBulto: { type: 'number' }, precioUnitario: { type: 'number' }, subtotal: { type: 'number' },
+        },
+        required: ['descripcion', 'codigo', 'cantidad', 'unidadesPorBulto', 'precioUnitario', 'subtotal'],
+        additionalProperties: false,
+      },
+    },
+  },
+  required: [...COMPROBANTE_SCHEMA.required, 'letra', 'items'],
+};
+const num = (v) => { const n = typeof v === 'number' ? v : parseFloat(String(v || '').replace(/\./g, '').replace(',', '.')); return Number.isFinite(n) ? n : 0; };
+function normalizarDetalle(c) {
+  const base = normalizar(c);
+  const items = (Array.isArray(c && c.items) ? c.items : []).map((it) => ({
+    descripcion: String(it.descripcion || '').trim(),
+    codigo: String(it.codigo || '').trim(),
+    cantidad: typeof it.cantidad === 'number' ? it.cantidad : num(it.cantidad),
+    unidadesPorBulto: Math.max(1, Math.round(typeof it.unidadesPorBulto === 'number' ? it.unidadesPorBulto : num(it.unidadesPorBulto)) || 1),
+    precioUnitario: typeof it.precioUnitario === 'number' ? it.precioUnitario : num(it.precioUnitario),
+    subtotal: typeof it.subtotal === 'number' ? it.subtotal : num(it.subtotal),
+  })).filter((it) => it.descripcion && it.cantidad > 0).slice(0, 300);
+  const letra = String((c && c.letra) || '').trim().toUpperCase();
+  return { ...base, letra: ['A', 'B', 'C'].includes(letra) ? letra : '', items };
+}
+
 // Deja la respuesta de la IA (Claude o Gemini) con los tipos que espera el formulario.
 function normalizar(c) {
   c = c || {};
@@ -107,7 +157,7 @@ async function modelosGemini() {
 
 // Prueba de a dos modelos a la vez y se queda con el primero que responde:
 // si uno está saturado no hay que esperarlo para pasar al siguiente.
-async function leerConGemini(data, mediaType, pedido) {
+async function leerConGemini(data, mediaType, pedido, sistema) {
   const todos = await modelosGemini();
   const ahora = Date.now();
   const modelos = todos.filter((m) => !(_enPausa.get(m) > ahora));
@@ -123,7 +173,7 @@ async function leerConGemini(data, mediaType, pedido) {
         if (resta < 5000) break;
         const modelo = modelos[siguiente++];
         enCurso++;
-        geminiUnModelo(modelo, data, mediaType, pedido, Math.min(25000, resta))
+        geminiUnModelo(modelo, data, mediaType, pedido, Math.min(25000, resta), sistema)
           .then((r) => { if (!terminado) { terminado = true; resolve(r); } })
           .catch((e) => {
             ultimoError = e;
@@ -144,7 +194,7 @@ async function leerConGemini(data, mediaType, pedido) {
   });
 }
 
-async function geminiUnModelo(modelo, data, mediaType, pedido, espera) {
+async function geminiUnModelo(modelo, data, mediaType, pedido, espera, sistema) {
   const hasta = Date.now() + espera;
   const llamar = (generationConfig) => fetch(
     `https://generativelanguage.googleapis.com/v1beta/models/${encodeURIComponent(modelo)}:generateContent`,
@@ -152,7 +202,7 @@ async function geminiUnModelo(modelo, data, mediaType, pedido, espera) {
       method: 'POST',
       headers: { 'Content-Type': 'application/json', 'x-goog-api-key': process.env.GEMINI_API_KEY },
       body: JSON.stringify({
-        systemInstruction: { parts: [{ text: SYSTEM_PROMPT + FORMATO_JSON }] },
+        systemInstruction: { parts: [{ text: sistema }] },
         contents: [{ role: 'user', parts: [{ inline_data: { mime_type: mediaType, data } }, { text: pedido }] }],
         ...(generationConfig ? { generationConfig } : {}),
       }),
@@ -182,7 +232,7 @@ async function geminiUnModelo(modelo, data, mediaType, pedido, espera) {
 }
 
 // Claude a través del AI Gateway de Vercel (API compatible con la de Anthropic).
-async function leerConGateway(data, mediaType, pedido) {
+async function leerConGateway(data, mediaType, pedido, sistema) {
   const token = process.env.AI_GATEWAY_API_KEY || await getVercelOidcToken();
   const client = new Anthropic({ apiKey: token, baseURL: 'https://ai-gateway.vercel.sh' });
   const archivo = mediaType === 'application/pdf'
@@ -190,8 +240,8 @@ async function leerConGateway(data, mediaType, pedido) {
     : { type: 'image', source: { type: 'base64', media_type: mediaType, data } };
   const response = await client.messages.create({
     model: process.env.AI_GATEWAY_MODEL || 'anthropic/claude-opus-5.5',
-    max_tokens: 4000,
-    system: SYSTEM_PROMPT + FORMATO_JSON,
+    max_tokens: 16000,
+    system: sistema,
     messages: [{ role: 'user', content: [archivo, { type: 'text', text: pedido }] }],
   });
   if (response.stop_reason === 'refusal') throw Object.assign(new Error('No se pudo leer este comprobante'), { status: 422 });
@@ -211,18 +261,34 @@ async function pinValido(pin) {
   return res.ok;
 }
 
+// Sesión de admin del panel (Ingreso de mercadería): el token de Supabase
+// tiene que pertenecer a un usuario de admin_users.
+async function adminValido(token) {
+  if (!token || typeof token !== 'string') return false;
+  const res = await fetch(SUPABASE_URL + '/rest/v1/rpc/is_admin', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json', apikey: SUPABASE_ANON_KEY, Authorization: 'Bearer ' + token },
+    body: '{}',
+  });
+  return res.ok && (await res.json().catch(() => false)) === true;
+}
+
 export default async function handler(req, res) {
   if (req.method !== 'POST') {
     res.setHeader('Allow', 'POST');
     return res.status(405).json({ error: 'Method not allowed' });
   }
 
-  const { pin, data, mediaType, proveedores } = req.body || {};
+  const { pin, adminToken, data, mediaType, proveedores } = req.body || {};
+  const detalle = !!(req.body && req.body.detalle);
   try {
-    if (!(await pinValido(pin))) return res.status(401).json({ error: 'PIN de la caja inválido' });
+    const ok = adminToken ? await adminValido(adminToken) : await pinValido(pin);
+    if (!ok) return res.status(401).json({ error: adminToken ? 'Tu sesión de admin venció: volvé a entrar' : 'PIN de la caja inválido' });
   } catch (e) {
-    return res.status(401).json({ error: 'No se pudo verificar el PIN' });
+    return res.status(401).json({ error: 'No se pudo verificar el acceso' });
   }
+  const sistema = detalle ? SYSTEM_PROMPT + DETALLE_EXTRA + FORMATO_JSON.replace(/\.$/, FORMATO_DETALLE) : SYSTEM_PROMPT + FORMATO_JSON;
+  const salida = detalle ? normalizarDetalle : normalizar;
   if (!data || typeof data !== 'string') return res.status(400).json({ error: 'Falta la foto' });
   if (!MEDIA_TYPES.includes(mediaType)) return res.status(400).json({ error: 'Formato no soportado (usá foto o PDF)' });
   const conocidos = Array.isArray(proveedores)
@@ -235,7 +301,7 @@ Proveedores conocidos: ${conocidos.length ? conocidos.join(', ') : '(ninguno tod
   // Sin clave de Anthropic: Gemini si hay clave; si no, el AI Gateway de Vercel.
   if (!process.env.ANTHROPIC_API_KEY && !process.env.GEMINI_API_KEY) {
     try {
-      return res.json(normalizar(await leerConGateway(data, mediaType, pedido)));
+      return res.json(salida(await leerConGateway(data, mediaType, pedido, sistema)));
     } catch (error) {
       console.error('factura-foto gateway error:', error);
       const msg = String(error.message || '');
@@ -247,7 +313,7 @@ Proveedores conocidos: ${conocidos.length ? conocidos.join(', ') : '(ninguno tod
   }
   if (!process.env.ANTHROPIC_API_KEY) {
     try {
-      return res.json(normalizar(await leerConGemini(data, mediaType, pedido)));
+      return res.json(salida(await leerConGemini(data, mediaType, pedido, sistema)));
     } catch (error) {
       console.error('factura-foto gemini error:', error);
       return res.status([429, 503].includes(error.status) ? 503 : 502).json({
@@ -264,14 +330,14 @@ Proveedores conocidos: ${conocidos.length ? conocidos.join(', ') : '(ninguno tod
     const anthropic = new Anthropic();
     const response = await anthropic.beta.messages.create({
       model: 'claude-opus-5-5',
-      max_tokens: 4000,
+      max_tokens: detalle ? 16000 : 4000,
       betas: ['server-side-fallback-2026-07-01'],
       fallbacks: 'default',
       output_config: {
         effort: 'medium',
-        format: { type: 'json_schema', schema: COMPROBANTE_SCHEMA },
+        format: { type: 'json_schema', schema: detalle ? DETALLE_SCHEMA : COMPROBANTE_SCHEMA },
       },
-      system: SYSTEM_PROMPT,
+      system: detalle ? SYSTEM_PROMPT + DETALLE_EXTRA : SYSTEM_PROMPT,
       messages: [{
         role: 'user',
         content: [
@@ -294,7 +360,7 @@ Proveedores conocidos: ${conocidos.length ? conocidos.join(', ') : '(ninguno tod
       return res.status(502).json({ error: 'El modelo devolvió un formato inválido' });
     }
 
-    res.json(normalizar(c));
+    res.json(salida(c));
   } catch (error) {
     console.error('factura-foto error:', error);
     if (error instanceof Anthropic.RateLimitError) return res.status(429).json({ error: 'Demasiadas consultas, probá en un minuto' });

@@ -744,7 +744,7 @@ function renderCeliaco(){
 
 /* ---------- SECTION META ---------- */
 const LOW_STOCK_THRESHOLD = 5;
-function isLowStock(p){ return !p.sellByWeight && p.stock<=LOW_STOCK_THRESHOLD; }
+function isLowStock(p){ return !p.sellByWeight && p.stock<=(typeof spStockMinimo==='function' ? spStockMinimo(p) : LOW_STOCK_THRESHOLD); }
 // p.photo queda como data: (el blob local) cuando apiSaveProduct no logró
 // subirla al servidor — se ve bien en ESTE navegador (es la foto tal cual
 // se sacó) pero nunca llegó a Supabase, así que en la app de clientes no
@@ -4191,6 +4191,10 @@ function renderAdmin(){
               📷 Foto sin subir (${photoPendingCount})
             </button>` : ''}
           </div>
+          <div style="display:flex; gap:8px; margin-top:8px;">
+            <button class="btn-primary" style="flex:1; padding:9px; font-size:12.5px;" onclick="spAbrirIngreso()">📥 Ingreso de mercadería (leer factura)</button>
+          </div>
+          ${typeof spAvisoSql==='function' ? spAvisoSql() : ''}
         </div>
         <div id="admin-productos-list">${renderAdminProductos()}</div>
       ` : ""}
@@ -8281,6 +8285,7 @@ function renderAdminProductos(){
         <div class="prod-row-v2-info">
           <h4>${p.name}${p.sellByWeight?' <span style="font-size:9px; color:#6db8e8;">(x kg)</span>':''}${p.hidden?' <span class="badge-oculto">OCULTO</span>':''}${p.superOffer?' <span style="font-size:9px; font-weight:800; color:#c62222; background:linear-gradient(135deg,#ffe066,#ffd400); border-radius:5px; padding:2px 6px; vertical-align:middle;">🔥 SÚPER OFERTA</span>':''}${photoPendingUpload(p)?' <span style="font-size:9px; font-weight:800; color:#fff; background:var(--danger); border-radius:5px; padding:2px 6px; vertical-align:middle;">📷 FOTO SIN SUBIR</span>':''}</h4>
           <p>Stock: ${p.stock} · ${SECTION_META[p.section]?.label||p.section}${p.sub?` · ${p.sub}`:''} ${isLowStock(p)?`<span style="color:${p.stock===0?'var(--danger)':'var(--warn)'}; font-weight:700;">· ${p.stock===0?'Sin stock':'Stock bajo'}</span>`:''}</p>
+          ${typeof spFilaExtra==='function' ? spFilaExtra(p) : ''}
         </div>
       </div>
       <div class="prod-row-v2-bottom">
@@ -8304,6 +8309,7 @@ function renderAdminProductos(){
           ${photoPendingUpload(p) ? `<button class="icon-btn" style="color:var(--danger); border-color:var(--danger);" title="Reintentar subir la foto" onclick="retryProductPhotoUpload('${p.id}')">📷↻</button>` : ''}
           <button class="icon-btn" style="font-size:14px; ${p.hidden?'color:var(--danger); border-color:var(--danger);':''}" title="${p.hidden?'Oculto — tocá para mostrarlo a los clientes':'Visible — tocá para ocultarlo de los clientes'}" onclick="toggleProductHidden('${p.id}')">${p.hidden?'🙈':'👁️'}</button>
           <button class="icon-btn" style="${p.barcode?'':'color:var(--warn); border-color:var(--warn);'}" title="${p.barcode?'Código: '+p.barcode:'Sin código de barras'}" onclick="openBarcodeScannerModal(code=>updateProductBarcode('${p.id}', code))">${ic('camera')}</button>
+          ${typeof spBotonFicha==='function' && p._apiId ? spBotonFicha(p) : ''}
           <button class="icon-btn" onclick="openProductModal('${p.id}')">${ic('edit')}</button>
           <button class="icon-btn" onclick="deleteProduct('${p.id}')">${ic('trash')}</button>
         </div>
@@ -13475,5 +13481,6 @@ if('serviceWorker' in navigator){
   navigator.serviceWorker.register('sw.js');
 }
 </script>
+<script src="stock-pro.js"></script>
 </body>
 </html>
