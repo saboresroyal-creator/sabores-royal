@@ -620,8 +620,8 @@ function productCardHtml(p){
   return `<button class="product-card" onclick="addToCart(${p.id})">
     ${src ? `<img class="pc-thumb" src="${escAttr(src)}" loading="lazy">` : `<div class="pc-thumb-ph">🛒</div>`}
     <div class="pc-name">${esc(p.name)}</div>
-    <div class="pc-price">${money(p.price)}</div>
-    <div class="pc-stock ${stockCls}">Stock: ${p.stock}</div>
+    <div class="pc-price">${p.sellByWeight ? money(p.pricePerKg)+'/kg' : money(p.price)}</div>
+    ${p.sellByWeight ? `<div class="pc-stock">⚖️ Pesable</div>` : `<div class="pc-stock ${stockCls}">Stock: ${p.stock}</div>`}
   </button>`;
 }
 function renderProductGrid(){
@@ -703,13 +703,15 @@ function renderSeccionVender(){
         ${cart.length===0 ? `<div class="cart-empty">Carrito vacío — escaneá un producto o buscalo arriba</div>` :
           cart.map((it,i)=>`<div class="cart-row">
             ${thumbHtml(it)}
+            ${isWeightLine(it) ? `
+            <div class="cr-name">${esc(it.name)}<div class="cr-unit">⚖️ ${it.grams ? fmtKg(it.grams)+' · ' : ''}${money(it.price)}/kg</div></div>` : `
             <div class="cr-name">${esc(it.name)}<div class="cr-unit">${money(it.price)} c/u</div></div>
             <div class="cr-qty-ctl">
               <button onclick="changeQty(${i},-1)">-</button>
               <span>${it.qty}</span>
               <button onclick="changeQty(${i},1)">+</button>
-            </div>
-            <div class="cr-total">${money(it.price*it.qty)}</div>
+            </div>`}
+            <div class="cr-total">${money(lineTotal(it))}</div>
             <button class="cr-del" onclick="removeFromCart(${i})">✕</button>
           </div>`).join('')}
       </div>
@@ -768,6 +770,7 @@ function onScanKeydown(ev){
   if(byBarcode){ addToCart(byBarcode.id); return; }
   const byDisplayBarcode = products.find(p => p.displayBarcode && p.displayBarcode === raw);
   if(byDisplayBarcode){ addToCart(byDisplayBarcode.id, byDisplayBarcode.displayQty||1); toast('Caja completa: x'+(byDisplayBarcode.displayQty||1)+' '+byDisplayBarcode.name, 'ok'); return; }
+  if(tryBalanzaCode(raw)) return;
   const matches = filterProducts();
   if(matches.length === 1){ addToCart(matches[0].id); return; }
   toast(matches.length ? 'Hay varias coincidencias, elegí de la lista' : 'No se encontró el producto', 'err');
@@ -776,7 +779,8 @@ function addToCart(id, qty){
   qty = qty||1;
   const p = products.find(x=>x.id===id);
   if(!p) return;
-  const existing = cart.find(it=>it.id===id);
+  if(p.sellByWeight){ openWeightModal(p); return; }
+  const existing = cart.find(it=>it.id===id && !isWeightLine(it));
   if(existing) existing.qty += qty;
   else cart.push({id:p.id, name:p.name, price:p.price, qty, barcode:p.barcode||'', photo_url:p.photo_url, photo_clean_url:p.photo_clean_url});
   searchQuery = '';
@@ -789,13 +793,94 @@ function changeQty(i, delta){
   render();
 }
 function removeFromCart(i){ cart.splice(i,1); render(); }
-function cartTotal(){ return cart.reduce((s,it)=>s+it.price*it.qty,0); }
+function lineTotal(it){ return it.lineTotal!=null ? it.lineTotal : it.price*it.qty; }
+function cartTotal(){ return cart.reduce((s,it)=>s+lineTotal(it),0); }
+function fmtKg(grams){ return (grams/1000).toLocaleString('es-AR',{minimumFractionDigits:3,maximumFractionDigits:3}) + ' kg'; }
+function isWeightLine(it){ return it.grams!=null; }
+function itemLabel(it){
+  if(!isWeightLine(it)) return it.qty+' x '+esc(it.name);
+  return (it.grams ? fmtKg(it.grams) : '⚖️') + ' ' + esc(it.name);
+}
+
+/* ── BALANZA: etiquetas EAN-13 que empiezan con 2 ──
+   2X + PLU (pluDigitos) + valor (lo que queda hasta el dígito 12) + verificador.
+   El valor es el importe (modo 'importe', con 'decimales' decimales) o el
+   peso en gramos (modo 'peso'). Se configura en el admin → posConfig.balanza. */
+const BALANZA_DEFAULT = {pluDigitos:5, modo:'importe', decimales:0};
+function balanzaCfg(){ return Object.assign({}, BALANZA_DEFAULT, (posConfig && posConfig.balanza) || {}); }
+function ean13Valido(c){
+  let s = 0;
+  for(let i=0;i<12;i++) s += Number(c[i]) * (i%2 ? 3 : 1);
+  return (10 - s%10) % 10 === Number(c[12]);
+}
+function parseBalanza(code){
+  if(!/^2\d{12}$/.test(code)) return null;
+  if(!ean13Valido(code)) return {error:'Etiqueta de balanza mal leída, escaneala de nuevo'};
+  const cfg = balanzaCfg();
+  const n = Math.min(6, Math.max(4, Number(cfg.pluDigitos)||5));
+  const plu = Number(code.slice(2, 2+n));
+  const valor = Number(code.slice(2+n, 12));
+  const p = products.find(x=>x.sellByWeight && x.plu && Number(x.plu)===plu);
+  if(!p) return {error:'El PLU '+plu+' de la balanza no está asignado a ningún producto pesable'};
+  if(cfg.modo === 'peso'){
+    if(!p.pricePerKg) return {error:p.name+' no tiene precio por kilo cargado'};
+    return {p, grams:valor, total:Math.round(p.pricePerKg*valor/10)/100};
+  }
+  const total = valor / Math.pow(10, Number(cfg.decimales)||0);
+  return {p, grams: p.pricePerKg ? Math.round(total/p.pricePerKg*1000) : null, total};
+}
+function tryBalanzaCode(code){
+  const r = parseBalanza(code);
+  if(!r) return false;
+  if(r.error){ toast(r.error, 'err'); searchQuery=''; render(); return true; }
+  addWeightToCart(r.p, r.grams, r.total);
+  toast('⚖️ '+r.p.name+' '+(r.grams?fmtKg(r.grams)+' · ':'')+money(r.total), 'ok');
+  return true;
+}
+function addWeightToCart(p, grams, total){
+  // grams marca la línea como pesable (create_pos_sale no le descuenta stock).
+  // Si la etiqueta trae importe y el producto no tiene $/kg, queda 0 = peso desconocido.
+  cart.push({id:p.id, name:p.name, price:p.pricePerKg||0, qty:1, grams:grams||0, lineTotal:total, barcode:'', photo_url:p.photo_url, photo_clean_url:p.photo_clean_url});
+  searchQuery = '';
+  saleError = '';
+  render();
+}
+// Pesable elegido a mano (sin etiqueta de balanza): se carga el peso en gramos.
+function openWeightModal(p){
+  if(!p.pricePerKg){ toast(p.name+' no tiene precio por kilo cargado', 'err'); return; }
+  const root = document.getElementById('modal-root');
+  root.innerHTML = `<div class="modal-bg" onclick="if(event.target===this) closeModal()"><div class="modal">
+    <h2>⚖️ ${esc(p.name)}</h2>
+    <p class="comp-meta">${money(p.pricePerKg)}/kg</p>
+    <div class="form-row" style="margin-top:10px;"><label>Peso (gramos)</label><input id="wm-grams" type="number" inputmode="numeric" min="1" placeholder="Ej: 350" oninput="onWeightModalInput(${p.id})" onkeydown="if(event.key==='Enter') confirmWeightModal(${p.id})"></div>
+    <p id="wm-total" class="comp-meta" style="margin-top:8px;">Total: ${money(0)}</p>
+    <button class="btn-primary" style="width:100%; margin-top:12px;" onclick="confirmWeightModal(${p.id})">Agregar</button>
+    <button class="close-btn" onclick="closeModal()">Cancelar</button>
+  </div></div>`;
+  setTimeout(()=>{ const el = document.getElementById('wm-grams'); if(el) el.focus(); }, 30);
+}
+function weightModalValues(p){
+  const g = Math.round(Number((document.getElementById('wm-grams')||{}).value)||0);
+  return {g, total: Math.round(p.pricePerKg*g/10)/100};
+}
+function onWeightModalInput(id){
+  const p = products.find(x=>x.id===id); if(!p) return;
+  const el = document.getElementById('wm-total');
+  if(el) el.textContent = 'Total: ' + money(weightModalValues(p).total);
+}
+function confirmWeightModal(id){
+  const p = products.find(x=>x.id===id); if(!p) return;
+  const {g, total} = weightModalValues(p);
+  if(g<=0){ toast('Ingresá el peso en gramos', 'err'); return; }
+  closeModal();
+  addWeightToCart(p, g, total);
+}
 function money(n){ return '$' + Number(n||0).toLocaleString('es-AR',{minimumFractionDigits:2,maximumFractionDigits:2}); }
 
 async function confirmSale(){
   if(!cart.length || !payMethod || submitting) return;
   submitting = true; saleError=''; render();
-  const items = cart.map(it=>({id:it.id, name:it.name, qty:it.qty, price:it.price, lineTotal:it.price*it.qty, barcode:it.barcode}));
+  const items = cart.map(it=>({id:it.id, name:it.name, qty:it.qty, price:it.price, lineTotal:lineTotal(it), barcode:it.barcode, ...(isWeightLine(it)?{grams:it.grams}:{})}));
   const subtotal = cartTotal();
   try{
     const rpcBody = {
@@ -808,7 +893,7 @@ async function confirmSale(){
     if(clientPhone.trim()){ rpcBody.p_client_phone = normalizePhone(clientPhone.trim()); rpcBody.p_client_name = clientName.trim(); }
     const rows = await posFetch('/rpc/create_pos_sale', 'POST', rpcBody, 'return=representation');
     const sale = Array.isArray(rows) ? rows[0] : rows;
-    cart.forEach(it=>{ const p = products.find(x=>x.id===it.id); if(p) p.stock -= it.qty; });
+    cart.forEach(it=>{ const p = products.find(x=>x.id===it.id); if(p && !isWeightLine(it)) p.stock -= it.qty; });
     printTicket(sale || {id:'', items, total:subtotal, payment_method:payMethod, created_at:new Date().toISOString(), client_phone:clientPhone, client_name:clientName});
     cart = []; payMethod = null; clientPhone = ''; clientName = ''; showClientBox = false;
     toast('Venta cobrada', 'ok');
@@ -846,7 +931,7 @@ function onBarcodeDetected(code){
   closeCameraScanner();
   const p = products.find(x => x.barcode && x.barcode === code);
   if(p) addToCart(p.id);
-  else toast('Código no encontrado: ' + code, 'err');
+  else if(!tryBalanzaCode(code)) toast('Código no encontrado: ' + code, 'err');
 }
 function loadZXingLib(){
   if(window.ZXingBrowser) return Promise.resolve();
@@ -950,7 +1035,7 @@ function printTicket(sale){
     <p>${esc(caja)} · ${esc(cajero)} · ${esc(fecha)}</p>
     <div class="line"></div>
     <table>
-      ${items.map(it=>`<tr><td>${it.qty} x ${esc(it.name)}</td><td style="text-align:right;">${money(it.lineTotal!=null?it.lineTotal:it.price*it.qty)}</td></tr>`).join('')}
+      ${items.map(it=>`<tr><td>${itemLabel(it)}</td><td style="text-align:right;">${money(it.lineTotal!=null?it.lineTotal:it.price*it.qty)}</td></tr>`).join('')}
     </table>
     <div class="line"></div>
     <table><tr><td class="tot">TOTAL</td><td class="tot" style="text-align:right;">${money(sale.total)}</td></tr></table>
@@ -1099,7 +1184,7 @@ async function anularVentaActual(){
   try{
     const rows = await posFetch('/rpc/cancel_pos_sale', 'POST', {p_sale_id: compDetalle.id}, 'return=representation');
     const updated = Array.isArray(rows) ? rows[0] : rows;
-    (updated.items||[]).forEach(it=>{ const p = products.find(x=>x.id===it.id); if(p) p.stock += (it.qty||0); });
+    (updated.items||[]).forEach(it=>{ const p = products.find(x=>x.id===it.id); if(p && !isWeightLine(it)) p.stock += (it.qty||0); });
     compDetalle = updated;
     const idx = compVentas.findIndex(v=>v.id===updated.id);
     if(idx>=0) compVentas[idx] = updated;
@@ -1116,7 +1201,7 @@ function renderSeccionComprobantes(){
       <p class="comp-meta">${new Date(v.created_at).toLocaleString('es-AR')} · ${esc(v.caja)} · ${esc(v.cajero||'')}</p>
       ${v.client_phone ? `<p class="comp-meta">Cliente: ${esc(v.client_name||'')} ${esc(v.client_phone)}</p>` : ''}
       <div class="list-wrap">
-        ${(v.items||[]).map(it=>`<div class="sale-row"><span>${it.qty} x ${esc(it.name)}</span><span>${money(it.lineTotal!=null?it.lineTotal:it.price*it.qty)}</span></div>`).join('')}
+        ${(v.items||[]).map(it=>`<div class="sale-row"><span>${itemLabel(it)}</span><span>${money(it.lineTotal!=null?it.lineTotal:it.price*it.qty)}</span></div>`).join('')}
       </div>
       <div class="totals-bar"><span class="tb-label">Total</span><span class="tb-value">${money(v.total)}</span></div>
       <p class="comp-meta">Medio de pago: ${esc(PAY_LABELS[v.payment_method]||v.payment_method)}</p>
@@ -1430,9 +1515,11 @@ function escAttr(s){ return esc(s).replace(/'/g,'&#39;'); }
 /* ── INIT ── */
 async function init(){
   try{
+    const PROD_COLS = 'id,name,description,price,stock,barcode,display_qty,display_barcode,cat,photo_url,photo_clean_url,sell_by_weight,price_per_kg';
     const [settingsRows, productRows] = await Promise.all([
       posFetch('/app_settings?setting_key=in.(pos_config,fiscal_config,pos_banner)&select=setting_key,setting_value'),
-      posFetch('/products?select=id,name,description,price,stock,barcode,display_qty,display_barcode,cat,photo_url,photo_clean_url&order=name'),
+      // plu sale de supabase-migration-balanza.sql: si todavía no se corrió, se carga sin esa columna.
+      posFetch('/products?select='+PROD_COLS+',plu&order=name').catch(()=>posFetch('/products?select='+PROD_COLS+'&order=name')),
     ]);
     (settingsRows||[]).forEach(row=>{
       try{
@@ -1442,7 +1529,7 @@ async function init(){
         if(row.setting_key === 'pos_banner' && parsed) posBanner = parsed;
       }catch(e){}
     });
-    products = (productRows||[]).map(p=>({id:p.id, name:p.name, desc:p.description||'', price:Number(p.price)||0, stock:Number(p.stock)||0, barcode:p.barcode||'', displayQty:p.display_qty||null, displayBarcode:p.display_barcode||'', cat:p.cat||'Otros', photo_url:p.photo_url||'', photo_clean_url:p.photo_clean_url||''}));
+    products = (productRows||[]).map(p=>({id:p.id, name:p.name, desc:p.description||'', price:Number(p.price)||0, stock:Number(p.stock)||0, barcode:p.barcode||'', displayQty:p.display_qty||null, displayBarcode:p.display_barcode||'', cat:p.cat||'Otros', photo_url:p.photo_url||'', photo_clean_url:p.photo_clean_url||'', sellByWeight:!!p.sell_by_weight, pricePerKg:Number(p.price_per_kg)||0, plu:p.plu||null}));
   }catch(e){
     toast('No se pudo conectar: ' + e.message, 'err');
   }

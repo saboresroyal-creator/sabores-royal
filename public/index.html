@@ -1188,6 +1188,7 @@ async function apiSyncProducts(){
       barcode: p.barcode||"",
       hidden: p.hidden||false,
       ...(p.variants ? {variants: p.variants} : {}),
+      ...(p.plu!==undefined ? {plu: p.plu} : {}),
     };});
     const pendingOnly = state.products.filter(p=>_pendingSaves.has(p.id));
     const newProducts = [...apiMapped, ...pendingOnly];
@@ -1587,6 +1588,9 @@ async function apiSaveProduct(product){
       // productos comunes se siguen guardando aunque todavía no se haya
       // corrido supabase-migration-product-variants.sql.
       ...(product.variants!==undefined ? {variants: product.variants} : {}),
+      // Igual que variants: solo si el producto tiene (o tuvo) PLU, así no
+      // falla antes de correr supabase-migration-balanza.sql.
+      ...(product.plu!==undefined ? {plu: product.plu||null} : {}),
     };
     if(product._apiId){
       await adminFetch('/products?id=eq.' + product._apiId, 'PATCH', body);
@@ -8471,6 +8475,7 @@ function openProductModal(id){
           <div class="form-group" id="pm-promo-until-per-kg-wrap" style="flex:1; display:${p&&p.superOffer?'none':'block'};"><label>Válido hasta</label><input id="pm-promo-until-per-kg" type="date" value="${p&&p.sellByWeight&&p.promoUntil?p.promoUntil:''}"></div>
         </div>
         <div class="form-group"><label>Cantidad mínima a vender (gramos)</label><input id="pm-min-grams" type="number" value="${p&&p.minGrams?p.minGrams:50}" placeholder="50"></div>
+        <div class="form-group"><label>⚖️ PLU en la balanza</label><input id="pm-plu" type="number" inputmode="numeric" min="1" value="${p&&p.plu?p.plu:''}" placeholder="Ej: 123 — el mismo número que tiene cargado en la balanza"></div>
       </div>
 
       <div class="form-group"><label>Stock</label><input id="pm-stock" type="number" value="${p?p.stock:''}" placeholder="0"></div>
@@ -8692,6 +8697,11 @@ function saveProductModal(id){
   const minGrams = sellByWeight ? (Number(document.getElementById("pm-min-grams").value)|| 50) : null;
   if(!name){ toast("Ingresá un nombre", "err"); return; }
   if(sellByWeight && !pricePerKg){ toast("Ingresá el precio por kilo", "err"); return; }
+  const plu = sellByWeight ? (Math.round(Number(document.getElementById("pm-plu").value))||null) : null;
+  if(plu){
+    const dupPlu = state.products.find(pr=>pr.id!==id && pr.sellByWeight && Number(pr.plu)===plu);
+    if(dupPlu){ toast(`El PLU ${plu} ya lo tiene "${dupPlu.name}"`, "err"); return; }
+  }
   if(!id){
     const dup = state.products.find(pr=>pr.name.toLowerCase().trim()===name.toLowerCase().trim());
     if(dup && !confirm(`Ya existe un producto llamado "${dup.name}" en ${SECTION_META[dup.section]?.label||dup.section}. ¿Guardarlo igual?`)) return;
@@ -8714,13 +8724,15 @@ function saveProductModal(id){
     // undefined = el producto nunca tuvo variantes y sigue sin tener: no
     // se manda la columna (ver apiSaveProduct).
     if(variantsObj || p.variants) p.variants = variantsObj;
+    if(plu || p.plu) p.plu = plu;
     savedProduct = p;
   }else{
     savedProduct = {
       id: "p"+Date.now(), section, cat, sub, name, price, wholesalePrice, stock, desc, barcode,
       sellByWeight, pricePerKg, wholesalePricePerKg, minGrams, sinTacc, sinAzucar, hidden, displayQty, displayDiscount, displayBarcode, promoPrice, promoUntil, superOffer,
       photo: adminPhotoDraft.current||"", photoClean,
-      ...(variantsObj ? {variants: variantsObj} : {})
+      ...(variantsObj ? {variants: variantsObj} : {}),
+      ...(plu ? {plu} : {})
     };
     state.products.push(savedProduct);
   }
@@ -10616,6 +10628,31 @@ function renderAdminConfig(){
       <button class="btn-outline-gold" style="margin-top:10px; width:100%;" onclick="openCajeroModal(null)">+ Agregar cajero</button>
     </div>
 
+    <h3 style="color:var(--gold2); font-size:14px; margin:18px 16px 4px;">⚖️ Balanza (etiquetas de pesables)</h3>
+    <div style="padding:0 16px 6px;">
+      <p style="font-size:12px; color:rgba(255,255,255,0.5); margin-bottom:10px;">Cómo arma la balanza el código de barras de la etiqueta (empieza con 2). A cada producto pesable cargale el mismo <b>PLU</b> que tiene en la balanza.</p>
+    </div>
+    <div class="form-group"><label>Dígitos del PLU</label>
+      <select onchange="updateBalanza('pluDigitos', Number(this.value))">
+        ${[4,5,6].map(n=>`<option value="${n}" ${balanzaCfgAdmin().pluDigitos===n?'selected':''}>${n}</option>`).join('')}
+      </select>
+    </div>
+    <div class="form-group"><label>La etiqueta trae</label>
+      <select onchange="updateBalanza('modo', this.value)">
+        <option value="importe" ${balanzaCfgAdmin().modo==='importe'?'selected':''}>El importe (precio a cobrar)</option>
+        <option value="peso" ${balanzaCfgAdmin().modo==='peso'?'selected':''}>El peso en gramos</option>
+      </select>
+    </div>
+    <div class="form-group" style="display:${balanzaCfgAdmin().modo==='importe'?'block':'none'};"><label>Decimales del importe</label>
+      <select onchange="updateBalanza('decimales', Number(this.value))">
+        <option value="0" ${balanzaCfgAdmin().decimales===0?'selected':''}>Sin decimales (04567 = $4.567)</option>
+        <option value="1" ${balanzaCfgAdmin().decimales===1?'selected':''}>1 decimal (04567 = $456,70)</option>
+        <option value="2" ${balanzaCfgAdmin().decimales===2?'selected':''}>2 decimales (04567 = $45,67)</option>
+      </select>
+    </div>
+    <div class="form-group"><label>Probar una etiqueta</label><input placeholder="Escribí el número de 13 dígitos de una etiqueta" oninput="probarEtiquetaBalanza(this.value)"></div>
+    <p id="balanza-test" style="font-size:12px; color:var(--gold2); margin:-6px 16px 12px;"></p>
+
     <h3 style="color:var(--gold2); font-size:14px; margin:18px 16px 4px;">Banner de Caja</h3>
     <div style="padding:0 16px 6px;">
       <p style="font-size:12px; color:rgba(255,255,255,0.5); margin-bottom:10px;">Banner de oferta que se muestra en <b>caja-venta.html</b> (mostrador) — independiente del banner de Novedades/Ofertas de la tienda online.</p>
@@ -10700,6 +10737,34 @@ function saveCajero(idx){
   render();
   apiSaveSetting('pos_config', state.posConfig);
   toast("Cajero guardado","ok");
+}
+// Formato de la etiqueta de la balanza. Lo lee caja-venta.html (parseBalanza)
+// desde pos_config.balanza — mantener los mismos defaults en los dos lados.
+function balanzaCfgAdmin(){ return Object.assign({pluDigitos:5, modo:'importe', decimales:0}, state.posConfig.balanza||{}); }
+function updateBalanza(key, val){
+  state.posConfig.balanza = Object.assign(balanzaCfgAdmin(), {[key]: val});
+  saveState();
+  render();
+  apiSaveSetting('pos_config', state.posConfig);
+}
+function probarEtiquetaBalanza(raw){
+  const el = document.getElementById('balanza-test');
+  if(!el) return;
+  const code = String(raw||'').replace(/\D/g,'');
+  if(code.length < 13){ el.textContent = ''; return; }
+  if(!/^2\d{12}$/.test(code)){ el.textContent = 'No es una etiqueta de balanza (tiene que tener 13 dígitos y empezar con 2).'; return; }
+  const cfg = balanzaCfgAdmin();
+  const plu = Number(code.slice(2, 2+cfg.pluDigitos));
+  const valor = Number(code.slice(2+cfg.pluDigitos, 12));
+  const p = state.products.find(x=>x.sellByWeight && Number(x.plu)===plu);
+  const nombre = p ? `"${p.name}"` : 'ningún producto (falta cargar ese PLU)';
+  if(cfg.modo==='peso'){
+    const kg = valor/1000;
+    el.textContent = `PLU ${plu} → ${nombre} · ${kg.toFixed(3).replace('.',',')} kg` + (p&&p.pricePerKg ? ` · ${money(p.pricePerKg*kg)}` : '');
+  }else{
+    const importe = valor/Math.pow(10, cfg.decimales);
+    el.textContent = `PLU ${plu} → ${nombre} · importe ${money(importe)}` + (p&&p.pricePerKg ? ` (≈ ${(importe/p.pricePerKg).toFixed(3).replace('.',',')} kg)` : '');
+  }
 }
 function deleteCajero(idx){
   if(!confirm("¿Eliminar este cajero?")) return;
