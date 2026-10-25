@@ -930,6 +930,10 @@ tr:hover td { background:var(--surface2); }
 <div class="panel" id="panel-bancos">
   <datalist id="bancosList"></datalist>
 
+  <div style="display:flex;justify-content:flex-end;margin-bottom:12px;">
+    <button class="btn btn-gold" onclick="abrirPrestamoForm()">+ Cargar préstamo</button>
+  </div>
+
   <!-- Resumen -->
   <div class="grid4 mb16" id="bancosResumen"></div>
 
@@ -4444,7 +4448,8 @@ function abrirPrestamoForm() {
   document.getElementById('prestamoForm').style.display = 'block';
   if(!document.getElementById('prPrimera').value) document.getElementById('prPrimera').value = todayStr();
   armarCuotasPrestamo();
-  document.getElementById('prBanco').focus();
+  document.getElementById('prestamoForm').scrollIntoView({behavior:'smooth', block:'start'});
+  document.getElementById('prBanco').focus({preventScroll:true});
 }
 function cerrarPrestamoForm() {
   document.getElementById('prestamoForm').style.display = 'none';
