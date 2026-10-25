@@ -960,6 +960,11 @@ tr:hover td { background:var(--surface2); }
 
     <div id="prestamoForm" style="display:none;border:1px solid var(--gold);border-radius:10px;padding:16px;margin-bottom:16px;">
       <div style="font-size:12px;color:var(--muted);margin-bottom:12px;">Cargá las cuotas tal como figuran en el cuadro de marcha del banco.</div>
+      <div class="mb16">
+        <label>Pegar cuadro de marcha (opcional)</label>
+        <textarea id="prPegado" rows="4" placeholder="Copiá la tabla de cuotas del PDF del banco y pegala acá" style="width:100%;font-family:var(--mono);font-size:12px;"></textarea>
+        <button class="btn btn-ghost btn-sm" style="margin-top:6px;" onclick="usarCuadroPegado()">📋 Usar estas cuotas</button>
+      </div>
       <div class="grid4 mb16">
         <div><label>Banco</label><input type="text" id="prBanco" list="bancosList" placeholder="Ej: BBVA"></div>
         <div><label>Concepto (opcional)</label><input type="text" id="prConcepto" placeholder="Ej: Préstamo prendario"></div>
@@ -4443,7 +4448,7 @@ function abrirPrestamoForm() {
 }
 function cerrarPrestamoForm() {
   document.getElementById('prestamoForm').style.display = 'none';
-  ['prBanco','prConcepto','prTotal','prPrimera'].forEach(id=>{ document.getElementById(id).value=''; });
+  ['prBanco','prConcepto','prTotal','prPrimera','prPegado'].forEach(id=>{ document.getElementById(id).value=''; });
   document.getElementById('prCantidad').value = 12;
   document.getElementById('prCuotas').innerHTML = '';
 }
@@ -4467,6 +4472,31 @@ function armarCuotasPrestamo() {
     </div>`;
   }
   cont.innerHTML = html;
+}
+// Lee el cuadro de marcha pegado desde el PDF del banco: cada cuota empieza
+// con su vencimiento (DD-MM-AAAA) y el importe es el anteúltimo monto de la
+// fila (el último es el saldo). Si la fila trae solo un monto, se usa ése.
+function parseCuadroMarcha(txt) {
+  const fechas = [...String(txt||'').matchAll(/(\d{2})[-\/](\d{2})[-\/](\d{4})/g)];
+  return fechas.map((m,i)=>{
+    const tramo = txt.slice(m.index + m[0].length, i+1<fechas.length ? fechas[i+1].index : undefined);
+    const montos = (tramo.match(/\d{1,3}(?:\.\d{3})*,\d{2}/g)||[]).map(s=>parseFloat(s.replace(/\./g,'').replace(',','.')));
+    const monto = montos.length >= 3 ? montos[montos.length-2] : montos[0];
+    return {vto: `${m[3]}-${m[2]}-${m[1]}`, monto};
+  }).filter(c=>c.monto>0);
+}
+function usarCuadroPegado() {
+  const cuotas = parseCuadroMarcha(document.getElementById('prPegado').value);
+  if(!cuotas.length) { alert('No encontré cuotas en lo pegado. Tiene que tener las fechas de vencimiento (DD-MM-AAAA) y los importes.'); return; }
+  document.getElementById('prCantidad').value = cuotas.length;
+  document.getElementById('prTotal').value = r2(cuotas.reduce((s,c)=>s+c.monto,0));
+  document.getElementById('prPrimera').value = cuotas[0].vto;
+  armarCuotasPrestamo();
+  document.querySelectorAll('#prCuotas [data-cuota]').forEach((row,i)=>{
+    row.querySelector('.pr-monto').value = cuotas[i].monto;
+    row.querySelector('.pr-vto').value = cuotas[i].vto;
+    row.dataset.tocado = '1';
+  });
 }
 function guardarPrestamo() {
   const banco = document.getElementById('prBanco').value.trim();
