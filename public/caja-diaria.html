@@ -4337,11 +4337,12 @@ function renderDeuda() {
     container.innerHTML = `<div class="card" style="text-align:center;color:var(--muted);padding:40px;">No hay facturas${hayFiltro?' para este filtro':' cargadas'}.</div>`;
     return;
   }
-  // Pendientes: la que vence primero arriba. Pagadas: la última pagada arriba.
+  // Pendientes (facturas y notas de crédito juntas): por fecha de ingreso, la
+  // más vieja arriba. Pagadas: la última pagada arriba.
   const sorted = [...list].sort((a,b)=>{
     if((a.estado==='pagada') !== (b.estado==='pagada')) return a.estado==='pagada' ? 1 : -1;
     if(a.estado==='pagada') return (b.fechaPagada||'').localeCompare(a.fechaPagada||'');
-    return a.fechaVence.localeCompare(b.fechaVence);
+    return (a.fechaIngreso||'').localeCompare(b.fechaIngreso||'') || (a.fechaVence||'').localeCompare(b.fechaVence||'');
   });
   const total = sumaNeta(list);
   container.innerHTML = `<div style="font-size:12px;color:var(--muted);margin-bottom:10px;">${deudaBusqueda?'🔍 Buscando en todas (pendientes y pagadas) · ':''}${list.length} comprobante(s) · total ${pesos2(total)}</div>
