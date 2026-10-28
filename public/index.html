@@ -118,6 +118,42 @@ img{display:block; max-width:100%;}
 .section-card.market    {--sc-l:#103b6e; --sc-m:#011e49; --sc-r:#00133b; --sc-bd:#a9bcd8; --sc-deco:url('/img/cards/deco-market.webp');}
 .section-card.fiambreria{--sc-l:#966236; --sc-m:#412311; --sc-r:#40210e; --sc-bd:#e9c47a; --sc-deco:url('/img/cards/deco-fiambreria.webp');}
 .section-card.featured {background:var(--glass); border-color:var(--glass-bd); box-shadow:none;}
+/* Tarjetas de Puntos Royal y Mayorista (inicio): dos tarjetas tipo
+   "membresía" lado a lado, solo texto. Puntos Royal es dorada metalizada
+   (con el saldo del cliente si inició sesión); Mayorista es azul noche con
+   filete dorado.
+   Si el cliente ya es mayorista queda solo la dorada, a todo el ancho. */
+.perk-cards{display:grid; grid-template-columns:1fr 1fr; gap:10px; padding:4px 14px 8px;}
+.perk-tile:only-child{grid-column:1 / -1;}
+.perk-tile{position:relative; overflow:hidden; text-align:left; border-radius:16px; min-height:112px;
+  padding:12px 12px 10px; display:flex; flex-direction:column; gap:8px;
+  transition:transform .2s cubic-bezier(.2,.7,.3,1), filter .2s ease;}
+.perk-tile:active{transform:scale(.97); filter:brightness(1.06);}
+.perk-tile:focus-visible{outline:2px solid var(--gold2); outline-offset:2px;}
+.perk-tile::before{ /* brillo metálico en diagonal */
+  content:""; position:absolute; inset:0; pointer-events:none;
+  background:linear-gradient(115deg, transparent 30%, rgba(255,255,255,0.22) 45%, transparent 60%);}
+.perk-tile > *{position:relative; z-index:1;}
+.perk-gold{color:#1a1608;
+  background:linear-gradient(135deg, #f7e6a6 0%, #dcb758 30%, #b8902f 58%, #e8cc78 82%, #c9a23f 100%);
+  border:1px solid #f3d98a; box-shadow:0 10px 22px -12px rgba(0,0,0,0.75), inset 0 1px 0 rgba(255,255,255,0.55);}
+.perk-navy{color:var(--cream);
+  background:radial-gradient(120% 120% at 100% 0%, rgba(224,187,74,0.16), transparent 55%), linear-gradient(160deg, #1b2c5e 0%, #0d1740 70%);
+  border:1px solid rgba(224,187,74,0.55); box-shadow:0 10px 22px -12px rgba(0,0,0,0.8), inset 0 1px 0 rgba(255,255,255,0.08);}
+.perk-navy::before{background:linear-gradient(115deg, transparent 30%, rgba(255,255,255,0.06) 45%, transparent 60%);}
+.pt-body{flex:1; min-width:0;}
+.perk-tile h3{font-family:'Playfair Display',serif; font-size:18px; line-height:1.15; font-weight:700; margin:0 0 3px;}
+.perk-gold h3{color:#14204a;}
+.perk-navy h3{color:#fffaf2;}
+.perk-tile p{font-size:11.5px; line-height:1.35;}
+.perk-gold p{color:rgba(20,32,74,0.78);}
+.perk-navy p{color:rgba(240,234,228,0.72);}
+.pt-foot{display:flex; align-items:center; justify-content:space-between; gap:6px; font-size:11.5px; font-weight:700;
+  padding-top:7px; border-top:1px solid currentColor; border-top-color:rgba(127,127,127,0.28);}
+.perk-gold .pt-foot{color:#14204a; border-top-color:rgba(20,32,74,0.22);}
+.perk-navy .pt-foot{color:var(--goldlight); border-top-color:rgba(224,187,74,0.25);}
+.pt-foot b{font-size:13px;}
+.pt-foot svg{width:13px; height:13px; flex:none;}
 .sc-badge{display:none;}
 
 /* medallón: imagen con aro dorado propio + halo oscuro alrededor */
@@ -2831,16 +2867,19 @@ function renderHome(){
         `).join('')}
       </div>
     ` : ''}
-    <div class="offers-banner" style="cursor:pointer;" onclick="nav('premios')">
-      <div class="ob-icon"><img src="${CROWN_DATA_URL}" style="width:100%; height:100%; object-fit:contain;"></div>
-      <div style="flex:1;"><b>Puntos Royal</b> — sumás 1 corona por cada $100 en compras, canjealos por premios</div>
-      <div style="flex:none; opacity:.6;">${ic('chevron')}</div>
-    </div>
-    ${(()=>{ const cl = state.currentClientPhone ? state.clients[state.currentClientPhone] : null; if(wholesaleModeActive(cl)) return ''; return `
-    <div class="offers-banner" style="cursor:pointer;" onclick="nav('mayorista')">
-      <div class="ob-icon">${ic('package')}</div>
-      <div style="flex:1;"><b>Soy Comercio / Mayorista</b> — accedé al toque a precios mayoristas, sin registrarte</div>
-      <div style="flex:none; opacity:.6;">${ic('chevron')}</div>
+    ${(()=>{
+      const cl = state.currentClientPhone ? state.clients[state.currentClientPhone] : null;
+      const pts = cl ? (cl.points||0) : null;
+      const mayorista = wholesaleModeActive(cl) ? '' : `
+      <button class="perk-tile perk-navy" onclick="nav('mayorista')">
+        <div class="pt-body"><h3>Soy Comercio</h3><p>Precios mayoristas al toque, sin registrarte</p></div>
+        <div class="pt-foot"><span>Ver precios</span>${ic('chevron')}</div>
+      </button>`;
+      return `<div class="perk-cards">
+      <button class="perk-tile perk-gold" onclick="nav('premios')">
+        <div class="pt-body"><h3>Puntos Royal</h3><p>1 corona cada $100 en compras</p></div>
+        <div class="pt-foot"><span>${pts!==null ? `Tenés <b>${pts}</b> coronas` : 'Canjeá premios'}</span>${ic('chevron')}</div>
+      </button>${mayorista}
     </div>`; })()}
     <div class="section-cards">
       ${(()=>{
