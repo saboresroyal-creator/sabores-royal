@@ -7814,7 +7814,8 @@ function renderAdminPedidos(){
           </div>` : ''}
         </div>`).join('')}
       </div>
-      ${o.status!=="Cancelado" ? `<button style="margin-bottom:10px; padding:6px 10px; font-size:11px; border-radius:8px; cursor:pointer; background:rgba(46,204,113,0.12); border:1px solid rgba(46,204,113,0.4); color:#2ecc71;" onclick="openAddOrderItemModal('${o.id}')">➕ Agregar producto</button>` : ''}
+      ${o.status!=="Cancelado" ? `<button style="margin-bottom:10px; padding:6px 10px; font-size:11px; border-radius:8px; cursor:pointer; background:rgba(46,204,113,0.12); border:1px solid rgba(46,204,113,0.4); color:#2ecc71;" onclick="openAddOrderItemModal('${o.id}')">➕ Agregar producto</button>
+        <button style="margin-bottom:10px; margin-left:6px; padding:6px 10px; font-size:11px; border-radius:8px; cursor:pointer; background:rgba(109,184,232,0.12); border:1px solid rgba(109,184,232,0.4); color:#6db8e8;" onclick="repriceOrder('${o.id}')">↻ Recalcular precios${orderClientIsWholesale(o)?' (mayorista)':''}</button>` : ''}
       <div style="font-weight:700; color:var(--gold2); margin-bottom:10px;">${o.items.some(it=>it.sinStock) ? `<span style="text-decoration:line-through; opacity:0.5; font-weight:400; margin-right:6px;">${money(orderOriginalTotal(o))}</span>` : ''}${money(o.total)}</div>
       <div class="oc-actions">
         ${o.status==="Cancelado" ? `<button class="btn-secondary" style="flex:1; padding:9px;" disabled>Anulado</button>`
@@ -7900,6 +7901,47 @@ function orderOriginalTotal(order){
 }
 // Recalcula el total del pedido excluyendo los items marcados sinStock,
 // reaplicando el % de descuento del cliente si tenía uno.
+// En el panel wholesaleModeActive() siempre da false (el admin no es un
+// cliente), así que para precios de un pedido se mira directo la ficha
+// del cliente que lo hizo.
+function orderClient(order){
+  const phone = order.customer && order.customer.phone ? normalizePhone(order.customer.phone) : null;
+  return phone ? state.clients[phone] : null;
+}
+function orderClientIsWholesale(order){
+  const c = orderClient(order);
+  return !!(c && c.wholesale);
+}
+// Vuelve a poner los precios de todo el pedido según cómo está el cliente
+// hoy (ej. hizo el pedido como minorista y después se lo pasó a mayorista).
+function repriceOrder(orderId){
+  const order = state.orders.find(o=>o.id===orderId);
+  if(!order) return;
+  const client = orderClient(order);
+  if(!client){ alert('No encontré la ficha de este cliente (revisá que el teléfono del pedido sea el mismo que el de Clientes).'); return; }
+  const isWholesale = !!client.wholesale;
+  const prevTotal = order.total;
+  const nuevos = order.items.map(it=>{
+    const p = state.products.find(pr=>pr.id===String(it.id));
+    if(!p) return null;
+    const promo = activePromo(p);
+    if(it.grams){
+      const kg = isWholesale ? (p.wholesalePricePerKg || p.pricePerKg) : (promo !== null ? promo : p.pricePerKg);
+      return kg ? {price: kg, lineTotal: (kg/1000)*it.grams} : null;
+    }
+    const u = isWholesale ? (p.wholesalePrice || p.price) : (promo !== null ? promo : p.price);
+    return u ? {price: u, lineTotal: u*(it.qty||1)} : null;
+  });
+  const sim = order.items.reduce((s,it,i)=> s + (it.sinStock ? 0 : Number((nuevos[i]||it).lineTotal||0)), 0);
+  const disc = order.clientDiscountPct>0 ? Math.round(sim*order.clientDiscountPct/100) : 0;
+  const faltan = nuevos.filter(n=>!n).length;
+  if(!confirm(`Recalcular con precios ${isWholesale?'MAYORISTAS':'de cliente común'}?\n\nTotal actual: ${money(prevTotal)}\nTotal nuevo: ${money(sim-disc)}${faltan?`\n\n(${faltan} producto(s) ya no están en el catálogo y quedan con su precio anterior)`:''}`)) return;
+  order.items.forEach((it,i)=>{ if(nuevos[i]) Object.assign(it, nuevos[i]); });
+  recalcOrderTotal(order);
+  saveState(); render();
+  apiUpdateOrderItems(order);
+  toast('Precios actualizados', 'ok');
+}
 function recalcOrderTotal(order){
   const base = order.items.reduce((s,it)=> s + (it.sinStock ? 0 : Number(it.lineTotal||0)), 0);
   const discPct = order.clientDiscountPct || 0;
@@ -8039,9 +8081,7 @@ function replaceOrderItemProduct(orderId, itemIndex, newProductId){
     if(oldProduct){ oldProduct.stock = (oldProduct.stock||0) + (it.qty||1); apiPatchProductStock(oldProduct); }
   }
 
-  const clientPhone = order.customer && order.customer.phone ? normalizePhone(order.customer.phone) : null;
-  const client = clientPhone ? state.clients[clientPhone] : null;
-  const isWholesale = wholesaleModeActive(client);
+  const isWholesale = orderClientIsWholesale(order);
   const promo = activePromo(newProduct);
 
   it.id = Number(newProduct.id);
@@ -8143,9 +8183,7 @@ function confirmAddOrderItem(orderId, productId){
   const val = Number(input.value);
   if(!val || val<=0){ toast('Ingresá una cantidad válida', 'err'); return; }
 
-  const clientPhone = order.customer && order.customer.phone ? normalizePhone(order.customer.phone) : null;
-  const client = clientPhone ? state.clients[clientPhone] : null;
-  const isWholesale = wholesaleModeActive(client);
+  const isWholesale = orderClientIsWholesale(order);
   const promo = activePromo(product);
 
   const newItem = { id: Number(product.id), name: product.name };
