@@ -4094,7 +4094,13 @@ function renderAdmin(){
           <input type="email" id="admin-email-input" placeholder="Email" value="saboresroyal@gmail.com" onkeydown="if(event.key==='Enter') document.getElementById('admin-pass-input').focus()">
         </div>
         <div class="form-group" style="margin:0 0 14px; width:100%; max-width:280px;">
-          <input type="password" id="admin-pass-input" placeholder="Contraseña" onkeydown="if(event.key==='Enter') tryAdminLogin()">
+          <div style="position:relative;">
+            <input type="password" id="admin-pass-input" placeholder="Contraseña" style="padding-right:46px;" onkeydown="if(event.key==='Enter') tryAdminLogin()">
+            <button type="button" id="admin-pass-toggle" aria-label="Mostrar contraseña" title="Mostrar contraseña" onclick="toggleAdminPass()"
+              style="position:absolute; right:6px; top:50%; transform:translateY(-50%); width:34px; height:34px; display:flex; align-items:center; justify-content:center; background:none; border:none; color:rgba(255,255,255,0.55); cursor:pointer; padding:0;">
+              <span style="width:20px; height:20px; display:block;">${ic('eye')}</span>
+            </button>
+          </div>
         </div>
         <button class="btn-primary" style="max-width:280px;" onclick="tryAdminLogin()">Ingresar</button>
         <button class="btn-secondary" style="max-width:280px; margin-top:10px;" onclick="nav('home')">Volver a la app</button>
@@ -4224,6 +4230,19 @@ function renderAdmin(){
     ${tab==="chats" && !state.adminChatPhone ? `<button class="fab" onclick="openNewChatPicker()">${ic('plus')}</button>` : ""}
     ${tab==="premios" && state.adminPremiosSub==='catalogo' ? `<button class="fab" onclick="openRewardModal(null)">${ic('plus')}</button>` : ""}
   </div>`;
+}
+// Ojito de la contraseña del login: muestra/oculta lo escrito.
+function toggleAdminPass(){
+  const inp = document.getElementById('admin-pass-input');
+  const btn = document.getElementById('admin-pass-toggle');
+  if(!inp) return;
+  const ver = inp.type === 'password';
+  inp.type = ver ? 'text' : 'password';
+  if(btn){
+    btn.style.color = ver ? 'var(--gold2)' : 'rgba(255,255,255,0.55)';
+    btn.title = btn.ariaLabel = ver ? 'Ocultar contraseña' : 'Mostrar contraseña';
+  }
+  inp.focus();
 }
 async function tryAdminLogin(){
   const email = (document.getElementById("admin-email-input")||{}).value?.trim();
