@@ -7938,9 +7938,17 @@ function repriceOrder(orderId){
   if(!confirm(`Recalcular con precios ${isWholesale?'MAYORISTAS':'de cliente común'}?\n\nTotal actual: ${money(prevTotal)}\nTotal nuevo: ${money(sim-disc)}${faltan?`\n\n(${faltan} producto(s) ya no están en el catálogo y quedan con su precio anterior)`:''}`)) return;
   order.items.forEach((it,i)=>{ if(nuevos[i]) Object.assign(it, nuevos[i]); });
   recalcOrderTotal(order);
+  // Si el pedido ya tenía comprobante, se actualiza con los precios nuevos
+  // (mismo número). Una factura con CAE de AFIP no se puede tocar.
+  const v = state.vouchers.find(vc=>vc.orderId===order.id);
+  let msg = 'Precios actualizados';
+  if(v){
+    if(v.type==='factura' && v.afipCae) msg = 'Precios actualizados. La factura tiene CAE de AFIP y no se puede cambiar';
+    else { updateVoucherInPlace(v.id, v.type, orderItemsForVoucher(order), v.customer, v.showIVA, v.generalDiscount); msg = 'Precios y comprobante actualizados'; }
+  }
   saveState(); render();
   apiUpdateOrderItems(order);
-  toast('Precios actualizados', 'ok');
+  toast(msg, v && v.afipCae && v.type==='factura' ? 'err' : 'ok');
 }
 function recalcOrderTotal(order){
   const base = order.items.reduce((s,it)=> s + (it.sinStock ? 0 : Number(it.lineTotal||0)), 0);
@@ -11073,6 +11081,12 @@ function closeVoucherPickerModal(){
   const el = document.getElementById("voucher-picker-overlay");
   if(el) el.remove();
 }
+function orderItemsForVoucher(order){
+  return order.items.filter(it=>!it.sinStock).map(it=> it.grams
+    ? {name: formatOrderItemLabel(it), qty:1, price: it.lineTotal!=null ? it.lineTotal : (it.price/1000)*it.grams}
+    : {name: it.name, qty: it.qty, price: it.price}
+  );
+}
 async function generateVoucherFromOrder(orderId, type, includeIVA){
   const order = state.orders.find(o=>o.id===orderId);
   if(!order) return;
@@ -11080,10 +11094,7 @@ async function generateVoucherFromOrder(orderId, type, includeIVA){
   // pasan como 1 unidad cuyo "precio" es el importe total de esa línea —
   // si no, el comprobante calcula qty*price con qty=undefined y da $NaN.
   // Los items marcados sin stock no se facturan (no se van a entregar).
-  const items = order.items.filter(it=>!it.sinStock).map(it=> it.grams
-    ? {name: formatOrderItemLabel(it), qty:1, price: it.lineTotal!=null ? it.lineTotal : (it.price/1000)*it.grams}
-    : {name: it.name, qty: it.qty, price: it.price}
-  );
+  const items = orderItemsForVoucher(order);
   if(type === "factura"){
     const overlay = document.getElementById("voucher-picker-overlay");
     if(overlay) overlay.querySelector(".modal-sheet").innerHTML = `<div class="modal-handle"></div><h3 class="modal-title">Factura</h3><p style="padding:24px 16px; font-size:13px; color:rgba(255,255,255,0.6); text-align:center;"><span class="spin" style="display:inline-block;">${ic('sparkle')}</span><br><br>Solicitando CAE a AFIP…</p>`;
