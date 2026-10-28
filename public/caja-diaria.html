@@ -836,13 +836,16 @@ tr:hover td { background:var(--surface2); }
       <div>
         <label>Fecha de ingreso</label>
         <div style="display:flex;gap:6px;">
-          <input type="date" id="facFechaIngreso" style="flex:1;">
-          <button type="button" class="btn btn-ghost btn-sm" onclick="document.getElementById('facFechaIngreso').value=todayStr()">Hoy</button>
+          <input type="date" id="facFechaIngreso" style="flex:1;" onchange="facDiasAVence()">
+          <button type="button" class="btn btn-ghost btn-sm" onclick="document.getElementById('facFechaIngreso').value=todayStr();facDiasAVence()">Hoy</button>
         </div>
       </div>
       <div>
         <label>Fecha de vencimiento <span style="text-transform:none;letter-spacing:0;">(no hace falta en NC)</span></label>
-        <input type="date" id="facFechaVence">
+        <div style="display:flex;gap:6px;">
+          <input type="date" id="facFechaVence" style="flex:1;" onchange="facVenceADias()">
+          <input type="number" id="facDias" min="0" step="1" inputmode="numeric" placeholder="Días" title="Días para pagar desde la fecha de ingreso" style="width:80px;" oninput="facDiasAVence()">
+        </div>
       </div>
     </div>
     <div class="grid4 mb16">
@@ -3676,6 +3679,7 @@ function editarFactura(id) {
   document.getElementById('facMonto').value = f.monto||'';
   document.getElementById('facFechaIngreso').value = f.fechaIngreso||'';
   document.getElementById('facFechaVence').value = f.fechaVence||'';
+  facVenceADias();
   document.getElementById('facTipo').value = TIPOS_COMP[f.tipo] ? f.tipo : 'factura';
   document.getElementById('facNumero').value = f.numero||'';
   document.getElementById('facNota').value = f.nota||'';
@@ -3687,11 +3691,29 @@ function editarFactura(id) {
 
 function cancelarEdicionFactura() {
   facturaEditandoId = null;
-  ['facProveedor','facMonto','facFechaVence','facNumero','facNota','facFormaPago'].forEach(id=>{ document.getElementById(id).value=''; });
+  ['facProveedor','facMonto','facFechaVence','facDias','facNumero','facNota','facFormaPago'].forEach(id=>{ document.getElementById(id).value=''; });
   document.getElementById('facTipo').value = 'factura';
   document.getElementById('facFechaIngreso').value = todayStr();
   document.getElementById('btnGuardarFactura').textContent = '+ Agregar comprobante';
   document.getElementById('btnCancelarEdicionFactura').style.display = 'none';
+}
+
+// "Días para pagar": con la fecha de ingreso arma el vencimiento solo, y al
+// revés, si se pone la fecha de vencimiento a mano muestra cuántos días son.
+function facDiasAVence() {
+  const dias = document.getElementById('facDias').value;
+  const ing = document.getElementById('facFechaIngreso').value;
+  if(dias === '' || !ing) return;
+  const d = new Date(ing + 'T12:00:00');
+  d.setDate(d.getDate() + (parseInt(dias,10)||0));
+  document.getElementById('facFechaVence').value = localDateStr(d);
+}
+function facVenceADias() {
+  const ing = document.getElementById('facFechaIngreso').value;
+  const vto = document.getElementById('facFechaVence').value;
+  document.getElementById('facDias').value = (ing && vto)
+    ? Math.round((new Date(vto + 'T12:00:00') - new Date(ing + 'T12:00:00')) / 86400000)
+    : '';
 }
 
 // ── CARGA DESDE FOTO ──
@@ -3801,6 +3823,7 @@ async function leerFotoFactura(input) {
     document.getElementById('facMonto').value = r.total || '';
     document.getElementById('facFechaIngreso').value = r.fechaEmision || todayStr();
     document.getElementById('facFechaVence').value = r.fechaVencimiento || '';
+    facVenceADias();
     const { avisos, dup } = avisosComprobante(r);
     estadoFotoFactura(`✓ Leído: <b>${escHtml(compLabel(r))}</b> de <b>${escHtml(r.proveedor||'¿proveedor?')}</b> por <b>${pesos2(r.total)}</b>. Revisá los datos y tocá <b>+ Agregar comprobante</b>.`
       + (avisos.length ? `<br><span style="color:var(--yellow)">⚠ ${avisos.join(' · ')}</span>` : ''), dup ? 'var(--red)' : avisos.length ? 'var(--yellow)' : 'var(--green)');
