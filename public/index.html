@@ -8968,6 +8968,34 @@ function appendBarcodeDebug(msg){
   const el = document.getElementById('barcode-debug');
   if(el) el.textContent += (el.textContent?' | ':'') + msg;
 }
+// Pedidos de cámara de más exigente a más simple: algunos Android rechazan
+// la trasera en alta resolución (OverconstrainedError / NotReadableError) y
+// antes eso dejaba el escáner sin cámara. Se prueba uno tras otro.
+const BARCODE_CAM_CONSTRAINTS = [
+  { video:{ facingMode:{ideal:'environment'}, width:{ideal:1920}, height:{ideal:1080} } },
+  { video:{ facingMode:{ideal:'environment'} } },
+  { video:true },
+];
+async function getBarcodeCameraStream(){
+  let lastErr;
+  for(const c of BARCODE_CAM_CONSTRAINTS){
+    try{ return await navigator.mediaDevices.getUserMedia(c); }
+    catch(e){
+      lastErr = e;
+      appendBarcodeDebug('getUserMedia '+JSON.stringify(c.video).slice(0,40)+' falló: '+e.name);
+      // Si el permiso está negado no tiene sentido seguir probando.
+      if(e.name==='NotAllowedError' || e.name==='SecurityError') break;
+    }
+  }
+  throw lastErr;
+}
+function cameraErrorMessage(err){
+  const n = err && err.name;
+  if(n==='NotAllowedError' || n==='SecurityError') return 'El permiso de la cámara está bloqueado. En Chrome: candado al lado de la dirección → Permisos → Cámara → Permitir. Si usás la app instalada: mantené apretado el ícono → Información de la app → Permisos → Cámara → Permitir.';
+  if(n==='NotReadableError' || n==='TrackStartError' || n==='AbortError') return 'La cámara está siendo usada por otra app. Cerrá las otras apps (cámara, WhatsApp, etc.) y probá de nuevo.';
+  if(n==='NotFoundError' || n==='OverconstrainedError') return 'No se encontró una cámara disponible en este equipo.';
+  return 'No se pudo abrir la cámara: '+((err && err.message) || err);
+}
 function startBarcodeCamera(){
   const manualInput = document.getElementById('barcode-manual-input');
   if(manualInput) manualInput.focus();
@@ -8978,6 +9006,11 @@ function startBarcodeCamera(){
       appendBarcodeDebug('frame '+video.videoWidth+'x'+video.videoHeight);
     });
     video.addEventListener('error', ()=>appendBarcodeDebug('<video> error'));
+  }
+  if(!navigator.mediaDevices || !navigator.mediaDevices.getUserMedia){
+    appendBarcodeDebug('sin mediaDevices');
+    setBarcodeStatus('Este navegador no deja usar la cámara. Abrí el panel desde Google Chrome (no desde WhatsApp) o escribí el código a mano.');
+    return;
   }
   appendBarcodeDebug('BarcodeDetector: '+(window.BarcodeDetector?'sí':'no'));
   // Si getSupportedFormats se cuelga o tarda de más en algún navegador
@@ -9000,7 +9033,7 @@ function startBarcodeCamera(){
 function startBarcodeCameraNative(formats){
   appendBarcodeDebug('motor: nativo');
   const video = document.getElementById('barcode-video');
-  navigator.mediaDevices.getUserMedia({ video:{ facingMode:'environment', width:{ideal:1920}, height:{ideal:1080} } }).then(stream=>{
+  getBarcodeCameraStream().then(stream=>{
     appendBarcodeDebug('getUserMedia ok, tracks: '+stream.getVideoTracks().length);
     _barcodeStream = stream;
     video.srcObject = stream;
@@ -9021,7 +9054,7 @@ function startBarcodeCameraNative(formats){
       pauseBarcodeCamera();
       startBarcodeCameraZXing();
     }
-  }).catch(err=>{ appendBarcodeDebug('getUserMedia falló: '+err.name); setBarcodeStatus('No se pudo abrir la cámara: '+(err.message||err)); });
+  }).catch(err=>{ appendBarcodeDebug('getUserMedia falló: '+err.name); setBarcodeStatus(cameraErrorMessage(err)); });
 }
 function startBarcodeCameraZXing(){
   appendBarcodeDebug('motor: ZXing');
@@ -9048,12 +9081,11 @@ function startBarcodeCameraZXing(){
       }
     }catch(e){ appendBarcodeDebug('armado de hints falló: '+e.message); hints = undefined; }
     const codeReader = new ZXingBrowser.BrowserMultiFormatReader(hints);
-    codeReader.decodeFromConstraints(
-      { video: { facingMode: 'environment', width:{ideal:1920}, height:{ideal:1080} } },
-      video,
-      (result)=>{ if(result) onBarcodeDetected(result.getText()); }
-    ).then(controls=>{ _zxingControls = controls; appendBarcodeDebug('decodeFromConstraints ok'); })
-    .catch(err=>{ appendBarcodeDebug('decodeFromConstraints falló: '+(err.name||'')+' '+err.message); setBarcodeStatus('No se pudo abrir la cámara: '+(err.message||err)); });
+    getBarcodeCameraStream().then(stream=>{
+      _barcodeStream = stream;
+      return codeReader.decodeFromStream(stream, video, (result)=>{ if(result) onBarcodeDetected(result.getText()); });
+    }).then(controls=>{ _zxingControls = controls; appendBarcodeDebug('decodeFromStream ok'); })
+    .catch(err=>{ appendBarcodeDebug('ZXing cámara falló: '+(err.name||'')+' '+err.message); setBarcodeStatus(cameraErrorMessage(err)); });
   }).catch(err=>{ appendBarcodeDebug('carga de ZXing falló'); setBarcodeStatus(err.message); });
 }
 function pauseBarcodeCamera(){
