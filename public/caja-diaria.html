@@ -841,7 +841,7 @@ tr:hover td { background:var(--surface2); }
         </div>
       </div>
       <div>
-        <label>Fecha de vencimiento <span style="text-transform:none;letter-spacing:0;">(no hace falta en NC)</span></label>
+        <label>Fecha de vencimiento <span style="text-transform:none;letter-spacing:0;">(no hace falta en NC ni pago a cuenta)</span></label>
         <div style="display:flex;gap:6px;">
           <input type="date" id="facFechaVence" style="flex:1;" onchange="facVenceADias()">
           <input type="number" id="facDias" min="0" step="1" inputmode="numeric" placeholder="Días" title="Días para pagar desde la fecha de ingreso" style="width:80px;" oninput="facDiasAVence()">
@@ -3588,9 +3588,15 @@ function diasHasta(fecha) {
 }
 const FORMAS_PAGO = { cheque:'Cheque', echeq:'eCheq', efectivo:'Efectivo', transferencia:'Transferencia' };
 const FORMAS_PAGO_TODAS = Object.assign({}, FORMAS_PAGO, { combinado:'varios medios' });
+// Los datos del pago están en las facturas/remitos del grupo: los créditos
+// (NC, pagos a cuenta) guardan los suyos propios.
+function principalDePago(grupo) { return grupo.find(f=>!esNC(f)) || grupo[0]; }
+// Pago a cuenta en el que salió plata (no el saldo que deja un pago de más,
+// que ya cuenta dentro de ese pago).
+function esPagoACuenta(f) { return f.tipo==='acuenta' && !String(f.origenPagoId||'').startsWith('P') && (f.pagoMedios||[]).length>0; }
 // Medios de un pago: los nuevos guardan pagoMedios; los viejos tenían una sola forma.
 function mediosDePago(grupo) {
-  const f0 = grupo[0];
+  const f0 = principalDePago(grupo);
   if(f0.pagoMedios && f0.pagoMedios.length) return f0.pagoMedios;
   return f0.formaPago && f0.formaPago!=='combinado' ? [{forma: f0.formaPago, monto: sumaNeta(grupo), detalle: f0.pagoDetalle||''}] : [];
 }
@@ -3604,7 +3610,7 @@ function sumaNeta(arr) { return arr.reduce((s,f)=>s+montoNeto(f),0); }
 function esNC(f) { return f.tipo==='nc' || f.tipo==='acuenta'; }
 // Lo que se pagó de verdad en un pago (suma de los medios); si es viejo, el neto de los comprobantes.
 function totalPagadoGrupo(grupo) {
-  const ms = grupo[0].pagoMedios;
+  const ms = principalDePago(grupo).pagoMedios;
   return ms && ms.length ? r2(ms.reduce((s,m)=>s+(+m.monto||0),0)) : r2(sumaNeta(grupo));
 }
 function saldoGeneradoPor(pagoId) { return pagoId ? state.facturas.find(x=>x.tipo==='acuenta' && x.origenPagoId===pagoId) : null; }
@@ -3649,16 +3655,27 @@ function guardarFactura() {
   const numero = document.getElementById('facNumero').value.trim();
   const nota = document.getElementById('facNota').value.trim();
   const formaPago = document.getElementById('facFormaPago').value;
-  if(tipo==='nc' && !fechaVence) fechaVence = fechaIngreso; // una NC no vence: se aplica en el próximo pago
+  if((tipo==='nc' || tipo==='acuenta') && !fechaVence) fechaVence = fechaIngreso; // una NC o un pago a cuenta no vencen: se aplican en el próximo pago
+  if(tipo==='acuenta' && formaPago==='combinado') { alert('Para un pago a cuenta con varios medios usá el botón "Pago a cuenta" de la tabla de deuda por proveedor.'); return; }
   if(!proveedor || !monto || !fechaIngreso || !fechaVence) { alert('Completá proveedor, monto, fecha de ingreso y vencimiento.'); return; }
   if(fechaVence < fechaIngreso && !confirm('El vencimiento es anterior a la fecha de ingreso. ¿Guardar igual?')) return;
   const repetida = buscarFacturaRepetida({proveedor, tipo, numero, monto, fechaIngreso}, facturaEditandoId);
   if(repetida && !confirm([repetida.seguro ? '⚠ Esta factura YA ESTÁ CARGADA:' : '⚠ Puede estar repetida (mismo proveedor, monto y fecha):',
     textoRepetida(repetida), '¿Guardarla igual?'].join(String.fromCharCode(10, 10)))) return;
   // Elegir una forma de pago = la factura queda pagada (hoy, o la fecha que ya tenía).
-  const pago = f => formaPago
-    ? {estado:'pagada', formaPago, fechaPagada: (f && f.fechaPagada) || todayStr()}
-    : {estado:'pendiente', formaPago:'', fechaPagada:'', pagoId:'', pagoDetalle:'', pagoMedios:[]};
+  // Un pago a cuenta queda como crédito pendiente de aplicar; la forma en que
+  // se pagó se guarda en pagoMedios (si no se cambia, conserva la que tenía).
+  const pago = f => {
+    if(f && esNC(f) && f.estado==='pagada') return {}; // crédito ya descontado en un pago: sigue usado
+    if(tipo==='acuenta') {
+      const previos = f && f.tipo==='acuenta' ? (f.pagoMedios||[]) : [];
+      return {estado:'pendiente', formaPago:'', fechaPagada:'', pagoId:'', pagoDetalle:'',
+        pagoMedios: formaPago ? [{forma: formaPago, monto, detalle:''}] : previos};
+    }
+    return formaPago
+      ? {estado:'pagada', formaPago, fechaPagada: (f && f.fechaPagada) || todayStr()}
+      : {estado:'pendiente', formaPago:'', fechaPagada:'', pagoId:'', pagoDetalle:'', pagoMedios:[]};
+  };
   if(facturaEditandoId) {
     const f = state.facturas.find(x=>x.id===facturaEditandoId);
     if(f) Object.assign(f, {proveedor, monto, fechaIngreso, fechaVence, tipo, numero, nota}, pago(f));
@@ -3683,7 +3700,8 @@ function editarFactura(id) {
   document.getElementById('facTipo').value = TIPOS_COMP[f.tipo] ? f.tipo : 'factura';
   document.getElementById('facNumero').value = f.numero||'';
   document.getElementById('facNota').value = f.nota||'';
-  document.getElementById('facFormaPago').value = f.estado==='pagada' ? (f.formaPago||'') : '';
+  document.getElementById('facFormaPago').value = f.tipo==='acuenta' ? ((f.pagoMedios||[]).length===1 ? f.pagoMedios[0].forma : '')
+    : f.estado==='pagada' ? (f.formaPago||'') : '';
   document.getElementById('btnGuardarFactura').textContent = '💾 Guardar cambios';
   document.getElementById('btnCancelarEdicionFactura').style.display = 'inline-flex';
   document.getElementById('facProveedor').scrollIntoView({behavior:'smooth', block:'center'});
@@ -4011,13 +4029,27 @@ function registrarPagoDeuda() {
   if(!medios.length || medios.some(m=>!m.forma)) { alert('Elegí el medio de pago de cada fila: cheque, eCheq, efectivo o transferencia.'); return; }
   if(medios.some(m=>m.monto<=0)) { alert('Cada medio de pago tiene que tener un monto mayor a cero.'); return; }
   const asignado = r2(medios.reduce((s,m)=>s+m.monto,0));
-  if(asignado<total) { alert(`Los medios de pago suman ${pesos2(asignado)} y el pago es de ${pesos2(total)}. Falta asignar ${pesos2(r2(total-asignado))}.`); return; }
+  if(asignado<total) {
+    // Pagar menos que el total = pago a cuenta: los comprobantes siguen
+    // pendientes y la plata queda como saldo a favor del proveedor.
+    if(!confirm(`Pagás ${pesos2(asignado)} y los comprobantes suman ${pesos2(total)}.\n\n¿Registrarlo como PAGO A CUENTA de ${items[0].proveedor}?\nLos comprobantes siguen pendientes y los ${pesos2(asignado)} quedan como saldo a favor: se descuentan cuando juntes ese saldo en el próximo pago (quedarían ${pesos2(r2(total-asignado))} por pagar).`)) return;
+    registrarPagoACuenta(items[0].proveedor, fechaPagada, medios);
+    deudaSeleccion.clear();
+    limpiarMediosPago();
+    document.getElementById('deudaPagoFecha').value = todayStr();
+    renderDeuda();
+    return;
+  }
   const sobrante = r2(asignado - total);
   if(sobrante>0 && !confirm(`Pagás ${pesos2(asignado)} y los comprobantes suman ${pesos2(total)}.\n\nLos ${pesos2(sobrante)} de más quedan A CUENTA de ${items[0].proveedor} como saldo a favor, y se descuentan en el próximo pago. ¿Seguir?`)) return;
   const formaPago = medios.length===1 ? medios[0].forma : 'combinado';
   const pagoDetalle = medios.length===1 ? medios[0].detalle : medios.map(textoMedio).join(' + ');
   const pagoId = 'P'+Date.now();
-  items.forEach(f=>Object.assign(f, {estado:'pagada', formaPago, fechaPagada, pagoId, pagoDetalle, pagoMedios: medios.map(m=>Object.assign({}, m))}));
+  // Los créditos (NC y pagos a cuenta) se marcan como usados pero conservan
+  // sus propios datos de pago: un pago a cuenta recuerda cómo se pagó.
+  items.forEach(f=>Object.assign(f, esNC(f)
+    ? {estado:'pagada', fechaPagada, pagoId}
+    : {estado:'pagada', formaPago, fechaPagada, pagoId, pagoDetalle, pagoMedios: medios.map(m=>Object.assign({}, m))}));
   if(sobrante>0) state.facturas.push({id: Date.now()+1, proveedor: items[0].proveedor, monto: sobrante, fechaIngreso: fechaPagada, fechaVence: fechaPagada,
     tipo:'acuenta', numero:'', nota:`Pago de más del ${fmtFecha(fechaPagada)}`, estado:'pendiente', formaPago:'', fechaPagada:'', pagoId:'', pagoDetalle:'', origenPagoId: pagoId});
   deudaSeleccion.clear();
@@ -4025,6 +4057,49 @@ function registrarPagoDeuda() {
   document.getElementById('deudaPagoFecha').value = todayStr();
   save(); renderDeuda();
   informarPago(items[0].id);
+}
+
+// ── PAGO A CUENTA ──
+// Plata que se le da al proveedor sin cancelar ningún comprobante entero:
+// queda como saldo a favor que se descuenta al juntarlo en un próximo pago.
+function registrarPagoACuenta(proveedor, fecha, medios) {
+  const ms = medios.map(m=>({forma: m.forma, monto: r2(m.monto), detalle: m.detalle||''}));
+  const monto = r2(ms.reduce((s,m)=>s+m.monto,0));
+  state.facturas.push({id: Date.now(), proveedor, monto, fechaIngreso: fecha, fechaVence: fecha,
+    tipo:'acuenta', numero:'', nota:`Pago a cuenta del ${fmtFecha(fecha)}`, estado:'pendiente', formaPago:'', fechaPagada:'', pagoId:'',
+    pagoDetalle: ms.length===1 ? ms[0].detalle : ms.map(textoMedio).join(' + '), pagoMedios: ms,
+    // "A…" distingue un pago a cuenta (salió plata) del saldo que deja un pago de más ("P…").
+    origenPagoId: 'A'+Date.now()});
+  save();
+}
+let pagoACuentaProveedor = null;
+function abrirPagoACuenta(proveedor) {
+  pagoACuentaProveedor = proveedor;
+  const deuda = r2(sumaNeta(state.facturas.filter(f=>f.estado!=='pagada' && provKey(f.proveedor)===provKey(proveedor))));
+  document.getElementById('acProveedor').textContent = proveedor;
+  document.getElementById('acDeuda').textContent = pesos2(deuda);
+  document.getElementById('acFecha').value = todayStr();
+  ['acMonto','acForma','acDetalle'].forEach(id=>{ document.getElementById(id).value=''; });
+  document.getElementById('modalPagoACuenta').style.display = 'flex';
+  setTimeout(()=>document.getElementById('acMonto').focus(), 50);
+}
+function cerrarPagoACuenta() {
+  document.getElementById('modalPagoACuenta').style.display = 'none';
+  pagoACuentaProveedor = null;
+}
+function confirmarPagoACuenta() {
+  const proveedor = pagoACuentaProveedor;
+  if(!proveedor) return;
+  const monto = r2(leerMonto(document.getElementById('acMonto').value));
+  const forma = document.getElementById('acForma').value;
+  if(!(monto>0)) { alert('Poné el monto del pago.'); return; }
+  if(!forma) { alert('Elegí la forma de pago.'); return; }
+  const deuda = r2(sumaNeta(state.facturas.filter(f=>f.estado!=='pagada' && provKey(f.proveedor)===provKey(proveedor))));
+  if(deuda>0 && monto>deuda && !confirm(`El pago (${pesos2(monto)}) es mayor a la deuda (${pesos2(deuda)}). ¿Registrarlo igual?`)) return;
+  registrarPagoACuenta(proveedor, document.getElementById('acFecha').value || todayStr(),
+    [{forma, monto, detalle: document.getElementById('acDetalle').value.trim()}]);
+  cerrarPagoACuenta();
+  renderDeuda();
 }
 
 // ── INFORMAR PAGO AL PROVEEDOR ──
@@ -4045,7 +4120,7 @@ function telWhatsApp(tel) {
 }
 
 function textoInformePago(grupo) {
-  const f0 = grupo[0];
+  const f0 = principalDePago(grupo);
   const comps = [...grupo].sort((a,b)=>(esNC(a)-esNC(b)) || a.fechaIngreso.localeCompare(b.fechaIngreso));
   const lineas = comps.map(f=>`• ${compLabel(f)}${f.fechaIngreso?' ('+fmtFecha(f.fechaIngreso)+')':''}: ${pesos2(montoNeto(f))}`);
   return [
@@ -4144,7 +4219,11 @@ function volverAPendiente(id) {
   const saldo = saldoGeneradoPor(f.pagoId);
   if(saldo && saldo.estado==='pagada') { alert(`Este pago dejó ${pesos2(saldo.monto)} a cuenta y ese saldo ya se usó en el pago del ${fmtFecha(saldo.fechaPagada)}. Primero volvé a pendiente ese otro pago.`); return; }
   if(!confirm(msg + (saldo ? `\n\nTambién se borra el saldo a favor de ${pesos2(saldo.monto)} que generó.` : ''))) return;
-  grupo.forEach(x=>Object.assign(x, {estado:'pendiente', formaPago:'', fechaPagada:'', pagoId:'', pagoDetalle:'', pagoInformado:'', pagoMedios:[]}));
+  // Los créditos del pago vuelven a quedar disponibles sin perder sus datos
+  // (un pago a cuenta sigue recordando cómo se pagó).
+  grupo.forEach(x=>Object.assign(x, esNC(x)
+    ? {estado:'pendiente', fechaPagada:'', pagoId:'', pagoInformado:''}
+    : {estado:'pendiente', formaPago:'', fechaPagada:'', pagoId:'', pagoDetalle:'', pagoInformado:'', pagoMedios:[]}));
   if(saldo) state.facturas = state.facturas.filter(x=>x!==saldo);
   save(); renderDeuda();
 }
@@ -4191,7 +4270,7 @@ function actualizarAsignadoPago() {
   const dif = r2(total - asignado);
   el.innerHTML = dif===0
     ? `<span style="color:var(--green);">✓ Asignado ${pesos2(asignado)} de ${pesos2(total)}</span>`
-    : dif>0 ? `<span style="color:var(--yellow);">Asignado ${pesos2(asignado)} · falta ${pesos2(dif)}</span>`
+    : dif>0 ? `<span style="color:var(--yellow);">Asignado ${pesos2(asignado)} · falta ${pesos2(dif)}${asignado>0?' → si lo registrás así, queda como pago a cuenta':''}</span>`
             : `<span style="color:#60a5fa;">Asignado ${pesos2(asignado)} · pagás ${pesos2(-dif)} de más → queda a cuenta</span>`;
 }
 function limpiarMediosPago() {
@@ -4273,6 +4352,11 @@ function renderDeudaResumen() {
   const grupos = {};
   pagadasMes.forEach(f=>{ const k = f.pagoId || ('f'+f.id); (grupos[k] = grupos[k] || []).push(f); });
   Object.values(grupos).forEach(g=>mediosDePago(g).forEach(m=>{ totForma[m.forma] = (totForma[m.forma]||0) + m.monto; }));
+  // Los pagos a cuenta cuentan el día que salió la plata; cuando después se
+  // descuentan de una factura, ese pago ya los resta (no se cuentan dos veces).
+  const aCuentaMes = state.facturas.filter(f=>esPagoACuenta(f) && (f.fechaIngreso||'').slice(0,7)===mes);
+  aCuentaMes.forEach(f=>f.pagoMedios.forEach(m=>{ totForma[m.forma] = (totForma[m.forma]||0) + (+m.monto||0); }));
+  const pagadoMes = suma(pagadasMes) + aCuentaMes.reduce((s,f)=>s+f.monto,0);
   const porForma = Object.entries(FORMAS_PAGO)
     .map(([k,v])=>({v, total: totForma[k]||0}))
     .filter(x=>x.total>0)
@@ -4281,7 +4365,7 @@ function renderDeudaResumen() {
     <div class="stat"><div class="stat-label">Deuda total pendiente</div><div class="stat-value gold">${pesos2(suma(pendientes))}</div><div style="font-size:11px;color:var(--muted);margin-top:4px">${pendientes.length-ncPend.length} comprobante(s)${ncPend.length?`<br><span style="color:var(--green)">ya descontadas ${ncPend.length} NC: −${pesos2(ncPend.reduce((s,f)=>s+f.monto,0))}</span>`:''}</div></div>
     <div class="stat"><div class="stat-label">Vencidas sin pagar</div><div class="stat-value" style="color:${vencidas.length?'var(--red)':'var(--text)'}">${pesos2(suma(vencidas))}</div><div style="font-size:11px;color:var(--muted);margin-top:4px">${vencidas.length} factura(s)</div></div>
     <div class="stat"><div class="stat-label">Vencen en ${DEUDA_ALERTA_DIAS} días</div><div class="stat-value" style="color:${proximas.length?'var(--yellow)':'var(--text)'}">${pesos2(suma(proximas))}</div><div style="font-size:11px;color:var(--muted);margin-top:4px">${proximas.length} factura(s)</div></div>
-    <div class="stat"><div class="stat-label">Pagado este mes</div><div class="stat-value green">${pesos2(suma(pagadasMes))}</div><div style="font-size:11px;color:var(--muted);margin-top:4px">${pagadasMes.filter(f=>!esNC(f)).length} comprobante(s)${porForma?'<br>'+porForma:''}</div></div>
+    <div class="stat"><div class="stat-label">Pagado este mes</div><div class="stat-value green">${pesos2(pagadoMes)}</div><div style="font-size:11px;color:var(--muted);margin-top:4px">${pagadasMes.filter(f=>!esNC(f)).length} comprobante(s)${aCuentaMes.length?` · ${aCuentaMes.length} pago(s) a cuenta`:''}${porForma?'<br>'+porForma:''}</div></div>
   `;
 }
 
@@ -4310,6 +4394,7 @@ function renderDeudaPorProveedor() {
           <th class="num">Próx. vencimiento</th>
           <th class="num">Vencido</th>
           <th class="num yellow">Total adeudado</th>
+          <th></th>
         </tr></thead>
         <tbody>${filas.map(f=>`
           <tr style="cursor:pointer;${deudaProveedorSel===f.proveedor?'background:var(--surface2);':''}" onclick="setDeudaProveedor(this.dataset.p)" data-p="${escHtml(f.proveedor)}">
@@ -4318,6 +4403,7 @@ function renderDeudaPorProveedor() {
             <td class="num">${fmtFecha(f.proxVence)}</td>
             <td class="num" style="color:${f.vencido?'var(--red)':'var(--muted)'}">${f.vencido?pesos2(f.vencido):'—'}</td>
             <td class="num yellow" style="font-weight:700;">${pesos2(f.total)}</td>
+            <td class="num"><button class="btn btn-ghost btn-sm" style="white-space:nowrap;" onclick="event.stopPropagation();abrirPagoACuenta(this.closest('tr').dataset.p)">Pago a cuenta</button></td>
           </tr>
         `).join('')}</tbody>
       </table>
@@ -4375,14 +4461,16 @@ function renderDeuda() {
     if(f.estado==='pagada'){ cls+=' pagado'; status = esNC(f)
         ? `✓ DESCONTADA en el pago del ${fmtFecha(f.fechaPagada)}`
         : `✓ PAGADA${f.formaPago?' con '+FORMAS_PAGO_TODAS[f.formaPago]:''}${f.fechaPagada?' el '+fmtFecha(f.fechaPagada):''}`;
-      if(f.pagoDetalle) status += `<div style="color:var(--muted);font-weight:400;">${escHtml(f.pagoDetalle)}</div>`;
+      if(esPagoACuenta(f)) status += `<div style="color:var(--muted);font-weight:400;">Se había pagado con ${escHtml(f.pagoMedios.map(textoMedio).join(' + '))}</div>`;
+      else if(f.pagoDetalle && !esNC(f)) status += `<div style="color:var(--muted);font-weight:400;">${escHtml(f.pagoDetalle)}</div>`;
       const grupo = grupoDePago(f);
       if(grupo.length>1) status += `<div style="color:var(--muted);font-weight:400;">🔗 Pago conjunto de ${grupo.length} comprobantes: ${pesos2(sumaNeta(grupo))}</div>`;
       const saldoGen = saldoGeneradoPor(f.pagoId);
       if(saldoGen) status += `<div style="color:#60a5fa;font-weight:400;">💵 Se pagó ${pesos2(totalPagadoGrupo(grupo))}: quedaron ${pesos2(saldoGen.monto)} a cuenta</div>`;
       if(f.pagoInformado) status += `<div style="color:var(--muted);font-weight:400;">📤 Informado al proveedor el ${fmtFecha(f.pagoInformado)}</div>`;
       statusColor='var(--green)'; }
-    else if(esNC(f)){ status = f.tipo==='acuenta' ? 'SALDO A FAVOR · se descuenta al juntarlo en el próximo pago' : 'CRÉDITO A FAVOR · juntala con una factura al pagar'; statusColor='var(--green)'; }
+    else if(esNC(f)){ status = f.tipo==='acuenta' ? 'SALDO A FAVOR · se descuenta al juntarlo en el próximo pago' : 'CRÉDITO A FAVOR · juntala con una factura al pagar'; statusColor='var(--green)';
+      if(esPagoACuenta(f)) status += `<div style="color:var(--muted);font-weight:400;">Pagado con ${escHtml(f.pagoMedios.map(textoMedio).join(' + '))}</div>`; }
     else if(diff<0){ cls+=' vencido'; status=`⚠ Vencida hace ${Math.abs(diff)} día(s)`; statusColor='var(--red)'; }
     else if(diff===0){ cls+=' alerta'; status='⏰ Vence HOY'; statusColor='var(--yellow)'; }
     else if(diff<=DEUDA_ALERTA_DIAS){ cls+=' alerta'; status=`⏰ Vence en ${diff} día(s)`; statusColor='var(--yellow)'; }
@@ -5360,6 +5448,35 @@ init();
 </div>
 
 <!-- MODAL: INFORMAR PAGO AL PROVEEDOR -->
+<!-- ══════════════════════════════════════════
+     MODAL: PAGO A CUENTA A UN PROVEEDOR
+══════════════════════════════════════════ -->
+<div class="modal-bg" id="modalPagoACuenta" style="display:none;" onclick="if(event.target===this) cerrarPagoACuenta()">
+  <div class="modal">
+    <h2>💵 Pago a cuenta — <span id="acProveedor"></span></h2>
+    <p class="hint">Deuda actual: <b id="acDeuda"></b>. El pago queda como saldo a favor y se descuenta cuando lo juntes con facturas en un próximo pago.</p>
+    <div class="grid2 mb16">
+      <div><label>Fecha del pago</label><input type="date" id="acFecha"></div>
+      <div><label>Monto ($)</label><input type="text" id="acMonto" inputmode="decimal" placeholder="0,00"></div>
+    </div>
+    <div class="mb16">
+      <label>Forma de pago</label>
+      <select id="acForma">
+        <option value="">Elegí…</option>
+        <option value="cheque">Cheque</option>
+        <option value="echeq">eCheq</option>
+        <option value="efectivo">Efectivo</option>
+        <option value="transferencia">Transferencia</option>
+      </select>
+    </div>
+    <div><label>Detalle (opcional)</label><input type="text" id="acDetalle" placeholder="Ej: cheque N° 2037, transferencia del Galicia"></div>
+    <div class="modal-actions">
+      <button class="btn btn-ghost" onclick="cerrarPagoACuenta()">Cancelar</button>
+      <button class="btn btn-green" onclick="confirmarPagoACuenta()">Registrar pago a cuenta</button>
+    </div>
+  </div>
+</div>
+
 <div class="modal-bg" id="modalInformarPago" style="display:none;" onclick="if(event.target===this) cerrarInformarPago()">
   <div class="modal" style="max-width:520px;">
     <h2>📤 Informar pago a <span id="infPagoProveedor"></span></h2>
