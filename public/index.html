@@ -9209,14 +9209,52 @@ function openStockCountScanner(){
   document.body.appendChild(overlay);
   startBarcodeCamera();
 }
+// Productos del local, para elegir uno en vez de escribir el nombre (los que
+// todavía no tienen código primero).
+function stockCountProductOptions(){
+  return state.products.slice()
+    .sort((a,b)=>(!!a.barcode - !!b.barcode) || a.name.localeCompare(b.name))
+    .map(p=>`<option value="${escapeHtml(p.name)}"></option>`).join('');
+}
+function stockCountProductByName(name){
+  const n = normText(name||'');
+  return n ? state.products.find(p=>normText(p.name)===n) : null;
+}
+// Al elegir uno de los productos del local: trae su precio y ofrece guardarle el código.
+function onStockCountNameInput(){
+  const p = stockCountProductByName(document.getElementById('sc-name').value);
+  const box = document.getElementById('sc-link-box');
+  if(box) box.style.display = p ? 'flex' : 'none';
+  const price = document.getElementById('sc-price');
+  if(p && price && !price.dataset.tocado) price.value = p.price;
+}
+// Busca un código desconocido en Open Food Facts (base pública y gratuita de
+// productos, tiene muchos argentinos) para no tener que escribir el nombre.
+async function lookupBarcodeOnWeb(code){
+  try{
+    const r = await fetch(`https://world.openfoodfacts.org/api/v2/product/${encodeURIComponent(code)}.json?fields=product_name,product_name_es,brands,quantity`, {signal: AbortSignal.timeout(6000)});
+    if(!r.ok) return null;
+    const j = await r.json();
+    if(j.status!==1 || !j.product) return null;
+    const pr = j.product;
+    const nombre = (pr.product_name_es || pr.product_name || '').trim();
+    const marca = (pr.brands||'').split(',')[0].trim();
+    if(!nombre && !marca) return null;
+    const partes = [nombre];
+    if(marca && !normText(nombre).includes(normText(marca))) partes.unshift(marca);
+    if(pr.quantity) partes.push(pr.quantity.trim());
+    return partes.filter(Boolean).join(' ').replace(/\s+/g,' ');
+  }catch(e){ return null; }
+}
 function showStockCountEntryPanel(code){
   const panel = document.getElementById('barcode-scan-panel');
   if(!panel) return;
   const product = state.products.find(p=>p.barcode===code);
   const existingItem = (state.stockCount.items||[]).find(it=>it.barcode===code);
+  const visto = (state.barcodeCatalog||{})[code];
   const defaultQty = existingItem ? existingItem.qty : 1;
-  const defaultPrice = existingItem ? existingItem.price : (product ? product.price : '');
-  const defaultName = existingItem ? existingItem.name : (product ? product.name : '');
+  const defaultPrice = existingItem ? existingItem.price : (product ? product.price : (visto ? visto.price : ''));
+  const defaultName = existingItem ? existingItem.name : (product ? product.name : (visto ? visto.name : ''));
   panel.innerHTML = `
     <div style="padding:10px 0 0;">
       <div style="font-size:12px; color:rgba(255,255,255,0.5); margin-bottom:8px;">Código: <b style="color:var(--gold2);">${escapeHtml(code)}</b>${existingItem?' · <span style="color:var(--warn);">ya está en el conteo, se actualiza</span>':''}</div>
@@ -9227,12 +9265,19 @@ function showStockCountEntryPanel(code){
         </div>
         <input type="hidden" id="sc-name" value="${escapeHtml(product.name)}">
       ` : `
-        <div style="font-size:12px; color:var(--warn); margin-bottom:8px;">Código no encontrado en el catálogo — cargalo como producto nuevo del conteo:</div>
-        <div class="form-group"><label>Nombre del producto</label><input id="sc-name" value="${escapeHtml(defaultName)}" placeholder="Ej: Alfajor Triple"></div>
+        <div style="font-size:12px; color:var(--warn); margin-bottom:8px;">Este código no está en tus productos. Elegí a cuál corresponde o escribí el nombre:</div>
+        <div class="form-group"><label>Producto</label>
+          <input id="sc-name" list="sc-prod-list" value="${escapeHtml(defaultName)}" placeholder="Tocá para elegir uno de tus productos o escribí" oninput="onStockCountNameInput()">
+          <datalist id="sc-prod-list">${stockCountProductOptions()}</datalist>
+          <p id="sc-web-hint" style="font-size:11px; color:rgba(255,255,255,0.5); margin-top:4px;">${defaultName ? '' : 'Buscando el código en internet…'}</p>
+        </div>
+        <label id="sc-link-box" style="display:none; align-items:center; gap:8px; font-size:12px; margin:-4px 0 10px; cursor:pointer;">
+          <input type="checkbox" id="sc-link" checked style="width:18px; height:18px;"> Guardarle este código al producto (la próxima vez lo reconoce solo, también en la caja)
+        </label>
       `}
       <div style="display:flex; gap:8px;">
         <div class="form-group" style="flex:1;"><label>Cantidad contada</label><input id="sc-qty" type="number" min="0" value="${defaultQty}" inputmode="decimal"></div>
-        <div class="form-group" style="flex:1;"><label>Precio de venta</label><input id="sc-price" type="number" min="0" value="${defaultPrice}" inputmode="decimal"></div>
+        <div class="form-group" style="flex:1;"><label>Precio de venta</label><input id="sc-price" type="number" min="0" value="${defaultPrice}" inputmode="decimal" oninput="this.dataset.tocado='1'"></div>
       </div>
       <div style="display:flex; gap:8px; margin-top:6px;">
         <button class="btn-secondary" style="flex:1;" onclick="resumeStockCountScan()">Omitir</button>
@@ -9240,6 +9285,23 @@ function showStockCountEntryPanel(code){
       </div>
     </div>`;
   setTimeout(()=>{ const i=document.getElementById('sc-qty'); if(i){ i.focus(); i.select(); } }, 50);
+  if(!product){
+    onStockCountNameInput();
+    if(!defaultName){
+      lookupBarcodeOnWeb(code).then(nombre=>{
+        const input = document.getElementById('sc-name');
+        const hint = document.getElementById('sc-web-hint');
+        if(!input || !hint) return; // ya se pasó a otro código
+        if(nombre && !input.value.trim()){
+          input.value = nombre;
+          onStockCountNameInput();
+          hint.innerHTML = '🌐 Encontrado en internet: revisá el nombre o elegí uno de tus productos.';
+        } else if(!nombre){
+          hint.textContent = 'No lo encontré en internet: elegí uno de tus productos o escribí el nombre.';
+        } else hint.textContent = '';
+      });
+    }
+  }
 }
 function resumeStockCountScan(){
   const panel = document.getElementById('barcode-scan-panel');
@@ -9253,6 +9315,14 @@ function confirmStockCountEntry(code, productId){
   if(!name){ toast('Ingresá un nombre para el producto', 'err'); return; }
   if(!(qty>=0)){ toast('Ingresá una cantidad válida', 'err'); return; }
   if(!(price>=0)){ toast('Ingresá un precio válido', 'err'); return; }
+  // Código nuevo que corresponde a un producto del local: se lo guarda si se pidió.
+  if(!productId){
+    const elegido = stockCountProductByName(name);
+    if(elegido){
+      productId = elegido.id;
+      if(document.getElementById('sc-link')?.checked && !elegido.barcode) updateProductBarcode(elegido.id, code, true);
+    }
+  }
   const items = state.stockCount.items||(state.stockCount.items=[]);
   const idx = items.findIndex(it=>it.barcode===code);
   const entry = {id: idx>=0?items[idx].id:stockCountId(), barcode:code, productId: productId||null, name, qty, price, updatedAt:new Date().toISOString()};
@@ -9272,11 +9342,14 @@ function openStockCountManualModal(itemId){
     <div class="modal-sheet">
       <div class="modal-handle"></div>
       <h3 class="modal-title">${item?'Editar item del conteo':'Agregar item al conteo'}</h3>
-      <div class="form-group"><label>Producto</label><input id="scm-name" value="${escapeHtml(item?item.name:'')}" placeholder="Nombre del producto"></div>
+      <div class="form-group"><label>Producto</label>
+        <input id="scm-name" list="scm-prod-list" value="${escapeHtml(item?item.name:'')}" placeholder="Tocá para elegir uno de tus productos o escribí" oninput="onStockCountManualNameInput()">
+        <datalist id="scm-prod-list">${stockCountProductOptions()}</datalist>
+      </div>
       <div class="form-group"><label>Código de barras (opcional)</label><input id="scm-barcode" value="${escapeHtml(item?(item.barcode||''):'')}" placeholder="Opcional"></div>
       <div style="display:flex; gap:8px;">
         <div class="form-group" style="flex:1;"><label>Cantidad</label><input id="scm-qty" type="number" min="0" value="${item?item.qty:1}"></div>
-        <div class="form-group" style="flex:1;"><label>Precio de venta</label><input id="scm-price" type="number" min="0" value="${item?item.price:''}"></div>
+        <div class="form-group" style="flex:1;"><label>Precio de venta</label><input id="scm-price" type="number" min="0" value="${item?item.price:''}" oninput="this.dataset.tocado='1'"></div>
       </div>
       <div style="display:flex; gap:10px; margin-top:6px;">
         <button class="btn-secondary" style="flex:1;" onclick="closeStockCountManualModal()">Cancelar</button>
@@ -9286,6 +9359,15 @@ function openStockCountManualModal(itemId){
   document.body.appendChild(overlay);
 }
 function closeStockCountManualModal(){ const el=document.getElementById("stockcount-manual-overlay"); if(el) el.remove(); }
+// Al elegir uno de los productos del local en la carga manual: trae su precio y su código.
+function onStockCountManualNameInput(){
+  const p = stockCountProductByName(document.getElementById('scm-name').value);
+  if(!p) return;
+  const price = document.getElementById('scm-price');
+  if(price && !price.dataset.tocado) price.value = p.price;
+  const bc = document.getElementById('scm-barcode');
+  if(bc && !bc.value && p.barcode) bc.value = p.barcode;
+}
 function saveStockCountManualEntry(itemId){
   const name = (document.getElementById('scm-name').value||'').trim();
   const barcode = (document.getElementById('scm-barcode').value||'').trim();
@@ -9295,11 +9377,12 @@ function saveStockCountManualEntry(itemId){
   if(!(qty>=0)){ toast('Ingresá una cantidad válida', 'err'); return; }
   if(!(price>=0)){ toast('Ingresá un precio válido', 'err'); return; }
   const items = state.stockCount.items||(state.stockCount.items=[]);
+  const elegido = stockCountProductByName(name);
   if(itemId){
     const idx = items.findIndex(it=>it.id===itemId);
-    if(idx>=0) items[idx] = Object.assign({}, items[idx], {name, barcode, qty, price, updatedAt:new Date().toISOString()});
+    if(idx>=0) items[idx] = Object.assign({}, items[idx], {name, barcode, qty, price, productId: elegido ? elegido.id : (items[idx].productId||null), updatedAt:new Date().toISOString()});
   } else {
-    items.push({id:stockCountId(), barcode, productId:null, name, qty, price, updatedAt:new Date().toISOString()});
+    items.push({id:stockCountId(), barcode, productId: elegido ? elegido.id : null, name, qty, price, updatedAt:new Date().toISOString()});
   }
   closeStockCountManualModal();
   saveState(); render();
