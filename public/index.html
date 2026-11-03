@@ -9401,6 +9401,88 @@ function clearStockCount(){
   saveState(); render();
   apiSaveStockCount();
 }
+// ── Pasar el conteo al stock de la app ──
+// Cada item del conteo que es un producto de la app (elegido de la lista o
+// con su mismo código) le fija el stock a lo contado. Si el mismo producto
+// se contó en varias partes, se suma. Lo que no es un producto de la app no
+// se toca, y los productos que no se contaron quedan como estaban.
+function stockCountPuedeAplicar(){ return state.adminIsSuperAdmin || (state.adminLoggedPerms||[]).includes('productos'); }
+function stockCountCambios(){
+  const porProducto = new Map();
+  const codigoNuevo = new Map(); // producto sin código -> código escaneado en el conteo
+  let sinProducto = 0;
+  (state.stockCount.items||[]).forEach(it=>{
+    const p = (it.productId && state.products.find(x=>x.id===it.productId))
+      || (it.barcode && state.products.find(x=>x.barcode===it.barcode))
+      || stockCountProductByName(it.name);
+    if(!p || !p._apiId){ sinProducto++; return; }
+    porProducto.set(p, (porProducto.get(p)||0) + Number(it.qty||0));
+    if(it.barcode && !p.barcode && !codigoNuevo.has(p) && !state.products.some(x=>x.barcode===it.barcode)) codigoNuevo.set(p, it.barcode);
+  });
+  const cambios = [], iguales = [], porPeso = [];
+  porProducto.forEach((qty, p)=>{
+    const barcode = codigoNuevo.get(p) || null;
+    if(p.sellByWeight){ if(barcode) cambios.push({p, antes: Number(p.stock||0), nuevo: Number(p.stock||0), barcode, soloCodigo: true}); else porPeso.push(p); return; }
+    const nuevo = Math.round(qty);
+    if(nuevo === Number(p.stock||0) && !barcode) iguales.push(p); else cambios.push({p, antes: Number(p.stock||0), nuevo, barcode});
+  });
+  cambios.sort((a,b)=>a.p.name.localeCompare(b.p.name));
+  return {cambios, iguales, porPeso, sinProducto};
+}
+function openApplyStockCount(){
+  const {cambios, iguales, porPeso, sinProducto} = stockCountCambios();
+  const overlay = document.createElement("div");
+  overlay.className = "modal-overlay";
+  overlay.id = "stockcount-apply-overlay";
+  overlay.innerHTML = `
+    <div class="modal-sheet">
+      <div class="modal-handle"></div>
+      <h3 class="modal-title">Actualizar el stock de la app</h3>
+      <p style="font-size:12.5px; color:rgba(255,255,255,0.6); margin-bottom:10px;">
+        A los productos de la app que contaste se les pone como stock la cantidad contada.
+        <b>${cambios.length}</b> cambian · ${iguales.length} ya tenían ese stock${sinProducto?` · ${sinProducto} del conteo no son productos de la app (no se tocan)`:''}${porPeso.length?` · ${porPeso.length} se venden por peso (no se tocan)`:''}.
+        Los productos que no contaste quedan como están. 🏷️ = el producto no tenía código y se le guarda el que escaneaste.
+      </p>
+      <div style="max-height:45vh; overflow-y:auto; margin-bottom:12px;">
+        ${cambios.length ? cambios.map(c=>`
+          <div style="display:flex; justify-content:space-between; gap:10px; padding:7px 4px; border-bottom:1px solid var(--glass-bd); font-size:13px;">
+            <span style="flex:1; min-width:0; overflow:hidden; text-overflow:ellipsis; white-space:nowrap;">${escapeHtml(c.p.name)}</span>
+            <span style="white-space:nowrap; color:rgba(255,255,255,0.55);">${c.barcode?`<span title="Se le guarda el código ${escapeHtml(c.barcode)}">🏷️</span> `:''}${c.soloCodigo?'solo código':`${c.antes} → <b style="color:${c.nuevo>c.antes?'var(--ok)':c.nuevo<c.antes?'var(--warn)':'inherit'};">${c.nuevo}</b>`}</span>
+          </div>`).join('') : `<div style="text-align:center; padding:20px; color:rgba(255,255,255,0.45);">No hay cambios para aplicar.</div>`}
+      </div>
+      <div style="display:flex; gap:10px;">
+        <button class="btn-secondary" style="flex:1;" onclick="document.getElementById('stockcount-apply-overlay').remove()">Cancelar</button>
+        ${cambios.length ? `<button class="btn-primary" style="flex:1;" id="stockcount-apply-btn" onclick="applyStockCount()">Actualizar ${cambios.length} producto(s)</button>` : ''}
+      </div>
+    </div>`;
+  document.body.appendChild(overlay);
+}
+async function applyStockCount(){
+  const {cambios} = stockCountCambios();
+  const btn = document.getElementById('stockcount-apply-btn');
+  if(btn){ btn.disabled = true; btn.textContent = 'Actualizando…'; }
+  let ok = 0; const fallidos = [];
+  for(let i=0; i<cambios.length; i+=5){
+    await Promise.all(cambios.slice(i, i+5).map(async c=>{
+      try{
+        const body = c.soloCodigo ? {} : {stock: c.nuevo};
+        if(c.barcode) body.barcode = c.barcode;
+        await adminFetch('/products?id=eq.' + c.p._apiId, 'PATCH', body);
+        if(!c.soloCodigo) c.p.stock = c.nuevo;
+        if(c.barcode) c.p.barcode = c.barcode;
+        ok++;
+      }catch(e){ fallidos.push(c.p.name); }
+    }));
+    if(btn) btn.textContent = `Actualizando… ${Math.min(i+5, cambios.length)}/${cambios.length}`;
+  }
+  state.stockCount.appliedAt = new Date().toISOString();
+  saveState();
+  apiSaveStockCount();
+  document.getElementById('stockcount-apply-overlay')?.remove();
+  render();
+  if(fallidos.length) toast(`Se actualizaron ${ok}; fallaron ${fallidos.length}: ${fallidos.slice(0,3).join(', ')}${fallidos.length>3?'…':''}. Volvé a tocar el botón para reintentar.`, 'err');
+  else toast(`Stock actualizado en ${ok} producto(s)`, 'ok');
+}
 function renderAdminConteo(){
   if(!stockCountLoaded){ apiSyncStockCount(); return `<div style="padding:40px;text-align:center;color:rgba(255,255,255,0.4);">Cargando...</div>`; }
   const items = state.stockCount.items||[];
@@ -9408,7 +9490,7 @@ function renderAdminConteo(){
   return `
     <div style="padding:14px 16px;">
       <p style="font-size:12.5px; color:rgba(255,255,255,0.55); margin-bottom:12px;">
-        Conteo físico de mercadería: escaneá cada producto, cargá la cantidad contada y el precio de venta. Este registro es independiente del stock que usa la caja para vender — sirve para saber cuánto tenés y cuánto vale.
+        Conteo físico de mercadería: escaneá cada producto, cargá la cantidad contada y el precio de venta. Cuando termines, con "Actualizar el stock de la app" los productos que ya están cargados pasan a tener el stock contado. Todos los códigos escaneados quedan guardados: al crear después un producto con ese código, se completa solo.
       </p>
       <div style="display:flex; gap:10px; margin-bottom:14px;">
         <button class="btn-primary" style="flex:1; display:flex; align-items:center; justify-content:center; gap:6px;" onclick="openStockCountScanner()">${ic('camera')} Escanear</button>
@@ -9428,6 +9510,8 @@ function renderAdminConteo(){
           <div style="font-size:15px; font-weight:800; color:var(--gold2);">${money(totals.money)}</div>
         </div>
       </div>
+      ${items.length && stockCountPuedeAplicar() ? `<button class="btn-primary" style="width:100%; margin-bottom:6px;" onclick="openApplyStockCount()">Actualizar el stock de la app con este conteo</button>
+        <p style="font-size:11px; color:rgba(255,255,255,0.45); margin:0 0 10px; text-align:center;">${state.stockCount.appliedAt ? 'Última vez aplicado: '+new Date(state.stockCount.appliedAt).toLocaleString('es-AR',{day:'2-digit',month:'2-digit',year:'numeric',hour:'2-digit',minute:'2-digit'}) : 'Todavía no se aplicó al stock de la app.'}</p>` : ''}
       ${items.length ? `<button class="btn-secondary" style="width:100%; margin-bottom:10px; color:var(--danger); border-color:var(--danger);" onclick="clearStockCount()">Vaciar conteo</button>` : ''}
       ${!items.length ? `<div style="text-align:center; padding:40px 20px; color:rgba(255,255,255,0.4);">Todavía no cargaste ningún producto. Escaneá el primero.</div>` : items.slice().reverse().map(it=>`
         <div style="display:flex; align-items:center; gap:10px; padding:10px 12px; border-radius:12px; background:var(--glass); border:1px solid var(--glass-bd); margin-bottom:8px;">
