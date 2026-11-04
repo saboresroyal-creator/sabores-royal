@@ -4179,7 +4179,8 @@ function renderAdmin(){
     ? ALL_TABS
     : ALL_TABS.filter(t => t.key !== 'config' && t.key !== 'comparador' && t.key !== 'alquiler' && t.key !== 'cajadiaria' && (state.adminLoggedPerms||[]).includes(t.key));
   const tab = tabs.find(t=>t.key===state.adminTab) ? state.adminTab : (tabs[0]?.key||"pedidos");
-  if(tab==="productos" && !barcodeCatalogLoaded){ barcodeCatalogLoaded = true; apiSyncBarcodeCatalog(); }
+  if((tab==="productos" || tab==="carteles") && !barcodeCatalogLoaded){ barcodeCatalogLoaded = true; apiSyncBarcodeCatalog(); }
+  if(tab==="carteles" && !stockCountLoaded){ stockCountLoaded = true; apiSyncStockCount(); }
   return `
   <div class="screen">
     <div class="topbar">
@@ -8582,7 +8583,9 @@ function openProductModal(id){
         <div class="form-group"><label>⚖️ PLU en la balanza</label><input id="pm-plu" type="number" inputmode="numeric" min="1" value="${p&&p.plu?p.plu:''}" placeholder="Ej: 123 — el mismo número que tiene cargado en la balanza"></div>
       </div>
 
-      <div class="form-group"><label>Stock</label><input id="pm-stock" type="number" value="${p?p.stock:''}" placeholder="0"></div>
+      <div class="form-group"><label>Stock</label><input id="pm-stock" type="number" value="${p?p.stock:''}" placeholder="0">
+        ${p ? '' : `<label style="display:flex; align-items:center; gap:8px; font-size:12px; margin-top:8px; cursor:pointer; color:rgba(255,255,255,0.7);"><input type="checkbox" id="pm-to-count" checked style="width:18px; height:18px;"> Sumarlo también al conteo de stock</label>`}
+      </div>
       <div class="form-group"><label>Código de barras</label>
         <div style="display:flex; gap:8px;">
           <input id="pm-barcode" value="${p&&p.barcode?p.barcode:''}" placeholder="Escaneá o escribí el código" oninput="onProductModalBarcodeInput()" style="flex:1;">
@@ -8840,9 +8843,11 @@ function saveProductModal(id){
     };
     state.products.push(savedProduct);
   }
+  const alConteo = !id && stock > 0 && !!document.getElementById('pm-to-count')?.checked;
   saveState();
   apiSaveProduct(savedProduct);
   if(barcode) upsertBarcodeCatalog(barcode, name, price);
+  if(alConteo) addNewProductToStockCount(savedProduct);
   closeProductModal();
   render();
   toast("Producto guardado", "ok");
@@ -9195,6 +9200,25 @@ async function apiSaveStockCount(){
       await adminFetch('/app_settings', 'POST', {setting_key:'stock_count', setting_value: val});
     }
   }catch(e){ toast('Error guardando conteo: '+e.message, 'err'); }
+}
+// Producto recién dado de alta con stock: entra también al conteo, con esa
+// cantidad. Si ya estaba contado (mismo código, o mismo nombre sin código),
+// solo se lo vincula y se respeta lo contado, para no duplicarlo. Antes de
+// tocar el conteo se trae el del servidor, si no se pisaría con uno viejo.
+async function addNewProductToStockCount(p){
+  if(!stockCountLoaded) await apiSyncStockCount();
+  const items = state.stockCount.items || (state.stockCount.items = []);
+  const nombre = normText(p.name).trim();
+  const previo = items.find(it=>!it.productId && ((p.barcode && it.barcode===p.barcode) || (!it.barcode && normText(it.name).trim()===nombre)));
+  if(previo){
+    previo.productId = p.id;
+    if(p.barcode && !previo.barcode) previo.barcode = p.barcode;
+  }else{
+    items.push({id:stockCountId(), barcode:p.barcode||'', productId:p.id, name:p.name, qty:Number(p.stock)||0, price:Number(p.sellByWeight ? p.pricePerKg : p.price)||0, updatedAt:new Date().toISOString()});
+  }
+  saveState();
+  await apiSaveStockCount();
+  toast(previo ? `"${p.name}" ya estaba en el conteo: quedó vinculado` : `"${p.name}" sumado al conteo (${p.stock})`, 'ok');
 }
 function openStockCountScanner(){
   _barcodeScanMode = 'conteo';
@@ -12295,23 +12319,87 @@ function signPriceInfo(p, mode){
 function signMoney(n){
   return '$ ' + Number(n||0).toLocaleString('es-AR',{minimumFractionDigits:2, maximumFractionDigits:2});
 }
+// Productos que no están en la app pero sí en el conteo de stock o en el
+// catálogo de códigos escaneados: también sirven para carteles. Llevan id
+// "x:<código>" (o "x:n:<nombre>" si se contaron sin código) y en la lista de
+// carteles se guarda una copia de nombre/precio/código (x.extra), así el
+// cartel no depende de que el conteo siga cargado.
+function signExtraId(barcode, name){
+  const key = barcode ? String(barcode).trim() : 'n:'+normText(name).trim();
+  return 'x:'+encodeURIComponent(key).replace(/'/g,'%27');
+}
+function signExtraPool(){
+  const strip = v => String(v||'').trim().replace(/^0+/, '');
+  const enApp = new Set();
+  state.products.forEach(p=>String(p.barcode||'').split(/[,;\s]+/).forEach(b=>{ if(b) enApp.add(strip(b)); }));
+  const nombresApp = new Set(state.products.map(p=>normText(p.name).trim()));
+  const pool = new Map();
+  const add = (barcode, name, price, fecha)=>{
+    name = String(name||'').trim();
+    if(!name || (barcode && enApp.has(strip(barcode))) || (!barcode && nombresApp.has(normText(name).trim()))) return;
+    const id = signExtraId(barcode, name);
+    const prev = pool.get(id);
+    if(prev && (prev._fecha||'') > (fecha||'')) return;   // queda el dato más nuevo
+    pool.set(id, {id, name, price:Number(price)||0, barcode:barcode||'', _extra:true, _fecha:fecha||''});
+  };
+  Object.entries(state.barcodeCatalog||{}).forEach(([code, v])=>add(code, v.name, v.price, v.updatedAt));
+  (state.stockCount?.items||[]).forEach(it=>{ if(!it.productId) add(it.barcode, it.name, it.price, it.updatedAt); });
+  return [...pool.values()];
+}
+// Producto de un renglón de la lista de carteles: el de la app, o la copia
+// guardada si es uno que no está en la app.
+function signQueueProduct(x){
+  return state.products.find(p=>p.id===x.id) || (x.extra ? Object.assign({id:x.id, _extra:true}, x.extra) : null);
+}
 function findProductForSign(code){
   const c = String(code||'').trim();
   if(!c) return null;
   const strip = v => String(v||'').trim().replace(/^0+/, '');
   return state.products.find(p=>p.barcode && (p.barcode.trim()===c || strip(p.barcode)===strip(c)))
-      || state.products.find(p=>p.barcode && p.barcode.split(/[,;\s]+/).some(b=>b && strip(b)===strip(c)));
+      || state.products.find(p=>p.barcode && p.barcode.split(/[,;\s]+/).some(b=>b && strip(b)===strip(c)))
+      || signExtraPool().find(p=>p.barcode && strip(p.barcode)===strip(c));
 }
 function addProductToSigns(id){
   const q = state.signQueue || (state.signQueue = []);
   const it = q.find(x=>x.id===id);
-  if(it) it.copies = (it.copies||1) + 1; else q.push({id, copies:1});
+  if(it) it.copies = (it.copies||1) + 1;
+  else {
+    const extra = state.products.some(p=>p.id===id) ? null : signExtraPool().find(p=>p.id===id);
+    q.push(extra ? {id, copies:1, extra:{name:extra.name, price:extra.price, barcode:extra.barcode}} : {id, copies:1});
+  }
   saveState();
+}
+// Precio de un cartel de producto que no está en la app (no hay otro lado
+// donde cambiarlo). También actualiza el catálogo de códigos.
+function setSignExtraPrice(id, value){
+  const it = (state.signQueue||[]).find(x=>x.id===id); if(!it || !it.extra) return;
+  const n = parseFloat(String(value).replace(',','.'));
+  if(!(n>=0)) return;
+  it.extra.price = Math.round(n*100)/100;
+  if(it.extra.barcode) upsertBarcodeCatalog(it.extra.barcode, it.extra.name, it.extra.price);
+  saveState(); render();
+}
+// Código que no está en ningún lado: se pide nombre y precio, queda en el
+// catálogo de códigos (para cuando se dé de alta) y va a la lista.
+function addUnknownCodeToSigns(code){
+  const name = (prompt('El código '+code+' no está cargado. ¿Nombre del producto para el cartel?')||'').trim();
+  if(!name) return false;
+  const price = parseFloat(String(prompt('Precio de venta de '+name+':')||'').replace(',','.'));
+  if(!(price>=0)){ toast('Precio inválido', 'err'); return false; }
+  upsertBarcodeCatalog(code, name, price);
+  addProductToSigns(signExtraId(code, name));
+  toast('Agregado: '+name, 'ok');
+  return true;
 }
 function scanProductForSign(){
   openBarcodeScannerModal(code=>{
     const p = findProductForSign(code);
-    if(!p){ toast('No hay ningún producto con el código '+code, 'err'); render(); return; }
+    if(!p){
+      const ok = addUnknownCodeToSigns(code);
+      render();
+      if(ok) setTimeout(scanProductForSign, 600);
+      return;
+    }
     addProductToSigns(p.id);
     toast('Agregado: '+p.name, 'ok');
     render();
@@ -12327,13 +12415,14 @@ function setSignSearch(v){
 function renderSignSearchResults(){
   const q = normText(state.signSearch||'').trim();
   if(q.length < 2) return '';
-  const res = state.products.filter(p=>normText(p.name).includes(q) || (p.barcode||'').includes(q)).slice(0,12);
+  const match = p=>normText(p.name).includes(q) || (p.barcode||'').includes(q);
+  const res = state.products.filter(match).concat(signExtraPool().filter(match)).slice(0,12);
   if(!res.length) return `<p style="padding:6px 16px; font-size:12.5px; color:rgba(255,255,255,0.5);">No encontré productos con "${escapeHtml(state.signSearch)}".</p>`;
   return res.map(p=>{
     const info = signPriceInfo(p, state.signPriceMode);
     return `<div class="order-card" style="display:flex; align-items:center; gap:10px; padding:10px 12px; margin-top:6px; margin-bottom:0; cursor:pointer;" onclick="addProductToSigns('${p.id}'); state.signSearch=''; render();">
       <div style="flex:1; min-width:0;"><div style="font-size:13.5px; color:var(--white); font-weight:600;">${escapeHtml(p.name)}</div>
-      <div style="font-size:11.5px; color:rgba(255,255,255,0.5);">${signMoney(info.price)}${info.weight?' x kg':''}${p.barcode?' · '+escapeHtml(p.barcode):''}</div></div>
+      <div style="font-size:11.5px; color:rgba(255,255,255,0.5);">${signMoney(info.price)}${info.weight?' x kg':''}${p.barcode?' · '+escapeHtml(p.barcode):''}${p._extra?' · <span style="color:var(--warn);">no está en la app</span>':''}</div></div>
       <span style="color:var(--gold2); font-weight:700; font-size:20px;">+</span>
     </div>`;
   }).join('');
@@ -12378,7 +12467,7 @@ function clearSigns(){
   state.signQueue = []; saveState(); render();
 }
 function renderAdminCarteles(){
-  const q = (state.signQueue||[]).filter(x=>state.products.some(p=>p.id===x.id));
+  const q = (state.signQueue||[]).filter(x=>signQueueProduct(x));
   const total = q.reduce((s,x)=>s+(x.copies||1),0);
   const size = SIGN_SIZES[state.signSize] ? state.signSize : 'gondola';
   const perPage = SIGN_SIZES[size].cols * SIGN_SIZES[size].rows;
@@ -12389,7 +12478,7 @@ function renderAdminCarteles(){
   const os = 'background:var(--navy2); color:var(--white);';
   return `
     <div style="padding:14px 16px 4px;">
-      <p style="font-size:12.5px; color:rgba(255,255,255,0.6); margin-bottom:12px;">Escaneá los productos (o buscalos por nombre), elegí el tamaño y generá el PDF para imprimir en hojas A4.</p>
+      <p style="font-size:12.5px; color:rgba(255,255,255,0.6); margin-bottom:12px;">Escaneá los productos (o buscalos por nombre), elegí el tamaño y generá el PDF para imprimir en hojas A4. También aparecen los productos del conteo de stock y los códigos ya escaneados aunque no estén cargados en la app.</p>
       <button class="btn-primary" onclick="scanProductForSign()">${ic('camera')} Escanear productos</button>
     </div>
     <div class="form-group" style="margin-top:12px;"><input id="sign-search" type="search" placeholder="O buscá por nombre o código..." value="${escapeHtml(state.signSearch||'')}" oninput="setSignSearch(this.value)"></div>
@@ -12408,7 +12497,7 @@ function renderAdminCarteles(){
     <div class="home-sec-header" style="margin-top:14px;"><span class="home-sec-label">Carteles a imprimir (${total})</span>
       ${q.length?`<button style="font-size:12px; color:var(--danger);" onclick="clearSigns()">Vaciar</button>`:''}</div>
     ${!q.length ? `<div class="empty-state">${ic('tag')}<p>Todavía no agregaste productos.</p></div>` : q.map(x=>{
-      const p = state.products.find(pp=>pp.id===x.id);
+      const p = signQueueProduct(x);
       const info = signPriceInfo(p, state.signPriceMode);
       const combo = !!x.promoQty;
       const comboTotal = x.promoTotal || (x.promoQty||2)*info.price;   // vacío = cantidad × precio actual
@@ -12419,6 +12508,7 @@ function renderAdminCarteles(){
             <div style="font-size:13.5px; color:var(--white); font-weight:600;">${escapeHtml(p.name)}</div>
             <div style="font-size:12px; color:${info.oldPrice?'var(--ok)':'var(--gold2)'}; font-weight:700;">${signMoney(info.price)}${info.weight?' x kg':''}${info.oldPrice?` <span style="color:rgba(255,255,255,0.45); font-weight:500; text-decoration:line-through;">${signMoney(info.oldPrice)}</span> OFERTA`:''}</div>
             ${(p.barcode||'').trim() ? '' : `<div style="font-size:11.5px; color:var(--warn); margin-top:2px;">Sin código de barras cargado: el cartel sale sin barras</div>`}
+            ${p._extra ? `<div style="display:flex; align-items:center; gap:6px; margin-top:4px; font-size:11.5px; color:rgba(255,255,255,0.55);">No está en la app · precio $ <input type="number" inputmode="decimal" min="0" step="0.01" value="${p.price}" style="width:96px; padding:4px 6px; border-radius:6px; background:var(--glass); border:1px solid var(--glass-bd); color:var(--cream);" onchange="setSignExtraPrice('${p.id}',this.value)"></div>` : ''}
           </div>
           <button onclick="setSignCopies('${p.id}',-1)" style="width:30px; height:30px; border-radius:50%; border:1px solid var(--glass-bd); background:var(--glass); color:var(--cream); font-size:16px;">−</button>
           <span style="min-width:22px; text-align:center; font-weight:700;">${x.copies||1}</span>
@@ -12459,12 +12549,12 @@ function renderAdminCarteles(){
 }
 // Arma el PDF con la lista actual. Devuelve {blob, name} o null.
 async function buildCurrentSignsPdf(){
-  const q = (state.signQueue||[]).filter(x=>state.products.some(p=>p.id===x.id));
+  const q = (state.signQueue||[]).filter(x=>signQueueProduct(x));
   if(!q.length) return null;
   await cmpLoadPdfLibs();
   const items = [], ofertas = [];
   q.forEach(x=>{
-    const p = state.products.find(pp=>pp.id===x.id);
+    const p = signQueueProduct(x);
     let item = x.promoQty ? Object.assign({}, p, {_combo:{qty:x.promoQty, total:x.promoTotal||null}}) : p;
     if(x.oferta && !x.promoQty && x.ofertaPrice) item = Object.assign({}, item, {_oferta:{price:x.ofertaPrice}});
     if(x.oferta && x.ofertaSimple) item = Object.assign({}, item, {_simple:true});
