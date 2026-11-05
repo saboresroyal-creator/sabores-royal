@@ -11623,10 +11623,10 @@ function selectManualClient(phone){
 function renderManualSearchResults(){
   const d = manualVoucherDraft;
   const q = (d.searchQuery||"").toLowerCase();
-  const matches = q ? state.products.filter(p=>p.name.toLowerCase().includes(q)).slice(0,6) : [];
+  const matches = q ? state.products.filter(p=>p.name.toLowerCase().includes(q)) : [];
   if(matches.length===0) return "";
   return `
-    <div style="margin:0 16px 12px; border-radius:12px; overflow:hidden; border:1px solid var(--glass-bd);">
+    <div style="margin:0 16px 12px; border-radius:12px; max-height:320px; overflow-y:auto; border:1px solid var(--glass-bd);">
       ${matches.map(p=>`
         <button onclick="addManualItemFromSearch('${p.id}')" style="width:100%; display:flex; align-items:center; gap:10px; padding:9px 14px; background:rgba(255,255,255,0.04); border-bottom:1px solid var(--glass-bd); text-align:left;">
           ${p.photo?`<img src="${p.photoThumb||p.photo}" loading="lazy" style="width:36px; height:36px; border-radius:8px; object-fit:cover; flex:none;" onerror="this.style.visibility='hidden'">`:`<div style="width:36px; height:36px; border-radius:8px; background:var(--glass); flex:none; display:flex; align-items:center; justify-content:center;">${ic('box')}</div>`}
