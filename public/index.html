@@ -2622,7 +2622,7 @@ function render(){
   // Solo Cuenta y Chat piden teléfono — el resto se navega libre y el
   // teléfono se pide recién en el checkout (menos fricción para mirar
   // el catálogo).
-  const needsLogin = !IS_ADMIN_APP && !state.currentClientPhone && (r.screen==="account" || r.screen==="chat");
+  const needsLogin = !IS_ADMIN_APP && !state.currentClientPhone && (r.screen==="account" || r.screen==="chat" || r.screen==="habituales");
   if(r.screen==="home") html = renderHome();
   else if(r.screen==="catalog") html = renderCatalog(r.section);
   else if(r.screen==="product") html = renderProductDetail(r.id);
@@ -2630,6 +2630,7 @@ function render(){
   else if(r.screen==="checkout") html = renderCheckout();
   else if(r.screen==="success") html = renderSuccess(r.order);
   else if(r.screen==="orders") html = renderOrdersLookup();
+  else if(r.screen==="habituales") html = needsLogin ? renderClientWelcome() : renderHabituales();
   else if(r.screen==="account") html = needsLogin ? renderClientWelcome() : renderAccount();
   else if(r.screen==="admin") html = renderAdmin();
   else if(r.screen==="voucher-view") html = renderVoucherView(r.voucherId);
@@ -2875,7 +2876,7 @@ function renderHome(){
         <div class="pt-body"><h3>Soy Comercio</h3><p>Precios mayoristas al toque, sin registrarte</p></div>
         <div class="pt-foot"><span>Ver precios</span>${ic('chevron')}</div>
       </button>`;
-      return `<div class="perk-cards">
+      return `${cl ? `<div style="padding:0 16px 14px;"><button class="btn-secondary" onclick="openHabituales()">${ic('star')} Mis habituales</button></div>` : ''}<div class="perk-cards">
       <button class="perk-tile perk-gold" onclick="nav('premios')">
         <div class="pt-body"><h3>Puntos Royal</h3><p>1 corona cada $100 en compras</p></div>
         <div class="pt-foot"><span>${pts!==null ? `Tenés <b>${pts}</b> coronas` : 'Canjeá premios'}</span>${ic('chevron')}</div>
@@ -3168,6 +3169,7 @@ function renderProductDetail(id){
         </div>
       `}
     </div>
+    ${state.currentClientPhone && !IS_ADMIN_APP ? `<div style="padding:0 16px 14px;"><button class="btn-outline-gold" style="padding:10px;" onclick="toggleHabitual('${p.id}')">${habData(state.currentClientPhone).added.includes(p.id) ? 'Quitar de mis habituales' : 'Agregar a mis habituales'}</button></div>` : ''}
     <div class="sticky-cta">
       ${outOfStock
         ? `<button class="btn-primary" disabled style="opacity:.4;">Sin stock</button>`
@@ -3383,6 +3385,7 @@ function renderCart(){
       <div class="empty-state">
         <div class="empty-cart-icon">${ic('cart2')}</div>
         <p>Tu carrito está vacío</p>
+        ${state.currentClientPhone ? `<button class="btn-outline-gold" style="max-width:240px; margin-top:14px;" onclick="openHabituales()">Ver mis habituales</button>` : ''}
       </div>
     </div>`;
   }
@@ -3708,6 +3711,7 @@ function renderOrdersLookup(){
           <div class="oc-head"><span class="oc-id">#${o.id}</span><span class="status-pill status-${o.status.toLowerCase()}">${orderStatusLabel(o.status)}</span></div>
           <div class="oc-items">${o.items.map(it=>formatOrderItemLabel(it)).join(', ')}</div>
           <div style="font-weight:700; color:var(--gold2);">${money(o.total)}</div>
+          <button class="btn-outline-gold" style="margin-top:10px; padding:10px;" onclick="repeatOrder('${o.id}')">Repetir pedido</button>
         </div>
       `).join('')
     }
@@ -3718,6 +3722,174 @@ function lookupOrders(){
   state.route.lookupPhone = raw ? normalizePhone(raw) : "";
   state._lookupOrdersFor = null;
   render();
+}
+
+/* ---------- REPETIR PEDIDO Y MIS HABITUALES ---------- */
+// Los ítems viejos pueden tener un producto que ya no existe, está oculto,
+// se quedó sin stock o cambió sus opciones: se agrega lo que se pueda (a
+// precio de hoy, lo calcula el carrito) y se avisa qué quedó afuera.
+function orderItemProduct(it){
+  const p = state.products.find(pr=>it.id!=null && pr.id===String(it.id)) || state.products.find(pr=>pr.name===it.name);
+  return p && !p.hidden ? p : null;
+}
+function addItemsToCart(items){
+  let added = 0;
+  const skipped = [];
+  items.forEach(it=>{
+    const p = orderItemProduct(it);
+    if(!p){ skipped.push(it.name); return; }
+    if(it.grams){
+      if(!p.sellByWeight){ skipped.push(p.name); return; }
+      const existing = state.cart.find(c=>c.id===p.id && c.grams);
+      if(existing) existing.grams += it.grams; else state.cart.push({id:p.id, qty:1, grams:it.grams});
+      added++;
+      return;
+    }
+    const opciones = productVariants(p);
+    const opcion = opciones.find(o=>o.name===it.variant);
+    if(p.sellByWeight || isOutOfStock(p) || (opciones.length && (!opcion || opcion.out))){ skipped.push(p.name); return; }
+    const existing = state.cart.find(c=>c.id===p.id && !c.grams && (c.variant||'')===(it.variant||''));
+    const qty = Math.min(it.qty||1, p.stock - (existing ? existing.qty : 0));
+    if(qty<=0){ skipped.push(p.name); return; }
+    if(existing) existing.qty += qty;
+    else state.cart.push(it.variant ? {id:p.id, qty, variant:it.variant} : {id:p.id, qty});
+    added++;
+  });
+  saveState();
+  return {added, skipped};
+}
+function toastItemsAdded({added, skipped}){
+  if(added===0) toast('No hay productos disponibles para agregar', 'err');
+  else if(skipped.length) toast(`Agregamos ${added}. No disponibles: ${skipped.join(', ')}`, 'err');
+  else toast(`Agregamos ${added} ${added===1?'producto':'productos'} al carrito`, 'ok');
+}
+function repeatOrder(orderId){
+  const order = (state.lookupOrdersResult||[]).find(o=>o.id===orderId);
+  if(!order) return;
+  const result = addItemsToCart(order.items);
+  toastItemsAdded(result);
+  if(result.added>0) nav('cart');
+}
+// La lista sale sola del historial de pedidos. Lo que el cliente agrega o
+// quita a mano se guarda en el servidor (ver supabase-migration-habituales.sql)
+// y queda copiado en este dispositivo por si el servidor no responde.
+let habSyncedFor = null;
+function habData(phone){
+  state.habituales = state.habituales || {};
+  const d = state.habituales[phone] = state.habituales[phone] || {added:[], hidden:[]};
+  if(habSyncedFor !== phone){ habSyncedFor = phone; syncHabituales(phone); }
+  return d;
+}
+async function syncHabituales(phone){
+  try{
+    const rows = await rpcFetch('get_my_habituales', {p_phone: phone});
+    const row = rows && rows[0];
+    if(!row){
+      const d = state.habituales[phone];
+      if(d.added.length || d.hidden.length) saveHabituales(phone);
+      return;
+    }
+    state.habituales[phone] = {added: row.added||[], hidden: row.hidden||[]};
+    saveState(); render();
+  }catch(e){ console.warn('Sync habituales:', e); }
+}
+function saveHabituales(phone){
+  saveState();
+  const d = state.habituales[phone];
+  rpcFetch('save_my_habituales', {p_phone: phone, p_added: d.added, p_hidden: d.hidden})
+    .catch(e=>console.warn('Guardar habituales:', e));
+}
+function habitualesList(phone){
+  const d = habData(phone);
+  const porId = new Map();
+  const orders = (state._lookupOrdersFor===phone ? state.lookupOrdersResult||[] : [])
+    .filter(o=>o.status!=='Cancelado').slice().sort((a,b)=>new Date(b.date)-new Date(a.date));
+  orders.forEach(o=>{
+    const vistos = new Set();
+    o.items.forEach(it=>{
+      const p = orderItemProduct(it);
+      if(!p) return;
+      if(!porId.has(p.id)) porId.set(p.id, {id:p.id, name:p.name, p, veces:0, qty:it.qty||1, grams:it.grams||null, variant:it.variant||null});
+      if(!vistos.has(p.id)){ porId.get(p.id).veces++; vistos.add(p.id); }
+    });
+  });
+  d.added.forEach(id=>{
+    const p = state.products.find(pr=>pr.id===id);
+    if(p && !p.hidden && !porId.has(id)) porId.set(id, {id, name:p.name, p, veces:0, qty:1, grams:null, variant:null});
+  });
+  return [...porId.values()].filter(e=>!d.hidden.includes(e.id)).sort((a,b)=>b.veces-a.veces);
+}
+// Pesables y productos con opciones que nunca se compraron: hay que elegir.
+function habitualNeedsChoice(e){
+  return (e.p.sellByWeight && !e.grams) || (productVariants(e.p).length>0 && !e.variant);
+}
+function openHabituales(){
+  state._lookupOrdersFor = null;
+  nav('habituales');
+}
+function renderHabituales(){
+  const phone = state.currentClientPhone;
+  if(state._lookupOrdersFor !== phone && !state.lookupOrdersLoading){
+    state._lookupOrdersFor = phone;
+    fetchMyOrders(phone);
+  }
+  const lista = habitualesList(phone);
+  return `
+  <div class="screen">
+    <div class="topbar"><button class="back" onclick="nav('home')">${ic('chevron')}</button><h2>Mis habituales</h2></div>
+    ${state.lookupOrdersLoading ? `<div class="empty-state">${ic('package')}<p>Buscando…</p></div>` :
+      lista.length===0 ? `<div class="empty-state">${ic('star')}<p>Acá van a aparecer los productos que comprás. También podés sumarlos desde cada producto.</p></div>` : `
+      <div style="padding:0 16px 12px;"><button class="btn-primary" onclick="addAllHabituales()">Agregar todo al carrito</button></div>
+      ${lista.map(e=>`
+        <div class="cart-item">
+          <img src="${e.p.photoThumb||e.p.photo||''}" loading="lazy" onerror="this.style.display='none'" onclick="openProduct('${e.id}')">
+          <div class="cart-item-body">
+            <h4 onclick="openProduct('${e.id}')">${e.p.name}</h4>
+            <div class="price">${e.p.sellByWeight ? pcWeightPriceHtml(e.p) : pcPriceHtml(e.p)}</div>
+            <div style="font-size:11.5px; color:rgba(255,255,255,0.5); margin-top:3px;">${e.veces ? `Comprado ${e.veces} ${e.veces===1?'vez':'veces'} · última: ${e.grams ? e.grams+'g' : e.qty+'x'}` : 'Agregado por vos'}</div>
+            <button class="cart-remove" onclick="removeHabitual('${e.id}')">Quitar</button>
+          </div>
+          <div style="flex:none; width:96px;">
+            ${isOutOfStock(e.p) ? `<button class="pc-add" disabled>Sin stock</button>` : `<button class="pc-add" onclick="addHabitualToCart('${e.id}')">${habitualNeedsChoice(e)?'Elegir':'Agregar'}</button>`}
+          </div>
+        </div>
+      `).join('')}
+    `}
+  </div>`;
+}
+function addHabitualToCart(id){
+  const e = habitualesList(state.currentClientPhone).find(x=>x.id===id);
+  if(!e) return;
+  if(habitualNeedsChoice(e)){ openProduct(id); return; }
+  toastItemsAdded(addItemsToCart([e]));
+  render();
+}
+function addAllHabituales(){
+  const lista = habitualesList(state.currentClientPhone);
+  const result = addItemsToCart(lista.filter(e=>!habitualNeedsChoice(e)));
+  lista.filter(habitualNeedsChoice).forEach(e=>result.skipped.push(e.name));
+  toastItemsAdded(result);
+  if(result.added>0) nav('cart');
+}
+function removeHabitual(id){
+  const d = habData(state.currentClientPhone);
+  d.added = d.added.filter(x=>x!==id);
+  if(!d.hidden.includes(id)) d.hidden.push(id);
+  saveHabituales(state.currentClientPhone);
+  render();
+}
+function toggleHabitual(id){
+  const d = habData(state.currentClientPhone);
+  if(d.added.includes(id)){
+    removeHabitual(id);
+    toast('Quitado de tus habituales', 'ok');
+    return;
+  }
+  d.added.push(id);
+  d.hidden = d.hidden.filter(x=>x!==id);
+  saveHabituales(state.currentClientPhone);
+  render();
+  toast('Agregado a tus habituales', 'ok');
 }
 
 /* ---------- ACCOUNT ---------- */
@@ -3789,6 +3961,9 @@ function renderAccount(){
     </div>
     <div style="padding:0 16px 16px;">
       <button class="btn-secondary" onclick="nav('orders')">Ver mis pedidos</button>
+    </div>
+    <div style="padding:0 16px 16px;">
+      <button class="btn-secondary" onclick="openHabituales()">${ic('star')} Mis habituales</button>
     </div>
     <div style="padding:0 16px 16px;">
       <button class="btn-secondary" onclick="nav('suggestions')">${ic('sparkle')} Buzón de sugerencias</button>
