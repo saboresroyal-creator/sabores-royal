@@ -429,6 +429,7 @@ tr:hover td { background:var(--surface2); }
   <div class="tab" onclick="switchTab('cheques',this)" id="tabCheques">💳 Cheques</div>
   <div class="tab" onclick="switchTab('deuda',this)" id="tabDeuda">📑 Deuda Proveedores</div>
   <div class="tab" onclick="switchTab('bancos',this)" id="tabBancos">🏦 Bancos</div>
+  <div class="tab" onclick="switchTab('costo',this)" id="tabCosto">💸 Costo Financiero</div>
   <div class="tab" onclick="switchTab('fondos',this)">🐷 Fondos</div>
   <div class="tab" onclick="switchTab('finales',this)">📈 Finales</div>
   <div class="tab" onclick="switchTab('ajustes',this)">⚙ Ajustes</div>
@@ -998,6 +999,13 @@ tr:hover td { background:var(--surface2); }
 </div>
 
 <!-- ══════════════════════════════════════════
+     PANEL: COSTO FINANCIERO (estadísticas de los resúmenes del banco)
+══════════════════════════════════════════ -->
+<div class="panel" id="panel-costo">
+  <div id="costoRoot"></div>
+</div>
+
+<!-- ══════════════════════════════════════════
      PANEL: FONDOS (plata apartada para EPE, La Serenísima, Obra Social)
 ══════════════════════════════════════════ -->
 <div class="panel" id="panel-fondos">
@@ -1326,6 +1334,7 @@ function rerenderAll(){
   if(name==='cheques') { renderCheques(); renderChequesBorrador(); }
   if(name==='deuda') renderDeuda();
   if(name==='bancos') renderBancos();
+  if(name==='costo') renderCosto();
   if(name==='fondos') renderFondos();
   if(name==='finales') renderFinales();
   if(name==='ajustes') renderCajeros();
@@ -4819,6 +4828,206 @@ function eliminarPagoFondo(id) {
   save(); renderFondos();
 }
 
+// ============================================================
+// COSTO FINANCIERO
+// ============================================================
+// Estadísticas de los resúmenes del banco. Este archivo es público, así
+// que los números no van acá: se importan de un .json y quedan en
+// state.costoFinanciero, detrás del PIN como el resto de la caja.
+// state.costoFinanciero = {version, actualizado, periodo, totales:{},
+//   mensual:[], costos:[], flujo:[], prestamos:[], proyeccion:[], afip:[],
+//   saldoDiario:[], alertas:[{nivel,titulo,texto}]}
+const COSTO_MESES = ['Abr','May','Jun','Jul','Ago','Sep','Oct'];
+function costoPct(v) { return ((v||0)*100).toLocaleString('es-AR',{minimumFractionDigits:2,maximumFractionDigits:2})+'%'; }
+function costoMill(v) { return '$'+(v/1e6).toLocaleString('es-AR',{maximumFractionDigits:1})+' M'; }
+
+function importarCostoFinanciero() {
+  const input = document.createElement('input');
+  input.type='file'; input.accept='.json';
+  input.onchange = e=>{
+    const file = e.target.files[0];
+    if(!file) return;
+    const reader = new FileReader();
+    reader.onload = ev=>{
+      let data;
+      try { data = JSON.parse(ev.target.result); } catch(err){ alert('El archivo no es un JSON válido.'); return; }
+      if(!data || data.version!==1 || !Array.isArray(data.mensual) || !data.totales){
+        alert('Este archivo no es de Costo Financiero. Elegí costo-financiero-bbva.json.');
+        return;
+      }
+      if(state.costoFinanciero && !confirm(`¿Reemplazar los datos de ${state.costoFinanciero.periodo} por los de ${data.periodo}?`)) return;
+      state.costoFinanciero = data;
+      save(); renderCosto();
+    };
+    reader.readAsText(file);
+  };
+  input.click();
+}
+
+function costoStackChart(id, labels, series, {stacked=true}={}) {
+  const ctx = document.getElementById(id);
+  if(!ctx) return;
+  charts[id] = new Chart(ctx, {
+    type:'bar',
+    data:{labels, datasets:series.map(s=>({label:s.label, data:s.data, backgroundColor:s.color, borderRadius:3}))},
+    options:{
+      responsive:true, maintainAspectRatio:false,
+      interaction:{mode:'index',intersect:false},
+      plugins:{
+        legend:{display:series.length>1,labels:{color:'#95a1c6',font:{size:11}}},
+        tooltip:{callbacks:{
+          label:c=>`${c.dataset.label}: ${pesos2(c.parsed.y)}`,
+          footer:items=>items.length>1&&stacked ? 'Total: '+pesos2(items.reduce((s,i)=>s+i.parsed.y,0)) : ''
+        }}
+      },
+      scales:{
+        x:{stacked,ticks:{color:'#95a1c6',font:{size:10}},grid:{display:false}},
+        y:{stacked,ticks:{color:'#95a1c6',font:{size:10},callback:costoMill},grid:{color:'rgba(255,255,255,0.08)'}}
+      }
+    }
+  });
+}
+function costoLineChart(id, labels, data, fmt, tickFmt, {puntos=true, titulos}={}) {
+  const ctx = document.getElementById(id);
+  if(!ctx) return;
+  charts[id] = new Chart(ctx, {
+    type:'line',
+    data:{labels, datasets:[{data, borderColor:'#c5a028', backgroundColor:'rgba(197,160,40,0.13)', borderWidth:2, pointRadius:puntos?3:0, fill:true, tension:0}]},
+    options:{
+      responsive:true, maintainAspectRatio:false,
+      interaction:{mode:'index',intersect:false},
+      plugins:{legend:{display:false},tooltip:{callbacks:{
+        title:items=>titulos ? titulos[items[0].dataIndex] : items[0].label,
+        label:c=>fmt(c.parsed.y)
+      }}},
+      scales:{
+        x:{ticks:{color:'#95a1c6',font:{size:10},maxTicksLimit:9,autoSkip:true},grid:{display:false}},
+        y:{beginAtZero:true,ticks:{color:'#95a1c6',font:{size:10},callback:tickFmt},grid:{color:'rgba(255,255,255,0.08)'}}
+      }
+    }
+  });
+}
+
+function costoTablaMeses(filas, grupoTotal) {
+  return `<div style="overflow-x:auto;"><table>
+    <thead><tr><th>Concepto</th>${COSTO_MESES.map(m=>`<th class="num">${m}</th>`).join('')}<th class="num">Total</th></tr></thead>
+    <tbody>${filas.map(f=>{
+      const est = f.grupo===grupoTotal ? 'font-weight:700;color:var(--gold);' : '';
+      return `<tr><td style="font-family:var(--sans);white-space:nowrap;${est}">${escHtml(f.concepto)}</td>${COSTO_MESES.map(m=>`<td class="num" style="white-space:nowrap;${est}">${pesos2(f[m])}</td>`).join('')}<td class="num" style="white-space:nowrap;font-weight:700;${est}">${pesos2(f.total)}</td></tr>`;
+    }).join('')}</tbody></table></div>`;
+}
+
+function renderCosto() {
+  const root = document.getElementById('costoRoot');
+  if(!root) return;
+  destroyCharts();
+  const cf = state.costoFinanciero;
+  if(!cf){
+    root.innerHTML = `<div class="card" style="text-align:center;padding:40px 20px;">
+      <div class="card-title" style="justify-content:center;"><div class="dot"></div>COSTO FINANCIERO</div>
+      <p class="hint" style="margin-bottom:16px;">Todavía no hay datos cargados. Importá el archivo costo-financiero-bbva.json.</p>
+      <button class="btn btn-gold" onclick="importarCostoFinanciero()">Importar datos</button>
+    </div>`;
+    return;
+  }
+  const t = cf.totales, m = cf.mensual, labels = m.map(x=>x.mes);
+  const nota = s=>`<div style="font-size:11px;color:var(--muted);margin-top:4px;">${s}</div>`;
+  const stat = (label, valor, color, sub)=>`<div class="stat"><div class="stat-label">${label}</div><div class="stat-value" style="color:var(--${color});">${valor}</div>${nota(sub)}</div>`;
+  const titulo = s=>`<div class="card-title"><div class="dot"></div>${s}</div>`;
+  const grafico = (id, tit, sub)=>`<div class="card" style="min-width:0;">${titulo(tit)}<p class="hint" style="margin-bottom:12px;">${sub}</p><div class="chart-wrap"><canvas id="${id}"></canvas></div></div>`;
+  const colorNivel = {urgente:'red', revisar:'yellow', seguir:'muted'};
+
+  root.innerHTML = `
+  <div class="flex mb16" style="justify-content:space-between;flex-wrap:wrap;gap:8px;align-items:center;">
+    <p class="hint">${escHtml(cf.banco||'Banco')} · ${escHtml(cf.periodo)} · actualizado ${fmtFecha(cf.actualizado)}</p>
+    <button class="btn btn-ghost btn-sm" onclick="importarCostoFinanciero()">Actualizar datos</button>
+  </div>
+  <div class="card mb16">
+    <p>En ${escHtml(cf.periodoCorto)} la deuda con el banco costó <b>${pesos2(t.costo_total)}</b>, el <b>${costoPct(t.pct_total)}</b> de lo que entró por ventas. La cuenta dejó <b>${pesos2(t.resultado_op)}</b> antes de pagar deuda.</p>
+  </div>
+  <div class="grid4 mb16">
+    ${stat('Costo financiero', pesos2(t.costo_total), 'red', `Promedio mensual: ${pesos2(t.costo_prom_mes)}`)}
+    ${stat('Costo del último mes', pesos2(t.costo_oct), 'yellow', `${pesos2(t.costo_dia_oct)} por día corrido`)}
+    ${stat('Deuda bancaria', pesos2(t.deuda_fin), 'red', `Subió ${pesos2(t.deuda_var)} en el período`)}
+    ${stat('Costo sobre ingresos', costoPct(t.pct_sep_oct), 'yellow', `Últimos dos meses. Promedio: ${costoPct(t.pct_total)}`)}
+  </div>
+  ${(cf.alertas||[]).filter(a=>a.nivel==='urgente').map(a=>`<div class="card mb16" style="border-color:color-mix(in srgb, var(--red) 50%, transparent);">
+    <div style="color:var(--red);font-size:12px;font-weight:700;margin-bottom:4px;">⚠ ${escHtml(a.titulo)}</div><p>${escHtml(a.texto)}</p></div>`).join('')}
+  <div class="grid2 mb16">
+    ${grafico('chartCostoMes','COSTO FINANCIERO POR MES','Intereses más IVA y percepción. Lo de préstamos es estimado.')}
+    ${grafico('chartCostoDeuda','DEUDA BANCARIA A FIN DE MES','Cuenta corriente más capital de préstamos. Sin AFIP ni Visa.')}
+    ${grafico('chartCostoPct','COSTO SOBRE INGRESOS','Ingresos: tarjetas, transferencias de clientes y efectivo depositado.')}
+    ${grafico('chartCostoTna','TNA DEL DESCUBIERTO','Tasa informada en cada resumen, sin IVA.')}
+  </div>
+  <div class="card mb16">${titulo('DESGLOSE POR CONCEPTO Y MES')}
+    <p class="hint" style="margin-bottom:12px;">Cada mes es el período del resumen. Los intereses de préstamos son estimados, porque el banco los debita junto con la cuota.</p>
+    ${costoTablaMeses(cf.costos,'Total')}</div>
+  <div class="grid4 mb16">
+    ${stat('Descubierto', pesos2(t.cc_fin), 'red', `Era ${pesos2(t.cc_ini)} al inicio`)}
+    ${stat('Capital de préstamos', pesos2(t.prest_fin), 'red', `${t.prest_activos} activos. Era ${pesos2(t.prest_ini)} al inicio`)}
+    ${stat('Préstamos nuevos', pesos2(t.nuevos), 'gold', `Capital devuelto: ${pesos2(t.capital)}`)}
+    ${stat('TNA promedio de préstamos', costoPct(t.tna_prest), 'gold', `Descubierto: ${costoPct(t.tna_desc_oct)}`)}
+  </div>
+  <div class="card mb16">${titulo('SALDO DEUDOR DÍA POR DÍA')}<div class="chart-wrap"><canvas id="chartCostoSaldo"></canvas></div></div>
+  <div class="grid2 mb16">
+    ${grafico('chartCostoRueda','PRÉSTAMOS NUEVOS CONTRA CAPITAL DEVUELTO','Lo que entró y lo que se devolvió por mes.')}
+    ${grafico('chartCostoProy','CUOTAS YA COMPROMETIDAS','Solo los préstamos que existen hoy. Estimado.')}
+  </div>
+  <div class="card mb16">${titulo(`PRÉSTAMO POR PRÉSTAMO (${cf.prestamos.length})`)}
+    <p class="hint" style="margin-bottom:12px;">Reconstruido desde las cuotas: tasa, saldo e interés son estimados. Para vencimientos y pagos, la referencia sigue siendo la pestaña Bancos.</p>
+    <div style="overflow:auto;max-height:480px;"><table>
+      <thead><tr><th>Préstamo</th><th>Estado</th><th>Alta</th><th class="num">Capital</th><th class="num">TNA</th><th class="num">Cuotas restantes</th><th class="num">Saldo</th><th class="num">Interés del período</th><th>Certeza</th></tr></thead>
+      <tbody>${cf.prestamos.map(p=>`<tr><td style="white-space:nowrap;">${escHtml(p.prestamo)}</td><td style="font-family:var(--sans);">${escHtml(p.estado)}</td><td style="white-space:nowrap;">${escHtml(p.alta)}</td><td class="num" style="white-space:nowrap;">${p.capital==null?'Sin dato':pesos2(p.capital)}</td><td class="num">${costoPct(p.tna)}</td><td class="num">${p.cuotas_restantes}</td><td class="num" style="white-space:nowrap;">${pesos2(p.saldo)}</td><td class="num" style="white-space:nowrap;">${pesos2(p.interes_periodo)}</td><td style="font-family:var(--sans);white-space:nowrap;">${escHtml(p.certeza)}</td></tr>`).join('')}</tbody>
+    </table></div></div>
+  <div class="grid2 mb16">
+    ${grafico('chartCostoIng','INGRESOS POR MEDIO DE COBRO','Lo que llegó al banco, neto de lo que retienen las tarjetas.')}
+    ${grafico('chartCostoRop','RESULTADO ANTES DE PAGAR DEUDA','Ingresos menos egresos, sin préstamos ni intereses.')}
+  </div>
+  <div class="card mb16">${titulo('FLUJO COMPLETO DE LA CUENTA')}${costoTablaMeses(cf.flujo,'Subtotal')}</div>
+  <div class="card mb16">${titulo('ALERTAS')}
+    ${(cf.alertas||[]).map(a=>`<div style="margin-bottom:14px;"><div style="color:var(--${colorNivel[a.nivel]||'muted'});font-size:12px;font-weight:700;">${escHtml(a.titulo)}</div><p style="font-size:13px;">${escHtml(a.texto)}</p></div>`).join('')}
+    <div style="overflow-x:auto;"><table>
+      <thead><tr><th>Cuota de AFIP rechazada</th><th>Plan</th><th class="num">Intentos</th><th class="num">Último intento</th><th class="num">Importe</th></tr></thead>
+      <tbody>${(cf.afip||[]).map(a=>`<tr><td>${escHtml(a.referencia)}</td><td>${escHtml(a.plan)}</td><td class="num">${a.intentos}</td><td class="num">${escHtml(a.ultimo)}</td><td class="num" style="white-space:nowrap;">${pesos2(a.importe)}</td></tr>`).join('')}</tbody>
+    </table></div></div>
+  <div class="card mb16">${titulo('CÓMO LEER ESTOS NÚMEROS')}
+    <p class="hint">Saldos, intereses del descubierto, comisiones, impuestos, cheques y débitos son exactos y cierran contra el banco. Capital e interés de cada cuota son estimados, porque el banco los debita en un solo importe. No figuran lo que retienen las tarjetas ni el costo financiero de la Visa y de los planes de AFIP, así que el costo real es mayor.</p>
+    <p class="hint" style="margin-top:8px;">Cargado hoy en la pestaña Bancos: préstamos ${pesos2(deudaCreditosActual())} y descubierto ${pesos2(deudaDescubiertoActual())}. Si difieren mucho de lo de arriba, conviene revisar esa pestaña.</p>
+  </div>`;
+
+  if(typeof Chart==='undefined') return;
+  costoStackChart('chartCostoMes', labels, [
+    {label:'Intereses descubierto', color:'#c5a028', data:m.map(x=>x.int_desc)},
+    {label:'Intereses préstamos', color:'#60a5fa', data:m.map(x=>x.int_prest)},
+    {label:'IVA y percepción', color:'#3ecf8e', data:m.map(x=>r2(x.iva_desc+x.iva_prest))}
+  ]);
+  costoStackChart('chartCostoDeuda', labels, [
+    {label:'Cuenta corriente', color:'#c5a028', data:m.map(x=>x.saldo_cc)},
+    {label:'Préstamos', color:'#60a5fa', data:m.map(x=>x.saldo_prest)}
+  ]);
+  costoLineChart('chartCostoPct', labels, m.map(x=>x.pct), costoPct, costoPct);
+  costoLineChart('chartCostoTna', labels, m.map(x=>x.tna_desc), costoPct, costoPct);
+  const sd = cf.saldoDiario||[];
+  costoLineChart('chartCostoSaldo', sd.map(x=>fmtFecha(x.fecha).slice(0,5)), sd.map(x=>x.saldo), pesos2, costoMill, {puntos:false, titulos:sd.map(x=>fmtFecha(x.fecha))});
+  costoStackChart('chartCostoRueda', labels, [
+    {label:'Préstamos nuevos', color:'#c5a028', data:m.map(x=>x.prest_nuevos)},
+    {label:'Capital devuelto', color:'#60a5fa', data:m.map(x=>x.capital)}
+  ], {stacked:false});
+  costoStackChart('chartCostoProy', (cf.proyeccion||[]).map(x=>x.mes), [
+    {label:'Capital', color:'#60a5fa', data:cf.proyeccion.map(x=>x.capital)},
+    {label:'Interés, IVA y percepción', color:'#c5a028', data:cf.proyeccion.map(x=>r2(x.interes+x.iva))}
+  ]);
+  costoStackChart('chartCostoIng', labels, [
+    {label:'Tarjetas', color:'#c5a028', data:m.map(x=>x.tarjetas)},
+    {label:'Transferencias', color:'#60a5fa', data:m.map(x=>x.transferencias)},
+    {label:'Efectivo', color:'#3ecf8e', data:m.map(x=>x.efectivo)}
+  ]);
+  const rop = cf.flujo.find(f=>f.concepto==='Resultado antes de pagar deuda');
+  if(rop) costoStackChart('chartCostoRop', COSTO_MESES, [
+    {label:'Resultado', color:COSTO_MESES.map(k=>rop[k]<0?'#e5566d':'#3ecf8e'), data:COSTO_MESES.map(k=>rop[k])}
+  ]);
+}
+
 function renderFondos() {
   if(!document.getElementById('panel-fondos')) return;
   const movs = movimientosFondos();
@@ -5356,6 +5565,7 @@ function switchTab(name, el) {
   if(name==='cheques') { renderCheques(); renderChequesBorrador(); }
   if(name==='deuda') renderDeuda();
   if(name==='bancos') renderBancos();
+  if(name==='costo') renderCosto();
   if(name==='fondos') renderFondos();
   if(name==='finales') refrescarFinales();
   if(name==='ajustes') renderCajeros();
