@@ -9416,22 +9416,76 @@ function openStockCountScanner(){
   document.body.appendChild(overlay);
   startBarcodeCamera();
 }
-// Productos del local, para elegir uno en vez de escribir el nombre (los que
-// todavía no tienen código primero).
-function stockCountProductOptions(){
-  return state.products.slice()
-    .sort((a,b)=>(!!a.barcode - !!b.barcode) || a.name.localeCompare(b.name))
-    .map(p=>`<option value="${escapeHtml(p.name)}"></option>`).join('');
+// Los códigos se comparan sin los ceros de adelante: según el celular, un
+// UPC se lee con 12 dígitos o como EAN-13 con un 0 adelante, y es el mismo.
+function barcodeKey(code){
+  const c = String(code||'').trim();
+  return /^\d+$/.test(c) ? c.replace(/^0+/,'') : c;
 }
+// Busca por el código del producto y, si no, por el de su caja/display.
+function stockCountProductByCode(code){
+  const k = barcodeKey(code);
+  if(!k) return null;
+  return state.products.find(p=>barcodeKey(p.barcode)===k)
+    || state.products.find(p=>barcodeKey(p.displayBarcode)===k)
+    || null;
+}
+function stockCountNameKey(name){ return normText(name||'').replace(/\s+/g,' ').trim(); }
 function stockCountProductByName(name){
-  const n = normText(name||'');
-  return n ? state.products.find(p=>normText(p.name)===n) : null;
+  const n = stockCountNameKey(name);
+  return n ? state.products.find(p=>stockCountNameKey(p.name)===n) : null;
+}
+// Productos del local que se parecen a lo escrito, en cualquier orden de
+// palabras y sin acentos (los que todavía no tienen código primero). Muchos no
+// tienen código, así que al escanearlos hay que poder encontrarlos por nombre.
+function stockCountMatches(text){
+  const words = normText(text).split(/[^a-z0-9]+/).filter(w=>w.length>1);
+  if(!words.length) return [];
+  const minimo = Math.ceil(words.length/2);
+  return state.products
+    .map(p=>{ const nombre = normText(p.name); return {p, n: words.filter(w=>nombre.includes(w)).length}; })
+    .filter(x=>x.n>=minimo)
+    .sort((a,b)=>b.n-a.n || (!!a.p.barcode - !!b.p.barcode) || a.p.name.localeCompare(b.p.name))
+    .slice(0,8).map(x=>x.p);
+}
+function stockCountPickerHTML(prefix, value){
+  return `<input id="${prefix}-name" value="${escapeHtml(value)}" placeholder="Escribí parte del nombre de tu producto" autocomplete="off" oninput="onStockCountPickerInput('${prefix}')">
+    <input type="hidden" id="${prefix}-pid">
+    <div id="${prefix}-matches" style="max-height:170px; overflow-y:auto; margin-top:6px;"></div>`;
+}
+function stockCountPickerSelected(prefix){
+  const pid = document.getElementById(prefix+'-pid')?.value;
+  return (pid && state.products.find(p=>p.id===pid)) || stockCountProductByName(document.getElementById(prefix+'-name')?.value);
+}
+function stockCountPickerChanged(prefix){
+  if(prefix==='sc') onStockCountNameInput(); else onStockCountManualNameInput();
+}
+function onStockCountPickerInput(prefix){
+  const input = document.getElementById(prefix+'-name');
+  const el = document.getElementById(prefix+'-matches');
+  if(!input || !el) return;
+  document.getElementById(prefix+'-pid').value = '';
+  const exacto = stockCountProductByName(input.value);
+  el.innerHTML = exacto ? '' : stockCountMatches(input.value).map(p=>`
+    <div style="display:flex; align-items:center; justify-content:space-between; gap:8px; padding:9px 10px; border-radius:10px; background:var(--glass); border:1px solid var(--glass-bd); margin-bottom:6px; cursor:pointer;" onclick="pickStockCountProduct('${prefix}','${p.id}')">
+      <span style="font-size:13px; flex:1; min-width:0; overflow:hidden; text-overflow:ellipsis; white-space:nowrap;">${escapeHtml(p.name)}</span>
+      ${p.barcode?`<span style="font-size:10px; color:rgba(255,255,255,0.4); flex-shrink:0;">ya tiene código</span>`:''}
+    </div>`).join('');
+  stockCountPickerChanged(prefix);
+}
+function pickStockCountProduct(prefix, id){
+  const p = state.products.find(x=>x.id===id);
+  if(!p) return;
+  document.getElementById(prefix+'-name').value = p.name;
+  document.getElementById(prefix+'-pid').value = p.id;
+  document.getElementById(prefix+'-matches').innerHTML = '';
+  stockCountPickerChanged(prefix);
 }
 // Al elegir uno de los productos del local: trae su precio y ofrece guardarle el código.
 function onStockCountNameInput(){
-  const p = stockCountProductByName(document.getElementById('sc-name').value);
+  const p = stockCountPickerSelected('sc');
   const box = document.getElementById('sc-link-box');
-  if(box) box.style.display = p ? 'flex' : 'none';
+  if(box) box.style.display = (p && !p.barcode) ? 'flex' : 'none';
   const price = document.getElementById('sc-price');
   if(p && price && !price.dataset.tocado) price.value = p.price;
 }
@@ -9456,10 +9510,15 @@ async function lookupBarcodeOnWeb(code){
 function showStockCountEntryPanel(code){
   const panel = document.getElementById('barcode-scan-panel');
   if(!panel) return;
-  const product = state.products.find(p=>p.barcode===code);
-  const existingItem = (state.stockCount.items||[]).find(it=>it.barcode===code);
+  const existingItem = (state.stockCount.items||[]).find(it=>barcodeKey(it.barcode)===barcodeKey(code));
   const visto = (state.barcodeCatalog||{})[code];
-  const defaultQty = existingItem ? existingItem.qty : 1;
+  // Reconoce también el código que ya se había vinculado en este conteo o se vio antes.
+  const product = stockCountProductByCode(code)
+    || (existingItem && existingItem.productId && state.products.find(p=>p.id===existingItem.productId))
+    || (visto && stockCountProductByName(visto.name))
+    || null;
+  const esDisplay = !!(product && product.displayQty && barcodeKey(product.displayBarcode)===barcodeKey(code) && barcodeKey(product.barcode)!==barcodeKey(code));
+  const defaultQty = existingItem ? existingItem.qty : (esDisplay ? product.displayQty : 1);
   const defaultPrice = existingItem ? existingItem.price : (product ? product.price : (visto ? visto.price : ''));
   const defaultName = existingItem ? existingItem.name : (product ? product.name : (visto ? visto.name : ''));
   panel.innerHTML = `
@@ -9470,12 +9529,12 @@ function showStockCountEntryPanel(code){
           ${product.photo ? `<img src="${escapeHtml(product.photoThumb||product.photo)}" style="width:40px;height:40px;border-radius:8px;object-fit:cover;flex:none;">` : ''}
           <span style="font-size:14px; font-weight:600;">${escapeHtml(product.name)}</span>
         </div>
+        ${esDisplay ? `<div style="font-size:12px; color:var(--warn); margin-bottom:8px;">Código de la caja: x${product.displayQty} unidades</div>` : ''}
         <input type="hidden" id="sc-name" value="${escapeHtml(product.name)}">
       ` : `
-        <div style="font-size:12px; color:var(--warn); margin-bottom:8px;">Este código no está en tus productos. Elegí a cuál corresponde o escribí el nombre:</div>
+        <div style="font-size:12px; color:var(--warn); margin-bottom:8px;">Ningún producto tiene este código todavía. Buscá el tuyo por nombre y tocalo:</div>
         <div class="form-group"><label>Producto</label>
-          <input id="sc-name" list="sc-prod-list" value="${escapeHtml(defaultName)}" placeholder="Tocá para elegir uno de tus productos o escribí" oninput="onStockCountNameInput()">
-          <datalist id="sc-prod-list">${stockCountProductOptions()}</datalist>
+          ${stockCountPickerHTML('sc', defaultName)}
           <p id="sc-web-hint" style="font-size:11px; color:rgba(255,255,255,0.5); margin-top:4px;">${defaultName ? '' : 'Buscando el código en internet…'}</p>
         </div>
         <label id="sc-link-box" style="display:none; align-items:center; gap:8px; font-size:12px; margin:-4px 0 10px; cursor:pointer;">
@@ -9491,9 +9550,9 @@ function showStockCountEntryPanel(code){
         <button class="btn-primary" style="flex:1;" onclick="confirmStockCountEntry('${code.replace(/'/g,"\\'")}', ${product?`'${product.id}'`:'null'})">Agregar al conteo</button>
       </div>
     </div>`;
-  setTimeout(()=>{ const i=document.getElementById('sc-qty'); if(i){ i.focus(); i.select(); } }, 50);
+  setTimeout(()=>{ const i=document.getElementById(product?'sc-qty':'sc-name'); if(i){ i.focus(); i.select(); } }, 50);
   if(!product){
-    onStockCountNameInput();
+    onStockCountPickerInput('sc');
     if(!defaultName){
       lookupBarcodeOnWeb(code).then(nombre=>{
         const input = document.getElementById('sc-name');
@@ -9501,10 +9560,10 @@ function showStockCountEntryPanel(code){
         if(!input || !hint) return; // ya se pasó a otro código
         if(nombre && !input.value.trim()){
           input.value = nombre;
-          onStockCountNameInput();
-          hint.innerHTML = '🌐 Encontrado en internet: revisá el nombre o elegí uno de tus productos.';
+          onStockCountPickerInput('sc');
+          hint.innerHTML = '🌐 Encontrado en internet: si es uno de tus productos, tocalo en la lista.';
         } else if(!nombre){
-          hint.textContent = 'No lo encontré en internet: elegí uno de tus productos o escribí el nombre.';
+          hint.textContent = 'No lo encontré en internet: buscá tu producto por nombre.';
         } else hint.textContent = '';
       });
     }
@@ -9524,14 +9583,14 @@ function confirmStockCountEntry(code, productId){
   if(!(price>=0)){ toast('Ingresá un precio válido', 'err'); return; }
   // Código nuevo que corresponde a un producto del local: se lo guarda si se pidió.
   if(!productId){
-    const elegido = stockCountProductByName(name);
+    const elegido = stockCountPickerSelected('sc');
     if(elegido){
       productId = elegido.id;
       if(document.getElementById('sc-link')?.checked && !elegido.barcode) updateProductBarcode(elegido.id, code, true);
     }
   }
   const items = state.stockCount.items||(state.stockCount.items=[]);
-  const idx = items.findIndex(it=>it.barcode===code);
+  const idx = items.findIndex(it=>barcodeKey(it.barcode)===barcodeKey(code));
   const entry = {id: idx>=0?items[idx].id:stockCountId(), barcode:code, productId: productId||null, name, qty, price, updatedAt:new Date().toISOString()};
   if(idx>=0) items[idx] = entry; else items.push(entry);
   saveState();
@@ -9550,8 +9609,7 @@ function openStockCountManualModal(itemId){
       <div class="modal-handle"></div>
       <h3 class="modal-title">${item?'Editar item del conteo':'Agregar item al conteo'}</h3>
       <div class="form-group"><label>Producto</label>
-        <input id="scm-name" list="scm-prod-list" value="${escapeHtml(item?item.name:'')}" placeholder="Tocá para elegir uno de tus productos o escribí" oninput="onStockCountManualNameInput()">
-        <datalist id="scm-prod-list">${stockCountProductOptions()}</datalist>
+        ${stockCountPickerHTML('scm', item?item.name:'')}
       </div>
       <div class="form-group"><label>Código de barras (opcional)</label><input id="scm-barcode" value="${escapeHtml(item?(item.barcode||''):'')}" placeholder="Opcional"></div>
       <div style="display:flex; gap:8px;">
@@ -9568,7 +9626,7 @@ function openStockCountManualModal(itemId){
 function closeStockCountManualModal(){ const el=document.getElementById("stockcount-manual-overlay"); if(el) el.remove(); }
 // Al elegir uno de los productos del local en la carga manual: trae su precio y su código.
 function onStockCountManualNameInput(){
-  const p = stockCountProductByName(document.getElementById('scm-name').value);
+  const p = stockCountPickerSelected('scm');
   if(!p) return;
   const price = document.getElementById('scm-price');
   if(price && !price.dataset.tocado) price.value = p.price;
@@ -9584,7 +9642,7 @@ function saveStockCountManualEntry(itemId){
   if(!(qty>=0)){ toast('Ingresá una cantidad válida', 'err'); return; }
   if(!(price>=0)){ toast('Ingresá un precio válido', 'err'); return; }
   const items = state.stockCount.items||(state.stockCount.items=[]);
-  const elegido = stockCountProductByName(name);
+  const elegido = stockCountPickerSelected('scm');
   if(itemId){
     const idx = items.findIndex(it=>it.id===itemId);
     if(idx>=0) items[idx] = Object.assign({}, items[idx], {name, barcode, qty, price, productId: elegido ? elegido.id : (items[idx].productId||null), updatedAt:new Date().toISOString()});
@@ -9620,11 +9678,11 @@ function stockCountCambios(){
   let sinProducto = 0;
   (state.stockCount.items||[]).forEach(it=>{
     const p = (it.productId && state.products.find(x=>x.id===it.productId))
-      || (it.barcode && state.products.find(x=>x.barcode===it.barcode))
+      || (it.barcode && stockCountProductByCode(it.barcode))
       || stockCountProductByName(it.name);
     if(!p || !p._apiId){ sinProducto++; return; }
     porProducto.set(p, (porProducto.get(p)||0) + Number(it.qty||0));
-    if(it.barcode && !p.barcode && !codigoNuevo.has(p) && !state.products.some(x=>x.barcode===it.barcode)) codigoNuevo.set(p, it.barcode);
+    if(it.barcode && !p.barcode && !codigoNuevo.has(p) && !stockCountProductByCode(it.barcode)) codigoNuevo.set(p, it.barcode);
   });
   const cambios = [], iguales = [], porPeso = [];
   porProducto.forEach((qty, p)=>{
