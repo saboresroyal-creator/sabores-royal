@@ -8699,6 +8699,7 @@ function openProductModal(id){
   // sacarse el sello hasta volver a subir la foto una vez.
   const cleanBase = p ? (p.photoClean || p.photo) : "";
   adminPhotoDraft = { original: cleanBase, current: p?p.photo:"", currentClean: cleanBase, filter:"none", bgRemoved:false, bgRemovedImage:"", background:"none", sinTacc: p?!!p.photoClean:false, brightness:100, contrast:100, saturation:100, rotation:0 };
+  if(!p && !stockCountLoaded) apiSyncStockCount();
   const overlay = document.createElement("div");
   overlay.className = "modal-overlay";
   overlay.id = "product-modal-overlay";
@@ -8722,7 +8723,8 @@ function openProductModal(id){
         ${adminPhotoDraft.current ? renderPhotoPreview() : ''}
       </div>
 
-      <div class="form-group"><label>Nombre del producto</label><input id="pm-name" value="${p?p.name:''}" placeholder="Ej: Cascaritas de Naranja"></div>
+      <div class="form-group"><label>Nombre del producto</label><input id="pm-name" value="${p?p.name:''}" placeholder="Ej: Cascaritas de Naranja"${p?'':' autocomplete="off" oninput="renderProductModalCountMatches()" onfocus="renderProductModalCountMatches()"'}>
+        ${p?'':'<input type="hidden" id="pm-count-item"><div id="pm-count-matches" style="max-height:190px; overflow-y:auto; margin-top:6px;"></div>'}</div>
       <div class="form-group"><label>Sección</label>
         <select id="pm-section" onchange="onModalSectionChange()">
           ${Object.keys(SECTION_META).map(k=>`<option value="${k}" ${p&&p.section===k?'selected':''}>${SECTION_META[k].label}</option>`).join('')}
@@ -8955,6 +8957,48 @@ function onProductModalBarcodeInput(){
   if(priceInput && !priceInput.value.trim() && entry.price) priceInput.value = entry.price;
   if(hint){ hint.textContent = 'Autocompletado desde el catálogo de códigos ("'+entry.name+'")'; hint.style.display = 'block'; }
 }
+// Items del conteo que todavía no son un producto de la app: al dar de alta un
+// producto se pueden traer por nombre, sin escanear, con cantidad, precio y código.
+function productModalCountItems(text){
+  const words = normText(text).split(/\s+/).filter(Boolean);
+  return (state.stockCount.items||[]).slice().reverse().filter(it=>{
+    if(state.products.some(p=>p.id===it.productId) || stockCountProductByCode(it.barcode) || stockCountProductByName(it.name)) return false;
+    const nombre = normText(it.name);
+    return words.every(w=>nombre.includes(w));
+  }).slice(0,30);
+}
+function renderProductModalCountMatches(){
+  const el = document.getElementById('pm-count-matches');
+  if(!el) return;
+  const items = document.getElementById('pm-count-item').value ? [] : productModalCountItems(document.getElementById('pm-name').value);
+  el.innerHTML = items.length ? `<div style="font-size:11px; color:rgba(255,255,255,0.5); margin-bottom:4px;">Del conteo, todavía sin cargar como producto:</div>`+items.map(it=>`
+    <div style="display:flex; align-items:center; justify-content:space-between; gap:8px; padding:9px 10px; border-radius:10px; background:var(--glass); border:1px solid var(--glass-bd); margin-bottom:6px; cursor:pointer;" onclick="pickProductModalCountItem('${it.id}')">
+      <span style="font-size:13px; flex:1; min-width:0; overflow:hidden; text-overflow:ellipsis; white-space:nowrap;">${escapeHtml(it.name)}</span>
+      <span style="font-size:11px; color:rgba(255,255,255,0.5); flex-shrink:0;">${it.qty} u. · ${money(it.price)}</span>
+    </div>`).join('') : '';
+}
+function pickProductModalCountItem(itemId){
+  const it = (state.stockCount.items||[]).find(x=>x.id===itemId);
+  if(!it) return;
+  document.getElementById('pm-count-item').value = it.id;
+  document.getElementById('pm-name').value = it.name;
+  document.getElementById('pm-price').value = it.price;
+  document.getElementById('pm-stock').value = it.qty;
+  document.getElementById('pm-barcode').value = it.barcode||'';
+  applyWholesalePct('');
+  renderProductModalCountMatches();
+  toast('Traído del conteo: '+it.name, 'ok');
+}
+// Se vincula recién con el id definitivo que devuelve la base.
+function linkStockCountItem(itemId, product){
+  const it = (state.stockCount.items||[]).find(x=>x.id===itemId);
+  if(!it) return;
+  it.productId = product.id;
+  it.name = product.name;
+  if(product.barcode) it.barcode = product.barcode;
+  saveState();
+  apiSaveStockCount();
+}
 function saveProductModal(id){
   const name = document.getElementById("pm-name").value.trim();
   const section = document.getElementById("pm-section").value;
@@ -9027,10 +9071,12 @@ function saveProductModal(id){
     };
     state.products.push(savedProduct);
   }
-  const alConteo = !id && stock > 0 && !!document.getElementById('pm-to-count')?.checked;
+  const itemConteo = id ? '' : (document.getElementById('pm-count-item')?.value||'');
+  const alConteo = !id && !itemConteo && stock > 0 && !!document.getElementById('pm-to-count')?.checked;
   saveState();
-  apiSaveProduct(savedProduct);
+  const guardado = apiSaveProduct(savedProduct);
   if(barcode) upsertBarcodeCatalog(barcode, name, price);
+  if(itemConteo) guardado.then(()=>linkStockCountItem(itemConteo, savedProduct));
   if(alConteo) addNewProductToStockCount(savedProduct);
   closeProductModal();
   render();
