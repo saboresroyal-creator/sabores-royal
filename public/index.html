@@ -939,6 +939,7 @@ function cmpImportAdjustPcts(){ return cmpParseAdjustInput(_cmpImportAdjustStr);
 let rentLoaded = false;
 let clientPaymentsLoaded = false;
 let stockCountLoaded = false;
+let stockCountQuery = '';
 let barcodeCatalogLoaded = false;
 let _pmEditingExisting = false;
 
@@ -9778,7 +9779,22 @@ function renderAdminConteo(){
       ${items.length && stockCountPuedeAplicar() ? `<button class="btn-primary" style="width:100%; margin-bottom:6px;" onclick="openApplyStockCount()">Actualizar el stock de la app con este conteo</button>
         <p style="font-size:11px; color:rgba(255,255,255,0.45); margin:0 0 10px; text-align:center;">${state.stockCount.appliedAt ? 'Última vez aplicado: '+new Date(state.stockCount.appliedAt).toLocaleString('es-AR',{day:'2-digit',month:'2-digit',year:'numeric',hour:'2-digit',minute:'2-digit'}) : 'Todavía no se aplicó al stock de la app.'}</p>` : ''}
       ${items.length ? `<button class="btn-secondary" style="width:100%; margin-bottom:10px; color:var(--danger); border-color:var(--danger);" onclick="clearStockCount()">Vaciar conteo</button>` : ''}
-      ${!items.length ? `<div style="text-align:center; padding:40px 20px; color:rgba(255,255,255,0.4);">Todavía no cargaste ningún producto. Escaneá el primero.</div>` : items.slice().reverse().map(it=>`
+      ${!items.length ? `<div style="text-align:center; padding:40px 20px; color:rgba(255,255,255,0.4);">Todavía no cargaste ningún producto. Escaneá el primero.</div>` : `
+        <input placeholder="Buscar en el conteo por nombre…" value="${escapeHtml(stockCountQuery)}" autocomplete="off" oninput="onStockCountQueryInput(this.value)" style="width:100%; box-sizing:border-box; padding:11px 14px; border-radius:12px; background:var(--glass); border:1px solid var(--glass-bd); color:var(--cream); outline:none; margin-bottom:10px;">
+        <div id="sc-count-list">${stockCountRowsHTML()}</div>
+      `}
+    </div>`;
+}
+// Lista del conteo, filtrada por nombre (palabras en cualquier orden, sin
+// acentos). Se repinta sola la lista para no sacarle el foco al buscador.
+function stockCountRowsHTML(){
+  const words = normText(stockCountQuery).split(/\s+/).filter(Boolean);
+  const items = (state.stockCount.items||[]).slice().reverse().filter(it=>{
+    const nombre = normText(it.name);
+    return words.every(w=>nombre.includes(w));
+  });
+  if(!items.length) return `<div style="text-align:center; padding:30px 20px; color:rgba(255,255,255,0.4);">Ningún producto del conteo coincide.</div>`;
+  return items.map(it=>`
         <div style="display:flex; align-items:center; gap:10px; padding:10px 12px; border-radius:12px; background:var(--glass); border:1px solid var(--glass-bd); margin-bottom:8px;">
           <div style="flex:1; min-width:0;">
             <div style="font-size:13.5px; font-weight:600; overflow:hidden; text-overflow:ellipsis; white-space:nowrap;">${escapeHtml(it.name)}</div>
@@ -9787,8 +9803,12 @@ function renderAdminConteo(){
           <button class="icon-btn" onclick="openStockCountManualModal('${it.id}')">${ic('edit')}</button>
           <button class="icon-btn" style="color:var(--danger);" onclick="deleteStockCountItem('${it.id}')">${ic('trash')}</button>
         </div>
-      `).join('')}
-    </div>`;
+      `).join('');
+}
+function onStockCountQueryInput(value){
+  stockCountQuery = value;
+  const el = document.getElementById('sc-count-list');
+  if(el) el.innerHTML = stockCountRowsHTML();
 }
 
 /* ---------- PHOTO UPLOAD + FILTERS + AI BG REMOVAL + BACKGROUNDS ---------- */
