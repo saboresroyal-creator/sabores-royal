@@ -9597,7 +9597,7 @@ function showStockCountEntryPanel(code){
   const defaultName = existingItem ? existingItem.name : (product ? product.name : (visto ? visto.name : ''));
   panel.innerHTML = `
     <div style="padding:10px 0 0;">
-      <div style="font-size:12px; color:rgba(255,255,255,0.5); margin-bottom:8px;">Código: <b style="color:var(--gold2);">${escapeHtml(code)}</b>${existingItem?' · <span style="color:var(--warn);">ya está en el conteo, se actualiza</span>':''}</div>
+      <div style="font-size:12px; color:rgba(255,255,255,0.5); margin-bottom:8px;">Código: <b style="color:var(--gold2);">${escapeHtml(code)}</b>${existingItem?' · <span style="color:var(--warn);">ya está en el conteo</span>':''}</div>
       ${product ? `
         <div style="display:flex; align-items:center; gap:10px; margin-bottom:10px;">
           ${product.photo ? `<img src="${escapeHtml(product.photoThumb||product.photo)}" style="width:40px;height:40px;border-radius:8px;object-fit:cover;flex:none;">` : ''}
@@ -9616,15 +9616,16 @@ function showStockCountEntryPanel(code){
         </label>
       `}
       <div style="display:flex; gap:8px;">
-        <div class="form-group" style="flex:1;"><label>Cantidad contada</label><input id="sc-qty" type="number" min="0" value="${defaultQty}" inputmode="decimal"></div>
+        <div class="form-group" style="flex:1;"><label>Cantidad contada</label><input id="sc-qty" type="number" min="0" value="${defaultQty}" inputmode="decimal" oninput="stockCountAddPreview('sc')"></div>
         <div class="form-group" style="flex:1;"><label>Precio de venta</label><input id="sc-price" type="number" min="0" value="${defaultPrice}" inputmode="decimal" oninput="this.dataset.tocado='1'"></div>
       </div>
+      ${existingItem ? stockCountAddHTML('sc') : ''}
       <div style="display:flex; gap:8px; margin-top:6px;">
         <button class="btn-secondary" style="flex:1;" onclick="resumeStockCountScan()">Omitir</button>
         <button class="btn-primary" style="flex:1;" onclick="confirmStockCountEntry('${code.replace(/'/g,"\\'")}', ${product?`'${product.id}'`:'null'})">Agregar al conteo</button>
       </div>
     </div>`;
-  setTimeout(()=>{ const i=document.getElementById(product?'sc-qty':'sc-name'); if(i){ i.focus(); i.select(); } }, 50);
+  setTimeout(()=>{ const i=document.getElementById(existingItem?'sc-add':product?'sc-qty':'sc-name'); if(i){ i.focus(); i.select(); } }, 50);
   if(!product){
     onStockCountPickerInput('sc');
     if(!defaultName){
@@ -9643,6 +9644,20 @@ function showStockCountEntryPanel(code){
     }
   }
 }
+// Mercadería que entra de un producto ya contado: se suma a la cantidad que tenía.
+function stockCountAddHTML(prefix){
+  return `<div class="form-group"><label>Sumar lo que entró</label>
+    <input id="${prefix}-add" type="number" min="0" placeholder="0" inputmode="decimal" oninput="stockCountAddPreview('${prefix}')">
+    <p id="${prefix}-add-hint" style="font-size:12px; color:var(--gold2); margin-top:4px;"></p>
+  </div>`;
+}
+function stockCountQtyFinal(prefix){
+  return Number(document.getElementById(prefix+'-qty')?.value) + Number(document.getElementById(prefix+'-add')?.value||0);
+}
+function stockCountAddPreview(prefix){
+  const hint = document.getElementById(prefix+'-add-hint');
+  if(hint) hint.textContent = Number(document.getElementById(prefix+'-add').value) ? 'Va a quedar en '+stockCountQtyFinal(prefix) : '';
+}
 function resumeStockCountScan(){
   const panel = document.getElementById('barcode-scan-panel');
   if(panel) panel.innerHTML = `<p id="barcode-scan-status" style="text-align:center; font-size:12.5px; color:rgba(255,255,255,0.5); margin:10px 0;">Apuntá la cámara al código de barras del producto…</p>`;
@@ -9650,7 +9665,7 @@ function resumeStockCountScan(){
 }
 function confirmStockCountEntry(code, productId){
   const name = (document.getElementById('sc-name')?.value||'').trim();
-  const qty = Number(document.getElementById('sc-qty')?.value);
+  const qty = stockCountQtyFinal('sc');
   const price = Number(document.getElementById('sc-price')?.value);
   if(!name){ toast('Ingresá un nombre para el producto', 'err'); return; }
   if(!(qty>=0)){ toast('Ingresá una cantidad válida', 'err'); return; }
@@ -9687,9 +9702,10 @@ function openStockCountManualModal(itemId){
       </div>
       <div class="form-group"><label>Código de barras (opcional)</label><input id="scm-barcode" value="${escapeHtml(item?(item.barcode||''):'')}" placeholder="Opcional"></div>
       <div style="display:flex; gap:8px;">
-        <div class="form-group" style="flex:1;"><label>Cantidad</label><input id="scm-qty" type="number" min="0" value="${item?item.qty:1}"></div>
+        <div class="form-group" style="flex:1;"><label>Cantidad</label><input id="scm-qty" type="number" min="0" value="${item?item.qty:1}" oninput="stockCountAddPreview('scm')"></div>
         <div class="form-group" style="flex:1;"><label>Precio de venta</label><input id="scm-price" type="number" min="0" value="${item?item.price:''}" oninput="this.dataset.tocado='1'"></div>
       </div>
+      ${item ? stockCountAddHTML('scm') : ''}
       <div style="display:flex; gap:10px; margin-top:6px;">
         <button class="btn-secondary" style="flex:1;" onclick="closeStockCountManualModal()">Cancelar</button>
         <button class="btn-primary" style="flex:1;" onclick="saveStockCountManualEntry(${item?`'${item.id}'`:'null'})">Guardar</button>
@@ -9710,7 +9726,7 @@ function onStockCountManualNameInput(){
 function saveStockCountManualEntry(itemId){
   const name = (document.getElementById('scm-name').value||'').trim();
   const barcode = (document.getElementById('scm-barcode').value||'').trim();
-  const qty = Number(document.getElementById('scm-qty').value);
+  const qty = stockCountQtyFinal('scm');
   const price = Number(document.getElementById('scm-price').value);
   if(!name){ toast('Ingresá un nombre', 'err'); return; }
   if(!(qty>=0)){ toast('Ingresá una cantidad válida', 'err'); return; }
