@@ -8796,7 +8796,7 @@ function openProductModal(id){
         <div class="form-group"><label>⚖️ PLU en la balanza</label><input id="pm-plu" type="number" inputmode="numeric" min="1" value="${p&&p.plu?p.plu:''}" placeholder="Ej: 123 — el mismo número que tiene cargado en la balanza"></div>
       </div>
 
-      <div class="form-group"><label id="pm-stock-label">${p&&p.sellByWeight?'Stock (en kilos)':'Stock'}</label><input id="pm-stock" type="number" value="${p?p.stock:''}" placeholder="0">
+      <div class="form-group"><label id="pm-stock-label">${p&&p.sellByWeight?'Stock (en kilos)':'Stock'}</label><input id="pm-stock" type="number" step="any" inputmode="decimal" value="${p?p.stock:''}" placeholder="0">
         ${p ? '' : `<label style="display:flex; align-items:center; gap:8px; font-size:12px; margin-top:8px; cursor:pointer; color:rgba(255,255,255,0.7);"><input type="checkbox" id="pm-to-count" checked style="width:18px; height:18px;"> Sumarlo también al conteo de stock</label>`}
       </div>
       <div class="form-group"><label>Código de barras</label>
@@ -9035,10 +9035,12 @@ function saveProductModal(id){
   const price = Number(document.getElementById("pm-price").value)||0;
   const wholesaleRaw = document.getElementById("pm-wholesale-price").value.trim();
   const wholesalePrice = wholesaleRaw ? Number(wholesaleRaw) : null;
-  const stock = Number(document.getElementById("pm-stock").value)||0;
+  const stockCargado = Number(document.getElementById("pm-stock").value)||0;
   const barcode = document.getElementById("pm-barcode").value.trim();
   const desc = document.getElementById("pm-desc").value.trim();
   const sellByWeight = document.getElementById("pm-sellbyweight-toggle").classList.contains("on");
+  // Por peso va en kilos, con los gramos como decimales; por unidad, entero.
+  const stock = sellByWeight ? stockCargado : Math.round(stockCargado);
   const sinTacc = document.getElementById("pm-sintacc-toggle").classList.contains("on");
   const sinAzucar = document.getElementById("pm-sinazucar-toggle").classList.contains("on");
   const hidden = document.getElementById("pm-hidden-toggle").classList.contains("on");
