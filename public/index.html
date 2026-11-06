@@ -9086,7 +9086,7 @@ function saveProductModal(id){
   let stockCambio = false;
   if(id){
     const p = state.products.find(pr=>pr.id===id);
-    stockCambio = !sellByWeight && stock !== Number(p.stock||0);
+    stockCambio = stock !== Number(p.stock||0);
     Object.assign(p, {name, section, cat, sub, price, wholesalePrice, stock, desc, barcode, sellByWeight, pricePerKg, wholesalePricePerKg, minGrams, sinTacc, sinAzucar, hidden, displayQty, displayDiscount, displayBarcode, promoPrice, promoUntil, superOffer, photo:adminPhotoDraft.current||p.photo, photoClean});
     // undefined = el producto nunca tuvo variantes y sigue sin tener: no
     // se manda la columna (ver apiSaveProduct).
@@ -9466,6 +9466,13 @@ async function apiSaveStockCount(){
     }
   }catch(e){ toast('Error guardando conteo: '+e.message, 'err'); }
 }
+function stockCountNewItem(p){
+  return {id:stockCountId(), barcode:p.barcode||'', productId:p.id, name:p.name, qty:Number(p.stock)||0, price:Number(p.sellByWeight ? p.pricePerKg : p.price)||0, updatedAt:new Date().toISOString()};
+}
+// Los kilos llevan decimales: se redondea al gramo para comparar la suma.
+function stockCountSuma(cantidades){
+  return Math.round(cantidades.reduce((s,q)=>s+Number(q||0),0)*1000)/1000;
+}
 // Producto recién dado de alta con stock: entra también al conteo, con esa
 // cantidad. Si ya estaba contado (mismo código, o mismo nombre sin código),
 // solo se lo vincula y se respeta lo contado, para no duplicarlo. Antes de
@@ -9479,7 +9486,7 @@ async function addNewProductToStockCount(p){
     previo.productId = p.id;
     if(p.barcode && !previo.barcode) previo.barcode = p.barcode;
   }else{
-    items.push({id:stockCountId(), barcode:p.barcode||'', productId:p.id, name:p.name, qty:Number(p.stock)||0, price:Number(p.sellByWeight ? p.pricePerKg : p.price)||0, updatedAt:new Date().toISOString()});
+    items.push(stockCountNewItem(p));
   }
   saveState();
   await apiSaveStockCount();
@@ -9487,11 +9494,20 @@ async function addNewProductToStockCount(p){
 }
 // Al cambiar el stock de un producto desde la app, su fila del conteo pasa a
 // esa cantidad. Si está en varias filas (unidad y caja, por ejemplo) se pide
-// cómo repartirla. Un producto que no se contó no entra: el conteo es lo contado.
+// cómo repartirla, y si no estaba en el conteo se lo agrega.
 async function syncStockCountWithProduct(p){
   if(!await apiSyncStockCount()) return;
   const filas = (state.stockCount.items||[]).filter(it=>stockCountItemProduct(it)===p);
-  if(!filas.length || filas.reduce((s,it)=>s+Number(it.qty||0),0)===p.stock) return;
+  if(!filas.length){
+    if(!(p.stock>0)) return;
+    state.stockCount.items = state.stockCount.items||[];
+    state.stockCount.items.push(stockCountNewItem(p));
+    saveState(); render();
+    await apiSaveStockCount();
+    toast(`"${p.name}" sumado al conteo (${p.stock})`, 'ok');
+    return;
+  }
+  if(stockCountSuma(filas.map(it=>it.qty))===p.stock) return;
   if(filas.length>1){ openStockCountSplit(p, filas); return; }
   const antes = filas[0].qty;
   filas[0].qty = p.stock;
@@ -9522,7 +9538,7 @@ function openStockCountSplit(p, filas){
   stockCountSplitPreview(p.stock);
 }
 function stockCountSplitPreview(stock){
-  const suma = [...document.querySelectorAll('.scs-qty')].reduce((s,i)=>s+Number(i.value||0),0);
+  const suma = stockCountSuma([...document.querySelectorAll('.scs-qty')].map(i=>i.value));
   document.getElementById('scs-hint').textContent = `Suman ${suma} de ${stock}`;
   document.getElementById('scs-save').disabled = suma!==stock;
 }
@@ -9945,11 +9961,15 @@ function stockCountRowsHTML(){
     return words.every(w=>nombre.includes(w));
   });
   if(!items.length) return `<div style="text-align:center; padding:30px 20px; color:rgba(255,255,255,0.4);">Ningún producto del conteo coincide.</div>`;
+  const pesados = state.products.filter(p=>p.sellByWeight);
+  const idsPeso = new Set(pesados.map(p=>p.id));
+  const nombresPeso = new Set(pesados.map(p=>stockCountNameKey(p.name)));
+  const cantidad = it=>idsPeso.has(it.productId) || nombresPeso.has(stockCountNameKey(it.name)) ? `${String(it.qty).replace('.',',')} kg` : `${it.qty} u.`;
   return items.map(it=>`
         <div style="display:flex; align-items:center; gap:10px; padding:10px 12px; border-radius:12px; background:var(--glass); border:1px solid var(--glass-bd); margin-bottom:8px;">
           <div style="flex:1; min-width:0;">
             <div style="font-size:13.5px; font-weight:600; overflow:hidden; text-overflow:ellipsis; white-space:nowrap;">${escapeHtml(it.name)}</div>
-            <div style="font-size:11px; color:rgba(255,255,255,0.45);">${it.barcode?escapeHtml(it.barcode)+' · ':''}${it.qty} u. × ${money(it.price)} = ${money(it.qty*it.price)}</div>
+            <div style="font-size:11px; color:rgba(255,255,255,0.45);">${it.barcode?escapeHtml(it.barcode)+' · ':''}${cantidad(it)} × ${money(it.price)} = ${money(it.qty*it.price)}</div>
           </div>
           <button class="icon-btn" onclick="openStockCountManualModal('${it.id}')">${ic('edit')}</button>
           <button class="icon-btn" style="color:var(--danger);" onclick="deleteStockCountItem('${it.id}')">${ic('trash')}</button>
