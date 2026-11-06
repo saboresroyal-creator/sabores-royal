@@ -8796,7 +8796,7 @@ function openProductModal(id){
         <div class="form-group"><label>⚖️ PLU en la balanza</label><input id="pm-plu" type="number" inputmode="numeric" min="1" value="${p&&p.plu?p.plu:''}" placeholder="Ej: 123 — el mismo número que tiene cargado en la balanza"></div>
       </div>
 
-      <div class="form-group"><label>Stock</label><input id="pm-stock" type="number" value="${p?p.stock:''}" placeholder="0">
+      <div class="form-group"><label id="pm-stock-label">${p&&p.sellByWeight?'Stock (en kilos)':'Stock'}</label><input id="pm-stock" type="number" value="${p?p.stock:''}" placeholder="0">
         ${p ? '' : `<label style="display:flex; align-items:center; gap:8px; font-size:12px; margin-top:8px; cursor:pointer; color:rgba(255,255,255,0.7);"><input type="checkbox" id="pm-to-count" checked style="width:18px; height:18px;"> Sumarlo también al conteo de stock</label>`}
       </div>
       <div class="form-group"><label>Código de barras</label>
@@ -8948,6 +8948,7 @@ function toggleSellByWeightField(){
   btn.classList.toggle("on", !isOn);
   weightGroup.style.display = isOn ? "none" : "block";
   normalGroup.style.display = isOn ? "block" : "none";
+  document.getElementById("pm-stock-label").textContent = btn.classList.contains("on") ? "Stock (en kilos)" : "Stock";
 }
 function toggleSuperOfferField(){
   const btn = document.getElementById("pm-superoffer-toggle");
@@ -9080,8 +9081,10 @@ function saveProductModal(id){
   const varLabel = ((document.getElementById('pm-var-label')||{}).value||'').trim() || 'Color';
   const variantsObj = (!sellByWeight && _pmVariants.length) ? {label:varLabel, options:_pmVariants.map(o=>({name:o.name, out:!!o.out, ...(o.photo?{photo:o.photo}:{})}))} : null;
   let savedProduct;
+  let stockCambio = false;
   if(id){
     const p = state.products.find(pr=>pr.id===id);
+    stockCambio = !sellByWeight && stock !== Number(p.stock||0);
     Object.assign(p, {name, section, cat, sub, price, wholesalePrice, stock, desc, barcode, sellByWeight, pricePerKg, wholesalePricePerKg, minGrams, sinTacc, sinAzucar, hidden, displayQty, displayDiscount, displayBarcode, promoPrice, promoUntil, superOffer, photo:adminPhotoDraft.current||p.photo, photoClean});
     // undefined = el producto nunca tuvo variantes y sigue sin tener: no
     // se manda la columna (ver apiSaveProduct).
@@ -9105,6 +9108,7 @@ function saveProductModal(id){
   if(barcode) upsertBarcodeCatalog(barcode, name, price);
   if(itemConteo) guardado.then(()=>linkStockCountItem(itemConteo, savedProduct));
   if(alConteo) addNewProductToStockCount(savedProduct);
+  if(stockCambio) syncStockCountWithProduct(savedProduct);
   closeProductModal();
   render();
   toast("Producto guardado", "ok");
@@ -9441,10 +9445,12 @@ async function apiSyncStockCount(){
     stockCountLoaded = true;
     saveState();
     render();
+    return true;
   }catch(e){
     stockCountLoaded = true;
     toast('Error cargando conteo de stock: '+e.message, 'err');
     render();
+    return false;
   }
 }
 async function apiSaveStockCount(){
@@ -9476,6 +9482,57 @@ async function addNewProductToStockCount(p){
   saveState();
   await apiSaveStockCount();
   toast(previo ? `"${p.name}" ya estaba en el conteo: quedó vinculado` : `"${p.name}" sumado al conteo (${p.stock})`, 'ok');
+}
+// Al cambiar el stock de un producto desde la app, su fila del conteo pasa a
+// esa cantidad. Si está en varias filas (unidad y caja, por ejemplo) se pide
+// cómo repartirla. Un producto que no se contó no entra: el conteo es lo contado.
+async function syncStockCountWithProduct(p){
+  if(!await apiSyncStockCount()) return;
+  const filas = (state.stockCount.items||[]).filter(it=>stockCountItemProduct(it)===p);
+  if(!filas.length || filas.reduce((s,it)=>s+Number(it.qty||0),0)===p.stock) return;
+  if(filas.length>1){ openStockCountSplit(p, filas); return; }
+  const antes = filas[0].qty;
+  filas[0].qty = p.stock;
+  filas[0].updatedAt = new Date().toISOString();
+  saveState(); render();
+  await apiSaveStockCount();
+  toast(`Conteo actualizado: ${p.name} ${antes} → ${p.stock}`, 'ok');
+}
+function openStockCountSplit(p, filas){
+  const overlay = document.createElement("div");
+  overlay.className = "modal-overlay";
+  overlay.id = "stockcount-split-overlay";
+  overlay.innerHTML = `
+    <div class="modal-sheet">
+      <div class="modal-handle"></div>
+      <h3 class="modal-title">Actualizar el conteo</h3>
+      <p style="font-size:12.5px; color:rgba(255,255,255,0.6); margin-bottom:10px;">
+        ${escapeHtml(p.name)} está en ${filas.length} filas del conteo. Repartí el stock nuevo (${p.stock}) entre ellas.
+      </p>
+      ${filas.map(it=>`<div class="form-group"><label>${escapeHtml(it.name)}${it.barcode?' · '+escapeHtml(it.barcode):''}</label><input class="scs-qty" data-item="${it.id}" type="number" min="0" value="${it.qty}" inputmode="decimal" oninput="stockCountSplitPreview(${p.stock})"></div>`).join('')}
+      <p id="scs-hint" style="font-size:12px; color:var(--gold2); margin-bottom:10px;"></p>
+      <div style="display:flex; gap:10px;">
+        <button class="btn-secondary" style="flex:1;" onclick="document.getElementById('stockcount-split-overlay').remove()">Dejarlo como está</button>
+        <button class="btn-primary" style="flex:1;" id="scs-save" onclick="saveStockCountSplit()">Guardar</button>
+      </div>
+    </div>`;
+  document.body.appendChild(overlay);
+  stockCountSplitPreview(p.stock);
+}
+function stockCountSplitPreview(stock){
+  const suma = [...document.querySelectorAll('.scs-qty')].reduce((s,i)=>s+Number(i.value||0),0);
+  document.getElementById('scs-hint').textContent = `Suman ${suma} de ${stock}`;
+  document.getElementById('scs-save').disabled = suma!==stock;
+}
+function saveStockCountSplit(){
+  document.querySelectorAll('.scs-qty').forEach(i=>{
+    const it = (state.stockCount.items||[]).find(x=>x.id===i.dataset.item);
+    if(it){ it.qty = Number(i.value||0); it.updatedAt = new Date().toISOString(); }
+  });
+  document.getElementById('stockcount-split-overlay').remove();
+  saveState(); render();
+  apiSaveStockCount();
+  toast('Conteo actualizado', 'ok');
 }
 function openStockCountScanner(){
   _barcodeScanMode = 'conteo';
@@ -9762,14 +9819,17 @@ function clearStockCount(){
 // se contó en varias partes, se suma. Lo que no es un producto de la app no
 // se toca, y los productos que no se contaron quedan como estaban.
 function stockCountPuedeAplicar(){ return state.adminIsSuperAdmin || (state.adminLoggedPerms||[]).includes('productos'); }
+function stockCountItemProduct(it){
+  return (it.productId && state.products.find(x=>x.id===it.productId))
+    || (it.barcode && stockCountProductByCode(it.barcode))
+    || stockCountProductByName(it.name);
+}
 function stockCountCambios(){
   const porProducto = new Map();
   const codigoNuevo = new Map(); // producto sin código -> código escaneado en el conteo
   let sinProducto = 0;
   (state.stockCount.items||[]).forEach(it=>{
-    const p = (it.productId && state.products.find(x=>x.id===it.productId))
-      || (it.barcode && stockCountProductByCode(it.barcode))
-      || stockCountProductByName(it.name);
+    const p = stockCountItemProduct(it);
     if(!p || !p._apiId){ sinProducto++; return; }
     porProducto.set(p, (porProducto.get(p)||0) + Number(it.qty||0));
     if(it.barcode && !p.barcode && !codigoNuevo.has(p) && !stockCountProductByCode(it.barcode)) codigoNuevo.set(p, it.barcode);
