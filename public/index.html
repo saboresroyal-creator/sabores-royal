@@ -963,6 +963,10 @@ function loadState(){
         }
       });
       state = Object.assign(state, parsed);
+      // saveState guarda todo el state: sin esto Mis Pedidos daría por buscado
+      // lo del último uso y el cliente seguiría viendo el pedido sin corregir.
+      state._lookupOrdersFor = null;
+      state.lookupOrdersLoading = false;
       // La primera vez que corre esta versión, marca como "vistos" a todos los
       // clientes ya existentes para no bombardear con notificaciones de
       // "nuevo cliente" a gente que ya estaba en la base hace tiempo.
@@ -1815,15 +1819,19 @@ async function apiSaveVoucher(voucher){
       neto: voucher.neto!=null ? voucher.neto : null,
       order_id: voucher.orderId || null,
       edited_at: voucher.editedAt || null,
-      afip_cae: voucher.afipCae || null,
-      afip_cae_vencimiento: voucher.afipCaeVencimiento || null,
-      afip_numero: voucher.afipNumero || null,
-      afip_punto_venta: voucher.afipPuntoVenta || null,
-      afip_tipo_comprobante: voucher.afipTipoComprobante || null,
-      afip_ambiente: voucher.afipAmbiente || null,
-      afip_doc_tipo: voucher.afipDocTipo || null,
-      afip_doc_nro: voucher.afipDocNro!=null ? String(voucher.afipDocNro) : null,
-      afip_cuit_emisor: voucher.afipCuitEmisor!=null ? String(voucher.afipCuitEmisor) : null,
+      // Solo si tiene CAE: así los demás comprobantes se guardan aunque todavía
+      // no se haya corrido supabase-migration-voucher-afip.sql.
+      ...(voucher.afipCae ? {
+        afip_cae: voucher.afipCae,
+        afip_cae_vencimiento: voucher.afipCaeVencimiento || null,
+        afip_numero: voucher.afipNumero || null,
+        afip_punto_venta: voucher.afipPuntoVenta || null,
+        afip_tipo_comprobante: voucher.afipTipoComprobante || null,
+        afip_ambiente: voucher.afipAmbiente || null,
+        afip_doc_tipo: voucher.afipDocTipo || null,
+        afip_doc_nro: voucher.afipDocNro!=null ? String(voucher.afipDocNro) : null,
+        afip_cuit_emisor: voucher.afipCuitEmisor!=null ? String(voucher.afipCuitEmisor) : null,
+      } : {}),
     };
     await adminFetch('/vouchers', 'POST', body, 'resolution=merge-duplicates,return=representation');
   }catch(e){
@@ -1844,6 +1852,8 @@ async function apiDeleteVoucher(voucherId){
    ========================================================= */
 function nav(screen, params){
   if(screen==='admin' && !IS_ADMIN_APP) return;
+  // Mis Pedidos siempre se pide de nuevo: el local pudo corregir un pedido.
+  if(screen==='orders') state._lookupOrdersFor = null;
   state.route = Object.assign({screen}, params||{});
   history.pushState({route: state.route}, '');
   render();
@@ -3672,23 +3682,35 @@ function resendOrderWA(){
 // Los pedidos de un cliente ya no viven en el blob local — se piden al
 // servidor (RPC get_my_orders) por teléfono cada vez que se entra a esta
 // pantalla, así funciona también desde un dispositivo nuevo.
-async function fetchMyOrders(phone){
-  state.lookupOrdersLoading = true;
-  render();
+// silent: repaso de fondo con la pantalla abierta — sin "Buscando…", y solo
+// repinta si el local corrigió algo del pedido.
+async function fetchMyOrders(phone, silent){
+  let repintar = !silent;
+  if(!silent){
+    state.lookupOrdersLoading = true;
+    render();
+  }
   try{
     const rows = await rpcFetch('get_my_orders', {p_phone: phone});
     // Si mientras esperábamos la respuesta el usuario ya buscó otro
     // teléfono, esta respuesta quedó vieja — no pisamos el resultado actual.
     if(state._lookupOrdersFor !== phone) return;
-    state.lookupOrdersResult = (rows||[]).map(mapOrderRow);
+    const pedidos = (rows||[]).map(mapOrderRow);
+    if(JSON.stringify(pedidos) !== JSON.stringify(state.lookupOrdersResult)) repintar = true;
+    state.lookupOrdersResult = pedidos;
   }catch(e){
     console.warn('lookupOrders:', e);
-    if(state._lookupOrdersFor !== phone) return;
+    if(silent || state._lookupOrdersFor !== phone) return;
     toast('No pudimos buscar tus pedidos: '+e.message, 'err');
   }finally{
-    if(state._lookupOrdersFor === phone) state.lookupOrdersLoading = false;
-    render();
+    if(!silent && state._lookupOrdersFor === phone) state.lookupOrdersLoading = false;
+    if(repintar) render();
   }
+}
+function refreshMyOrders(){
+  if(state.route.screen!=='orders' || !state._lookupOrdersFor || state.lookupOrdersLoading) return;
+  if(document.activeElement && document.activeElement.id==='lookup-phone') return;
+  fetchMyOrders(state._lookupOrdersFor, true);
 }
 function renderOrdersLookup(){
   const phone = state.route.lookupPhone || state.currentClientPhone || "";
@@ -3710,7 +3732,7 @@ function renderOrdersLookup(){
       orders.map(o=>`
         <div class="order-card">
           <div class="oc-head"><span class="oc-id">#${o.id}</span><span class="status-pill status-${o.status.toLowerCase()}">${orderStatusLabel(o.status)}</span></div>
-          <div class="oc-items">${o.items.map(it=>formatOrderItemLabel(it)).join(', ')}</div>
+          <div class="oc-items">${o.items.map(it=>it.sinStock ? `<span style="text-decoration:line-through; opacity:0.5;">${formatOrderItemLabel(it)}</span> (sin stock)` : formatOrderItemLabel(it)).join(', ')}</div>
           <div style="font-weight:700; color:var(--gold2);">${money(o.total)}</div>
           <button class="btn-outline-gold" style="margin-top:10px; padding:10px;" onclick="repeatOrder('${o.id}')">Repetir pedido</button>
         </div>
@@ -8125,15 +8147,20 @@ function repriceOrder(orderId){
   recalcOrderTotal(order);
   // Si el pedido ya tenía comprobante, se actualiza con los precios nuevos
   // (mismo número). Una factura con CAE de AFIP no se puede tocar.
-  const v = state.vouchers.find(vc=>vc.orderId===order.id);
-  let msg = 'Precios actualizados';
-  if(v){
-    if(v.type==='factura' && v.afipCae) msg = 'Precios actualizados. La factura tiene CAE de AFIP y no se puede cambiar';
-    else { updateVoucherInPlace(v.id, v.type, orderItemsForVoucher(order), v.customer, v.showIVA, v.generalDiscount); msg = 'Precios y comprobante actualizados'; }
-  }
   saveState(); render();
   apiUpdateOrderItems(order);
-  toast(msg, v && v.afipCae && v.type==='factura' ? 'err' : 'ok');
+  syncOrderVoucher(order, 'Precios actualizados');
+}
+// Lleva las correcciones del pedido a su comprobante, si ya tenía uno (mismo
+// número), y avisa cómo quedó. Una factura con CAE de AFIP no se puede tocar.
+function syncOrderVoucher(order, msg){
+  const v = state.vouchers.find(vc=>vc.orderId===order.id);
+  if(v && v.type==='factura' && v.afipCae){
+    toast(msg+'. La factura tiene CAE de AFIP y no se puede cambiar', 'err');
+    return;
+  }
+  if(v) updateVoucherInPlace(v.id, v.type, orderItemsForVoucher(order), v.customer, v.showIVA, v.generalDiscount);
+  toast(v ? msg+'. Comprobante actualizado' : msg, 'ok');
 }
 function recalcOrderTotal(order){
   const base = order.items.reduce((s,it)=> s + (it.sinStock ? 0 : Number(it.lineTotal||0)), 0);
@@ -8164,7 +8191,7 @@ function toggleOrderItemStock(orderId, itemIndex){
   recalcOrderTotal(order);
   saveState(); render();
   apiUpdateOrderItems(order);
-  toast(marking ? "Producto marcado sin stock, descontado del total" : "Producto restaurado al pedido", "ok");
+  syncOrderVoucher(order, marking ? "Producto marcado sin stock, descontado del total" : "Producto restaurado al pedido");
 }
 // Modal para editar un item de un pedido ya cargado: cambiar cantidad/gramos
 // (ej. el cliente pidió 50g y ahora se le manda 200g) o reemplazar el
@@ -8254,7 +8281,7 @@ function saveEditOrderItemQty(orderId, itemIndex){
   saveState(); render();
   apiUpdateOrderItems(order);
   closeEditOrderItemModal();
-  toast('Item actualizado', 'ok');
+  syncOrderVoucher(order, 'Item actualizado');
 }
 // Reemplaza el producto de un item del pedido por otro (ej. no hay stock de
 // la marca pedida). Devuelve el stock del producto viejo (si correspondía
@@ -8301,7 +8328,7 @@ function replaceOrderItemProduct(orderId, itemIndex, newProductId){
   saveState(); render();
   apiUpdateOrderItems(order);
   closeEditOrderItemModal();
-  toast('Producto reemplazado', 'ok');
+  syncOrderVoucher(order, 'Producto reemplazado');
 }
 // Modal para agregar un producto nuevo a un pedido ya cargado (ej. el
 // cliente se olvidó de pedir algo y se le suma al mismo pedido).
@@ -8398,7 +8425,7 @@ function confirmAddOrderItem(orderId, productId){
   saveState(); render();
   apiUpdateOrderItems(order);
   closeAddOrderItemModal();
-  toast('Producto agregado al pedido', 'ok');
+  syncOrderVoucher(order, 'Producto agregado al pedido');
 }
 async function apiPatchProductStock(p){
   if(!IS_ADMIN_APP || !p._apiId) return;
@@ -14252,7 +14279,7 @@ function autoSync(returning){
   if(IS_ADMIN_APP){
     if(due('admin')){ _lastSync.admin = now; apiSyncOrders(); apiSyncPosSales(); apiSyncSuggestions(); apiSyncRewardRedemptions(); apiSyncVouchers(); }
   }else if(due('client')){
-    _lastSync.client = now; refreshCurrentClient();
+    _lastSync.client = now; refreshCurrentClient(); refreshMyOrders();
   }
 }
 document.addEventListener('visibilitychange', ()=>autoSync(true));
