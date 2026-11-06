@@ -12266,7 +12266,7 @@ function renderVoucherView(voucherId){
     <div class="voucher-actions">
       <button class="btn-secondary" onclick="printVoucher('${voucher.id}')">${ic('printer')} Imprimir</button>
       <button class="btn-outline-gold" id="btn-download-pdf" onclick="downloadVoucherPDF('${voucher.id}')">${ic('download')} PDF</button>
-      <button class="btn-primary" onclick="shareVoucherWA('${voucher.id}')">${ic('wa')} Enviar</button>
+      <button class="btn-primary" id="btn-send-pdf" onclick="sendVoucherPDF('${voucher.id}')">${ic('wa')} Enviar</button>
     </div>
   </div>`;
 }
@@ -12304,6 +12304,52 @@ function printVoucher(voucherId){
   setTimeout(()=>{ win.print(); }, 300);
 }
 
+// Arma el PDF del comprobante en pantalla. En pedidos largos sigue en otra
+// hoja, cortando entre filas para no partir un renglón por la mitad.
+async function voucherPDFBlob(){
+  const [html2canvasMod, jsPDFMod] = await Promise.all([
+    import("https://esm.sh/html2canvas@1.4.1"),
+    import("https://esm.sh/jspdf@2.5.1"),
+  ]);
+  const html2canvas = html2canvasMod.default || html2canvasMod;
+  const jsPDF = jsPDFMod.jsPDF || jsPDFMod.default || jsPDFMod;
+  const source = document.getElementById("voucher-doc-content");
+  if(!source) throw new Error("No se encontró el documento");
+  // Small delay ensures any pending layout/reflow (e.g. blocks added right
+  // before this call) is fully settled before html2canvas reads the DOM.
+  await new Promise(r => setTimeout(r, 50));
+  const canvas = await html2canvas(source, {
+    scale: 2,
+    backgroundColor: "#ffffff",
+    windowWidth: source.scrollWidth,
+    windowHeight: source.scrollHeight,
+    height: source.scrollHeight,
+    width: source.scrollWidth,
+  });
+  const pdf = new jsPDF({ unit: "pt", format: "a4" });
+  const margin = 24;
+  const usableWidth = pdf.internal.pageSize.getWidth() - margin*2;
+  const usableHeight = pdf.internal.pageSize.getHeight() - margin*2;
+  const pxPorPunto = canvas.width / usableWidth;
+  const altoHoja = usableHeight * pxPorPunto;
+  const escala = canvas.height / source.scrollHeight;
+  const arriba = source.getBoundingClientRect().top;
+  const cortes = [...source.querySelectorAll("tr")].map(tr=>Math.floor((tr.getBoundingClientRect().top - arriba) * escala));
+  let y = 0;
+  while(y < canvas.height){
+    let fin = y + altoHoja;
+    if(fin >= canvas.height) fin = canvas.height;
+    else fin = cortes.filter(c=>c>y && c<=fin).pop() || Math.floor(fin);
+    const hoja = document.createElement("canvas");
+    hoja.width = canvas.width;
+    hoja.height = fin - y;
+    hoja.getContext("2d").drawImage(canvas, 0, -y);
+    if(y>0) pdf.addPage();
+    pdf.addImage(hoja.toDataURL("image/png"), "PNG", margin, margin, usableWidth, (fin-y)/pxPorPunto);
+    y = fin;
+  }
+  return pdf.output("blob");
+}
 async function downloadVoucherPDF(voucherId){
   const voucher = state.vouchers.find(v=>v.id===voucherId);
   if(!voucher) return;
@@ -12319,33 +12365,7 @@ async function downloadVoucherPDF(voucherId){
   if(win){ win.document.write("<title>Generando PDF…</title><body style='font-family:sans-serif; padding:24px; color:#444;'>Generando el comprobante, un momento…</body>"); }
 
   try{
-    const [html2canvasMod, jsPDFMod] = await Promise.all([
-      import("https://esm.sh/html2canvas@1.4.1"),
-      import("https://esm.sh/jspdf@2.5.1"),
-    ]);
-    const html2canvas = html2canvasMod.default || html2canvasMod;
-    const jsPDF = jsPDFMod.jsPDF || jsPDFMod.default || jsPDFMod;
-    const source = document.getElementById("voucher-doc-content");
-    if(!source) throw new Error("No se encontró el documento");
-    // Small delay ensures any pending layout/reflow (e.g. blocks added right
-    // before this call) is fully settled before html2canvas reads the DOM.
-    await new Promise(r => setTimeout(r, 50));
-    const canvas = await html2canvas(source, {
-      scale: 2,
-      backgroundColor: "#ffffff",
-      windowWidth: source.scrollWidth,
-      windowHeight: source.scrollHeight,
-      height: source.scrollHeight,
-      width: source.scrollWidth,
-    });
-    const imgData = canvas.toDataURL("image/png");
-    const pdf = new jsPDF({ unit: "pt", format: "a4" });
-    const pageWidth = pdf.internal.pageSize.getWidth();
-    const margin = 24;
-    const usableWidth = pageWidth - margin*2;
-    const imgHeight = (canvas.height * usableWidth) / canvas.width;
-    pdf.addImage(imgData, "PNG", margin, margin, usableWidth, imgHeight);
-    const blob = pdf.output("blob");
+    const blob = await voucherPDFBlob();
     const blobUrl = URL.createObjectURL(blob);
     if(win && !win.closed){
       win.location.href = blobUrl;
@@ -12363,16 +12383,85 @@ async function downloadVoucherPDF(voucherId){
   }
 }
 
-function shareVoucherWA(voucherId){
+function voucherFileName(voucher){
+  return `${VOUCHER_META[voucher.type].label} ${formatVoucherNumber(voucher.type, voucher.number)}`.replace(/[^\w]+/g,'-')+'.pdf';
+}
+function voucherWAUrl(voucher, msg){
+  const phone = voucher.customer.phone ? voucher.customer.phone.replace(/\D/g,'') : WA_NUMBER;
+  return "https://wa.me/" + phone + "?text=" + encodeURIComponent(msg);
+}
+// En el celular comparte el archivo y se elige WhatsApp y el contacto. En la
+// compu el navegador no puede pasarle un archivo a WhatsApp: se descarga y se
+// abre el chat para adjuntarlo. Si el PDF falla, sale el detalle como texto.
+async function sendVoucherPDF(voucherId){
   const voucher = state.vouchers.find(v=>v.id===voucherId);
   if(!voucher) return;
+  const btn = document.getElementById("btn-send-pdf");
+  const originalLabel = btn ? btn.innerHTML : null;
+  if(btn){ btn.innerHTML = `<span class="spin">${ic('sparkle')}</span> Generando...`; btn.disabled = true; }
+  const nombre = voucherFileName(voucher);
+  const titulo = `${VOUCHER_META[voucher.type].label} ${formatVoucherNumber(voucher.type, voucher.number)} — Sabores Royal`;
+  const puedeCompartir = !!(navigator.canShare && navigator.canShare({files:[new File(['x'], nombre, {type:'application/pdf'})]}));
+  // Igual que en downloadVoucherPDF: la ventana se abre ya, dentro del toque.
+  const win = puedeCompartir ? null : window.open("", "_blank");
+  try{
+    const blob = await voucherPDFBlob();
+    if(puedeCompartir){
+      await shareVoucherFile(new File([blob], nombre, {type:'application/pdf'}), titulo);
+    }else{
+      const a = document.createElement("a");
+      a.href = URL.createObjectURL(blob);
+      a.download = nombre;
+      document.body.appendChild(a);
+      a.click();
+      a.remove();
+      const url = voucherWAUrl(voucher, `${titulo}\nTe mando el comprobante en PDF.`);
+      if(win && !win.closed) win.location.href = url; else window.open(url, "_blank");
+      toast("PDF descargado: adjuntalo en el chat de WhatsApp", "ok");
+    }
+  }catch(err){
+    console.error(err);
+    toast("No se pudo generar el PDF, se envía el detalle como texto", "err");
+    const url = voucherWAUrl(voucher, voucherWAMessage(voucher));
+    if(win && !win.closed) win.location.href = url; else window.open(url, "_blank");
+  }finally{
+    if(btn){ btn.innerHTML = originalLabel; btn.disabled = false; }
+  }
+}
+// Armar el PDF demora, y algunos celulares ya no aceptan compartir como parte
+// del toque original: en ese caso se pide un toque más.
+let _voucherShare = null;
+async function shareVoucherFile(file, titulo){
+  try{
+    await navigator.share({files:[file], title:titulo});
+  }catch(e){
+    if(e.name==='AbortError') return;
+    if(e.name!=='NotAllowedError') throw e;
+    _voucherShare = {file, titulo};
+    const overlay = document.createElement("div");
+    overlay.className = "modal-overlay";
+    overlay.id = "voucher-share-overlay";
+    overlay.innerHTML = `
+      <div class="modal-sheet">
+        <div class="modal-handle"></div>
+        <h3 class="modal-title">PDF listo</h3>
+        <button class="btn-primary" onclick="retryVoucherShare()">${ic('wa')} Enviar PDF</button>
+        <button class="btn-secondary" style="margin-top:10px;" onclick="document.getElementById('voucher-share-overlay').remove()">Cancelar</button>
+      </div>`;
+    document.body.appendChild(overlay);
+  }
+}
+function retryVoucherShare(){
+  document.getElementById('voucher-share-overlay')?.remove();
+  if(_voucherShare) navigator.share({files:[_voucherShare.file], title:_voucherShare.titulo}).catch(e=>{ if(e.name!=='AbortError') toast('No se pudo compartir el PDF: '+e.message, 'err'); });
+}
+function voucherWAMessage(voucher){
   let msg = `${VOUCHER_META[voucher.type].label} ${formatVoucherNumber(voucher.type, voucher.number)} — Sabores Royal\n\n`;
   voucher.items.forEach(it=>{ msg += `• ${it.qty}x ${it.name}${voucher.type!=="remito"?` — ${money(it.price*it.qty)}`:''}\n`; });
   if(voucher.type!=="remito") msg += `\nTotal: ${money(voucher.total)}`;
   if(voucher.type==="presupuesto") msg += `\n\nPresupuesto sin cargo, sujeto a confirmación y disponibilidad de stock.`;
   if(voucher.type!=="remito" && voucher.type!=="presupuesto" && state.fiscal.aliasTransferencia) msg += `\n\nTransferencias a alias: ${state.fiscal.aliasTransferencia}`;
-  const phone = voucher.customer.phone ? voucher.customer.phone.replace(/\D/g,'') : WA_NUMBER;
-  window.open("https://wa.me/" + phone + "?text=" + encodeURIComponent(msg), "_blank");
+  return msg;
 }
 
 /* ---------- Admin: Comprobantes tab (history list) ---------- */
