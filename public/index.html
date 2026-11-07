@@ -9083,10 +9083,11 @@ function saveProductModal(id){
   const varLabel = ((document.getElementById('pm-var-label')||{}).value||'').trim() || 'Color';
   const variantsObj = (!sellByWeight && _pmVariants.length) ? {label:varLabel, options:_pmVariants.map(o=>({name:o.name, out:!!o.out, ...(o.photo?{photo:o.photo}:{})}))} : null;
   let savedProduct;
-  let stockCambio = false;
+  let stockCambio = false, precioCambio = false;
   if(id){
     const p = state.products.find(pr=>pr.id===id);
     stockCambio = stock !== Number(p.stock||0);
+    precioCambio = Number((sellByWeight ? pricePerKg : price)||0) !== Number((p.sellByWeight ? p.pricePerKg : p.price)||0);
     Object.assign(p, {name, section, cat, sub, price, wholesalePrice, stock, desc, barcode, sellByWeight, pricePerKg, wholesalePricePerKg, minGrams, sinTacc, sinAzucar, hidden, displayQty, displayDiscount, displayBarcode, promoPrice, promoUntil, superOffer, photo:adminPhotoDraft.current||p.photo, photoClean});
     // undefined = el producto nunca tuvo variantes y sigue sin tener: no
     // se manda la columna (ver apiSaveProduct).
@@ -9110,7 +9111,7 @@ function saveProductModal(id){
   if(barcode) upsertBarcodeCatalog(barcode, name, price);
   if(itemConteo) guardado.then(()=>linkStockCountItem(itemConteo, savedProduct));
   if(alConteo) addNewProductToStockCount(savedProduct);
-  if(stockCambio) syncStockCountWithProduct(savedProduct);
+  if(stockCambio || precioCambio) syncStockCountWithProduct(savedProduct, stockCambio, precioCambio);
   closeProductModal();
   render();
   toast("Producto guardado", "ok");
@@ -9494,12 +9495,13 @@ async function addNewProductToStockCount(p){
 }
 // Al cambiar el stock de un producto desde la app, su fila del conteo pasa a
 // esa cantidad. Si está en varias filas (unidad y caja, por ejemplo) se pide
-// cómo repartirla, y si no estaba en el conteo se lo agrega.
-async function syncStockCountWithProduct(p){
+// cómo repartirla, y si no estaba en el conteo se lo agrega. Un precio nuevo
+// pasa a todas sus filas; al revés no, el precio de la app es el que se cobra.
+async function syncStockCountWithProduct(p, cambioStock, cambioPrecio){
   if(!await apiSyncStockCount()) return;
   const filas = (state.stockCount.items||[]).filter(it=>stockCountItemProduct(it)===p);
   if(!filas.length){
-    if(!(p.stock>0)) return;
+    if(!cambioStock || !(p.stock>0)) return;
     state.stockCount.items = state.stockCount.items||[];
     state.stockCount.items.push(stockCountNewItem(p));
     saveState(); render();
@@ -9507,14 +9509,28 @@ async function syncStockCountWithProduct(p){
     toast(`"${p.name}" sumado al conteo (${p.stock})`, 'ok');
     return;
   }
-  if(stockCountSuma(filas.map(it=>it.qty))===p.stock) return;
-  if(filas.length>1){ openStockCountSplit(p, filas); return; }
-  const antes = filas[0].qty;
-  filas[0].qty = p.stock;
-  filas[0].updatedAt = new Date().toISOString();
+  const ahora = new Date().toISOString();
+  const avisos = [];
+  const precio = Number(p.sellByWeight ? p.pricePerKg : p.price)||0;
+  if(cambioPrecio && filas.some(it=>Number(it.price)!==precio)){
+    filas.forEach(it=>{ it.price = precio; it.updatedAt = ahora; });
+    avisos.push('precio '+money(precio));
+  }
+  const repartir = cambioStock && stockCountSuma(filas.map(it=>it.qty))!==p.stock;
+  if(repartir && filas.length>1){
+    if(avisos.length){ saveState(); apiSaveStockCount(); }
+    openStockCountSplit(p, filas);
+    return;
+  }
+  if(repartir){
+    avisos.push(`${filas[0].qty} → ${p.stock}`);
+    filas[0].qty = p.stock;
+    filas[0].updatedAt = ahora;
+  }
+  if(!avisos.length) return;
   saveState(); render();
   await apiSaveStockCount();
-  toast(`Conteo actualizado: ${p.name} ${antes} → ${p.stock}`, 'ok');
+  toast(`Conteo actualizado: ${p.name} ${avisos.join(' · ')}`, 'ok');
 }
 function openStockCountSplit(p, filas){
   const overlay = document.createElement("div");
@@ -9690,17 +9706,18 @@ function showStockCountEntryPanel(code){
           <input type="checkbox" id="sc-link" checked style="width:18px; height:18px;"> Guardarle este código al producto (la próxima vez lo reconoce solo, también en la caja)
         </label>
       `}
+      ${esDisplay && !existingItem ? `<div class="form-group"><label>Displays (x${product.displayQty} u. cada uno)</label><input id="sc-cajas" type="number" min="0" value="1" inputmode="decimal" oninput="document.getElementById('sc-qty').value = Number(this.value||0)*${product.displayQty}"></div>` : ''}
       <div style="display:flex; gap:8px;">
         <div class="form-group" style="flex:1;"><label>Cantidad contada</label><input id="sc-qty" type="number" min="0" value="${defaultQty}" inputmode="decimal" oninput="stockCountAddPreview('sc')"></div>
         <div class="form-group" style="flex:1;"><label>Precio de venta</label><input id="sc-price" type="number" min="0" value="${defaultPrice}" inputmode="decimal" oninput="this.dataset.tocado='1'"></div>
       </div>
-      ${existingItem ? stockCountAddHTML('sc') : ''}
+      ${existingItem ? stockCountAddHTML('sc', esDisplay ? product.displayQty : 0) : ''}
       <div style="display:flex; gap:8px; margin-top:6px;">
         <button class="btn-secondary" style="flex:1;" onclick="resumeStockCountScan()">Omitir</button>
         <button class="btn-primary" style="flex:1;" onclick="confirmStockCountEntry('${code.replace(/'/g,"\\'")}', ${product?`'${product.id}'`:'null'})">Agregar al conteo</button>
       </div>
     </div>`;
-  setTimeout(()=>{ const i=document.getElementById(existingItem?'sc-add':product?'sc-qty':'sc-name'); if(i){ i.focus(); i.select(); } }, 50);
+  setTimeout(()=>{ const i=document.getElementById(existingItem?'sc-add':esDisplay?'sc-cajas':product?'sc-qty':'sc-name'); if(i){ i.focus(); i.select(); } }, 50);
   if(!product){
     onStockCountPickerInput('sc');
     if(!defaultName){
@@ -9720,14 +9737,16 @@ function showStockCountEntryPanel(code){
   }
 }
 // Mercadería que entra de un producto ya contado: se suma a la cantidad que tenía.
-function stockCountAddHTML(prefix){
-  return `<div class="form-group"><label>Sumar lo que entró</label>
-    <input id="${prefix}-add" type="number" min="0" placeholder="0" inputmode="decimal" oninput="stockCountAddPreview('${prefix}')">
+// Con el código del display se cargan displays y se pasan a unidades.
+function stockCountAddHTML(prefix, porDisplay){
+  return `<div class="form-group"><label>${porDisplay ? `Displays que entraron (x${porDisplay} u. cada uno)` : 'Sumar lo que entró'}</label>
+    <input id="${prefix}-add" type="number" min="0" placeholder="0" inputmode="decimal" data-por="${porDisplay||1}" oninput="stockCountAddPreview('${prefix}')">
     <p id="${prefix}-add-hint" style="font-size:12px; color:var(--gold2); margin-top:4px;"></p>
   </div>`;
 }
 function stockCountQtyFinal(prefix){
-  return Number(document.getElementById(prefix+'-qty')?.value) + Number(document.getElementById(prefix+'-add')?.value||0);
+  const add = document.getElementById(prefix+'-add');
+  return Number(document.getElementById(prefix+'-qty')?.value) + (add ? Number(add.value||0)*Number(add.dataset.por||1) : 0);
 }
 function stockCountAddPreview(prefix){
   const hint = document.getElementById(prefix+'-add-hint');
