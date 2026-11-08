@@ -7430,7 +7430,10 @@ function renderClientAccountSection(c){
     </div>
     <div style="margin:0 16px 10px;">
       <button class="btn-primary" style="width:100%;" onclick="openClientPaymentModal('${phone}')">+ Registrar pago a cuenta</button>
-      ${rows.length ? `<button class="btn-outline-gold" id="btn-send-statement" style="width:100%; margin-top:8px;" onclick="sendClientStatementPDF('${phone}')">${ic('wa')} Enviar resumen en PDF</button>` : ''}
+      ${rows.length ? `<div style="display:flex; gap:8px; margin-top:8px;">
+        <button class="btn-outline-gold" id="btn-send-statement" style="flex:1;" onclick="sendClientStatementPDF('${phone}')">${ic('wa')} Resumen en PDF</button>
+        <button class="btn-secondary" style="flex:1;" onclick="sendClientStatementText('${phone}')">${ic('wa')} Por texto</button>
+      </div>` : ''}
     </div>
     ${rows.length===0 ? `<p style="font-size:13px; color:rgba(255,255,255,0.4); margin:0 16px 18px;">Sin movimientos todavía.</p>` : rows.slice().reverse().map(m=>`
       <div style="display:flex; justify-content:space-between; align-items:center; gap:10px; padding:12px 14px; margin:0 16px 8px; background:var(--glass); border:1px solid var(--glass-bd); border-radius:12px;">
@@ -7448,68 +7451,53 @@ function renderClientAccountSection(c){
 }
 // Resumen de la cuenta corriente para mandarle al cliente: los mismos
 // movimientos de la pantalla, el saldo y el alias para transferir.
-function buildClientStatementHTML(c){
+function clientStatementPDFSpec(c){
+  const rows = clientAccountRows(c.phone);
+  const saldo = rows.length ? rows[rows.length-1].running : 0;
+  return {
+    caja: ['RESUMEN DE', 'CUENTA CORRIENTE'],
+    datos: [['Cliente', (c.name||'') + (c.phone ? ` · ${c.phone}` : '')]],
+    fecha: new Date().toLocaleDateString("es-AR", {day:"2-digit", month:"2-digit", year:"numeric"}),
+    columnas: [{titulo:'Fecha', ancho:.14}, {titulo:'Concepto', ancho:.35, envuelve:true}, {titulo:'Debe', ancho:.17, align:'right'}, {titulo:'Haber', ancho:.17, align:'right'}, {titulo:'Saldo', ancho:.17, align:'right'}],
+    filas: rows.map(m=>({celdas: [fmtDateAR((m.date||'').slice(0,10)), m.label, m.type==='pago' ? '' : signMoney(m.amount), m.type==='pago' ? signMoney(m.amount) : '', signMoney(m.running)]})),
+    totales: [{label: saldo>0 ? 'Saldo a pagar' : saldo<0 ? 'Saldo a favor' : 'Saldo', valor: signMoney(Math.abs(saldo)), final:true}],
+    alias: state.fiscal.aliasTransferencia,
+    pie: `Resumen informativo, no válido como factura · ${state.fiscal.razonSocial} - ${state.fiscal.domicilio}`,
+  };
+}
+function clientStatementText(c){
   const rows = clientAccountRows(c.phone);
   const saldo = rows.length ? rows[rows.length-1].running : 0;
   const hoy = new Date().toLocaleDateString("es-AR", {day:"2-digit", month:"2-digit", year:"numeric"});
-  return `
-    <div class="vd-head">
-      <div class="vd-brand">
-        <img src="${LOGO_DATA_URL}" alt="">
-        <div>
-          <h2>${state.fiscal.razonSocial}</h2>
-          <p>${state.fiscal.domicilio}</p>
-          <p>CUIT: ${state.fiscal.cuit}</p>
-        </div>
-      </div>
-      <div class="vd-doctype"><div class="vd-num">RESUMEN DE<br>CUENTA CORRIENTE</div></div>
-    </div>
-    <div class="vd-meta" style="display:flex; justify-content:space-between;">
-      <div><b>Cliente:</b> ${escapeHtml(c.name||'')}${c.phone?` · ${escapeHtml(c.phone)}`:''}</div>
-      <div><b>Fecha:</b> ${hoy}</div>
-    </div>
-    <table>
-      <thead><tr><th>Fecha</th><th>Concepto</th><th style="text-align:right;">Debe</th><th style="text-align:right;">Haber</th><th style="text-align:right;">Saldo</th></tr></thead>
-      <tbody>
-        ${rows.map(m=>`
-          <tr>
-            <td style="white-space:nowrap;">${fmtDateAR((m.date||'').slice(0,10))}</td>
-            <td>${escapeHtml(m.label)}</td>
-            <td style="text-align:right; white-space:nowrap;">${m.type==='pago' ? '' : signMoney(m.amount)}</td>
-            <td style="text-align:right; white-space:nowrap;">${m.type==='pago' ? signMoney(m.amount) : ''}</td>
-            <td style="text-align:right; white-space:nowrap;">${signMoney(m.running)}</td>
-          </tr>`).join('')}
-      </tbody>
-    </table>
-    <div class="vd-totals"><div class="row final"><span>${saldo>0 ? 'Saldo a pagar' : saldo<0 ? 'Saldo a favor' : 'Saldo'}</span><span>${signMoney(Math.abs(saldo))}</span></div></div>
-    ${state.fiscal.aliasTransferencia ? `<div class="vd-alias" style="margin-top:16px; padding:10px 14px; border-radius:8px; background-color:#f6efd9; border:1px solid #d9c277; text-align:center; font-size:13px; color:#5a4a12;">Transferencias a alias: <span style="font-size:14px; font-weight:700; letter-spacing:0.3px;">${state.fiscal.aliasTransferencia}</span></div>` : ''}
-    <div class="vd-footer">Resumen informativo, no válido como factura · ${state.fiscal.razonSocial} — ${state.fiscal.domicilio}</div>`;
+  const nombre = (c.name||'').trim().split(' ')[0];
+  let msg = `Hola${nombre ? ' '+nombre : ''}! Te paso el resumen de tu cuenta en Sabores Royal al ${hoy}.`;
+  if(rows.length){
+    msg += `\n\nÚltimos movimientos:\n` + rows.slice(-5).map(m=>`• ${fmtDateAR((m.date||'').slice(0,10))} ${m.label}: ${m.type==='pago' ? '-' : '+'}${signMoney(m.amount)}`).join('\n');
+  }
+  msg += `\n\n${saldo>0 ? 'Saldo a pagar' : saldo<0 ? 'Saldo a favor' : 'Saldo'}: ${signMoney(Math.abs(saldo))}`;
+  if(state.fiscal.aliasTransferencia) msg += `\n\nTransferencias a alias: ${state.fiscal.aliasTransferencia}`;
+  return msg;
 }
-// El resumen no está en pantalla: se arma fuera de la vista para sacarle el PDF.
-async function sendClientStatementPDF(phone){
+function sendClientStatementPDF(phone){
   const c = state.clients[phone];
   if(!c) return;
-  const doc = document.createElement("div");
-  doc.className = "voucher-doc";
-  doc.id = "client-statement-doc";
-  doc.style.cssText = "position:fixed; left:-10000px; top:0; width:560px; margin:0;";
-  doc.innerHTML = buildClientStatementHTML(c);
-  document.body.appendChild(doc);
-  const rows = clientAccountRows(phone);
-  const saldo = rows.length ? rows[rows.length-1].running : 0;
-  try{
-    await sendDocPDF({
-      btnId: "btn-send-statement",
-      sourceId: "client-statement-doc",
-      nombre: ('Resumen de cuenta '+(c.name||'')).normalize('NFD').replace(/[̀-ͯ]/g,'').replace(/[^\w]+/g,'-')+'.pdf',
-      titulo: "Resumen de cuenta corriente — Sabores Royal",
-      aviso: "Te mando el resumen de tu cuenta en PDF.",
-      phone,
-      texto: ()=>`Resumen de cuenta corriente — Sabores Royal\nSaldo al ${new Date().toLocaleDateString("es-AR", {day:"2-digit", month:"2-digit", year:"numeric"})}: ${signMoney(saldo)}`+(state.fiscal.aliasTransferencia ? `\n\nTransferencias a alias: ${state.fiscal.aliasTransferencia}` : ''),
-    });
-  }finally{
-    doc.remove();
-  }
+  sendDocPDF({
+    btnId: "btn-send-statement",
+    crear: async ()=>{
+      const [jsPDF, logo] = await Promise.all([loadJsPDF(), pdfLogo()]);
+      return pdfDocumento(jsPDF, logo, clientStatementPDFSpec(c)).output("blob");
+    },
+    nombre: ('Resumen de cuenta '+(c.name||'')).normalize('NFD').replace(/[̀-ͯ]/g,'').replace(/[^\w]+/g,'-')+'.pdf',
+    titulo: "Resumen de cuenta corriente — Sabores Royal",
+    aviso: "Te mando el resumen de tu cuenta en PDF.",
+    phone,
+    texto: ()=>clientStatementText(c),
+  });
+}
+// Igual que el aviso de pago a proveedores: abre el chat con el texto, sin archivo.
+function sendClientStatementText(phone){
+  const c = state.clients[phone];
+  if(c) window.open(waChatUrl(phone, clientStatementText(c)), "_blank");
 }
 
 // Caja Diaria vive en su propio archivo (caja-diaria.html), con su propio
@@ -12490,16 +12478,195 @@ function printVoucher(voucherId){
   setTimeout(()=>{ win.print(); }, 300);
 }
 
+// ── PDF de texto (comprobante y resumen de cuenta) ──
+// Se dibuja con jsPDF, sin sacarle una foto a la pantalla: sale enseguida y
+// pesa poco. Solo la factura con CAE sigue saliendo de la pantalla, por el QR.
+let _pdfLogo = null;
+function pdfLogo(){
+  if(!_pdfLogo) _pdfLogo = new Promise(resolve=>{
+    const img = new Image();
+    img.onload = ()=>{
+      const c = document.createElement("canvas");
+      c.height = 160;
+      c.width = Math.round(img.width*160/img.height);
+      c.getContext("2d").drawImage(img, 0, 0, c.width, c.height);
+      resolve({data:c.toDataURL("image/png"), w:c.width, h:c.height});
+    };
+    img.onerror = ()=>resolve(null);
+    img.src = LOGO_DATA_URL;
+  });
+  return _pdfLogo;
+}
+async function loadJsPDF(){
+  const mod = await import("https://esm.sh/jspdf@2.5.1");
+  return mod.jsPDF || mod.default || mod;
+}
+// Las fuentes del PDF no tienen emojis ni algunos signos: se cambian o se sacan.
+function pdfTexto(t){ return String(t==null?'':t).replace(/[—–]/g,'-').replace(/[^\x00-\xff]/g,'').trim(); }
+// spec: {caja:[líneas], letra, datos:[[etiqueta, valor]], fecha, columnas:[{titulo, ancho, align, envuelve}],
+// filas:[{celdas, nota}], totales:[{label, valor, final}], alias, pie}
+function pdfDocumento(jsPDF, logo, spec){
+  const doc = new jsPDF({unit:"pt", format:"a4"});
+  const W = doc.internal.pageSize.getWidth(), H = doc.internal.pageSize.getHeight(), M = 40, ancho = W - M*2;
+  const tinta = [26,26,26], gris = [110,110,110];
+  let y = M;
+  // Membrete
+  let x = M;
+  if(logo){ const w = logo.w*48/logo.h; doc.addImage(logo.data, "PNG", M, y, w, 48); x = M + w + 10; }
+  doc.setTextColor(...tinta); doc.setFont("helvetica","bold"); doc.setFontSize(15);
+  doc.text(pdfTexto(state.fiscal.razonSocial), x, y+16);
+  doc.setTextColor(...gris); doc.setFont("helvetica","normal"); doc.setFontSize(9);
+  doc.text(pdfTexto(state.fiscal.domicilio), x, y+30);
+  doc.text(pdfTexto(`CUIT: ${state.fiscal.cuit} · ${state.fiscal.condicionIVA}`), x, y+42);
+  const bw = 150, bx = W - M - bw, cx = bx + bw/2;
+  doc.setDrawColor(...tinta); doc.setLineWidth(1); doc.roundedRect(bx, y, bw, 52, 6, 6);
+  doc.setTextColor(...tinta);
+  let by = y + (52 - ((spec.letra?18:0) + spec.caja.length*11))/2;
+  if(spec.letra){ doc.setFont("helvetica","bold"); doc.setFontSize(18); doc.text(pdfTexto(spec.letra), cx, by+14, {align:"center"}); by += 18; }
+  doc.setFont("helvetica","bold"); doc.setFontSize(9);
+  spec.caja.forEach(l=>{ doc.text(pdfTexto(l), cx, by+8, {align:"center"}); by += 11; });
+  y += 62;
+  doc.setLineWidth(1.5); doc.line(M, y, W-M, y);
+  y += 18;
+  // Cliente y fecha
+  const campo = (label, valor, cy, derecha)=>{
+    const l = pdfTexto(label)+': ', v = pdfTexto(valor);
+    doc.setFontSize(9.5); doc.setFont("helvetica","bold"); const wl = doc.getTextWidth(l);
+    doc.setFont("helvetica","normal"); const wv = doc.getTextWidth(v);
+    const cx0 = derecha ? W - M - wl - wv : M;
+    doc.setFont("helvetica","bold"); doc.text(l, cx0, cy);
+    doc.setFont("helvetica","normal"); doc.text(v, cx0 + wl, cy);
+  };
+  doc.setTextColor(60,60,60);
+  if(spec.fecha) campo('Fecha', spec.fecha, y, true);
+  spec.datos.forEach(([l, v])=>{ campo(l, v, y); y += 14; });
+  y += 8;
+  // Tabla: si no entra en la hoja sigue en otra, repitiendo los títulos.
+  const cols = spec.columnas.map(c=>Object.assign({}, c, {w: c.ancho*ancho}));
+  const xCelda = (c, x0)=> c.align==='right' ? x0 + c.w - 4 : x0 + 4;
+  const encabezado = ()=>{
+    doc.setFont("helvetica","bold"); doc.setFontSize(8); doc.setTextColor(...gris);
+    let x0 = M;
+    cols.forEach(c=>{ doc.text(c.titulo.toUpperCase(), xCelda(c, x0), y+10, {align: c.align==='right'?'right':'left'}); x0 += c.w; });
+    y += 16;
+    doc.setDrawColor(200,200,200); doc.setLineWidth(0.75); doc.line(M, y, W-M, y);
+  };
+  encabezado();
+  spec.filas.forEach(f=>{
+    doc.setFont("helvetica","normal"); doc.setFontSize(10);
+    const lineas = f.celdas.map((t,i)=> cols[i].envuelve ? doc.splitTextToSize(pdfTexto(t), cols[i].w-8) : [pdfTexto(t)]);
+    const alto = 8 + (Math.max(...lineas.map(l=>l.length)) + (f.nota?1:0))*12;
+    if(y + alto > H - M - 20){ doc.addPage(); y = M; encabezado(); doc.setFont("helvetica","normal"); doc.setFontSize(10); }
+    let x0 = M;
+    lineas.forEach((ls, i)=>{
+      const c = cols[i];
+      doc.setTextColor(...tinta);
+      ls.forEach((l, k)=>doc.text(l, xCelda(c, x0), y+14+k*12, {align: c.align==='right'?'right':'left'}));
+      if(f.nota && c.envuelve){
+        doc.setFontSize(8); doc.setTextColor(26,138,74);
+        doc.text(pdfTexto(f.nota), x0+4, y+13+ls.length*12);
+        doc.setFontSize(10);
+      }
+      x0 += c.w;
+    });
+    y += alto;
+    doc.setDrawColor(235,235,235); doc.setLineWidth(0.5); doc.line(M, y, W-M, y);
+  });
+  // Totales, alias y pie: van juntos, si no entran pasan a otra hoja.
+  if(y + 26 + spec.totales.length*18 + (spec.alias?46:0) + 40 > H - M){ doc.addPage(); y = M; }
+  y += 14;
+  const tx = W - M - ancho*0.55;
+  spec.totales.forEach(t=>{
+    doc.setTextColor(...tinta);
+    if(t.final){
+      doc.setDrawColor(...tinta); doc.setLineWidth(1.5); doc.line(tx, y, W-M, y);
+      y += 18; doc.setFont("helvetica","bold"); doc.setFontSize(13);
+    }else{ y += 14; doc.setFont("helvetica","normal"); doc.setFontSize(10); }
+    doc.text(pdfTexto(t.label), tx, y);
+    doc.text(pdfTexto(t.valor), W-M, y, {align:"right"});
+    if(!t.final) y += 2;
+  });
+  y += 18;
+  if(spec.alias){
+    doc.setFillColor(246,239,217); doc.setDrawColor(217,194,119); doc.setLineWidth(1);
+    doc.roundedRect(M, y, ancho, 30, 6, 6, "FD");
+    const l = 'Transferencias a alias: ', v = pdfTexto(spec.alias);
+    doc.setFontSize(10.5); doc.setFont("helvetica","normal"); const wl = doc.getTextWidth(l);
+    doc.setFont("helvetica","bold"); doc.setFontSize(11.5); const wv = doc.getTextWidth(v);
+    const ax = W/2 - (wl+wv)/2;
+    doc.setTextColor(90,74,18);
+    doc.setFont("helvetica","normal"); doc.setFontSize(10.5); doc.text(l, ax, y+19);
+    doc.setFont("helvetica","bold"); doc.setFontSize(11.5); doc.text(v, ax+wl, y+19);
+    y += 46;
+  }
+  doc.setDrawColor(200,200,200); doc.setLineWidth(0.5); doc.setLineDashPattern([2,2], 0);
+  doc.line(M, y, W-M, y); doc.setLineDashPattern([], 0);
+  doc.setFont("helvetica","normal"); doc.setFontSize(8); doc.setTextColor(120,120,120);
+  doc.splitTextToSize(pdfTexto(spec.pie), ancho).forEach((l, k)=>doc.text(l, W/2, y+14+k*10, {align:"center"}));
+  const hojas = doc.getNumberOfPages();
+  if(hojas>1) for(let i=1; i<=hojas; i++){ doc.setPage(i); doc.setFontSize(8); doc.setTextColor(120,120,120); doc.text(`Hoja ${i} de ${hojas}`, W-M, H-20, {align:"right"}); }
+  return doc;
+}
+function voucherPDFSpec(voucher){
+  const meta = VOUCHER_META[voucher.type];
+  const conPrecios = voucher.type !== "remito";
+  const datos = [['Cliente', voucher.customer.name + (voucher.customer.phone ? ` · ${voucher.customer.phone}` : '')]];
+  if(voucher.customer.address) datos.push(['Dirección', voucher.customer.address]);
+  if(voucher.customer.doc) datos.push(['CUIT/DNI', voucher.customer.doc]);
+  const totales = [];
+  if(conPrecios){
+    const gd = voucher.generalDiscount;
+    if(gd){
+      const pointsAmount = gd.pointsDiscountAmount||0;
+      const manualAmount = voucher.generalDiscountAmount - pointsAmount;
+      if(manualAmount > 0) totales.push({label:`Descuento ${gd.type==='percent'?`(${gd.value}%)`:'general'}`, valor:'-'+signMoney(manualAmount)});
+      if(pointsAmount > 0) totales.push({label:`Canje de puntos (${gd.pointsDiscountPct ? gd.pointsDiscountPct+'%' : (gd.pointsRedeemed||0)+' pts'})`, valor:'-'+signMoney(pointsAmount)});
+    }
+    if(voucher.type === "factura" && voucher.showIVA){
+      totales.push({label:'Neto', valor:signMoney(voucher.neto)});
+      totales.push({label:`IVA (${voucher.ivaPct}%, incluido)`, valor:signMoney(voucher.iva)});
+    }
+    totales.push({label:'Total', valor:signMoney(voucher.total), final:true});
+  }else{
+    totales.push({label:'Total de bultos/ítems', valor:String(voucher.items.reduce((s,it)=>s+it.qty,0)), final:true});
+  }
+  return {
+    caja: [meta.label.toUpperCase(), `${meta.short} ${formatVoucherNumber(voucher.type, voucher.number)}`],
+    letra: meta.letter,
+    datos,
+    fecha: new Date(voucher.date).toLocaleDateString("es-AR", {day:"2-digit", month:"2-digit", year:"numeric"}),
+    columnas: conPrecios
+      ? [{titulo:'Cant.', ancho:.1}, {titulo:'Descripción', ancho:.5, envuelve:true}, {titulo:'Precio', ancho:.2, align:'right'}, {titulo:'Subtotal', ancho:.2, align:'right'}]
+      : [{titulo:'Cant.', ancho:.15}, {titulo:'Descripción', ancho:.85, envuelve:true}],
+    filas: voucher.items.map(it=>{
+      const discPct = Number(it.discountPct)||0;
+      return {
+        celdas: conPrecios ? [String(it.qty), it.name, signMoney(it.price), signMoney(it.price*it.qty*(1-discPct/100))] : [String(it.qty), it.name],
+        nota: discPct>0 ? `Descuento ${discPct}%` : '',
+      };
+    }),
+    totales,
+    alias: voucher.type!=='presupuesto' ? state.fiscal.aliasTransferencia : '',
+    pie: (voucher.type==='presupuesto' ? 'Presupuesto sin cargo, sujeto a confirmación y disponibilidad de stock' : 'Comprobante interno no válido como factura fiscal AFIP')
+      + ` · Sabores Royal - ${state.fiscal.domicilio}` + (voucher.editedAt ? ` · Editado el ${new Date(voucher.editedAt).toLocaleDateString('es-AR')}` : ''),
+  };
+}
+async function voucherTextPDF(voucher){
+  if(voucher.type==='factura' && voucher.afipCae) return voucherPDFBlob();
+  const [jsPDF, logo] = await Promise.all([loadJsPDF(), pdfLogo()]);
+  return pdfDocumento(jsPDF, logo, voucherPDFSpec(voucher)).output("blob");
+}
+
 // Arma el PDF del comprobante en pantalla. En pedidos largos sigue en otra
 // hoja, cortando entre filas para no partir un renglón por la mitad.
-async function voucherPDFBlob(sourceId){
+async function voucherPDFBlob(){
   const [html2canvasMod, jsPDFMod] = await Promise.all([
     import("https://esm.sh/html2canvas@1.4.1"),
     import("https://esm.sh/jspdf@2.5.1"),
   ]);
   const html2canvas = html2canvasMod.default || html2canvasMod;
   const jsPDF = jsPDFMod.jsPDF || jsPDFMod.default || jsPDFMod;
-  const source = document.getElementById(sourceId || "voucher-doc-content");
+  const source = document.getElementById("voucher-doc-content");
   if(!source) throw new Error("No se encontró el documento");
   // Small delay ensures any pending layout/reflow (e.g. blocks added right
   // before this call) is fully settled before html2canvas reads the DOM.
@@ -12531,7 +12698,8 @@ async function voucherPDFBlob(sourceId){
     hoja.height = fin - y;
     hoja.getContext("2d").drawImage(canvas, 0, -y);
     if(y>0) pdf.addPage();
-    pdf.addImage(hoja.toDataURL("image/png"), "PNG", margin, margin, usableWidth, (fin-y)/pxPorPunto);
+    // JPEG y no PNG: con el fondo blanco se ve igual y el archivo pesa mucho menos.
+    pdf.addImage(hoja.toDataURL("image/jpeg", 0.85), "JPEG", margin, margin, usableWidth, (fin-y)/pxPorPunto);
     y = fin;
   }
   return pdf.output("blob");
@@ -12551,7 +12719,7 @@ async function downloadVoucherPDF(voucherId){
   if(win){ win.document.write("<title>Generando PDF…</title><body style='font-family:sans-serif; padding:24px; color:#444;'>Generando el comprobante, un momento…</body>"); }
 
   try{
-    const blob = await voucherPDFBlob();
+    const blob = await voucherTextPDF(voucher);
     const blobUrl = URL.createObjectURL(blob);
     if(win && !win.closed){
       win.location.href = blobUrl;
@@ -12583,7 +12751,7 @@ function sendVoucherPDF(voucherId){
   if(!voucher) return;
   sendDocPDF({
     btnId: "btn-send-pdf",
-    sourceId: "voucher-doc-content",
+    crear: ()=>voucherTextPDF(voucher),
     nombre: voucherFileName(voucher),
     titulo: `${VOUCHER_META[voucher.type].label} ${formatVoucherNumber(voucher.type, voucher.number)} — Sabores Royal`,
     aviso: "Te mando el comprobante en PDF.",
@@ -12591,7 +12759,7 @@ function sendVoucherPDF(voucherId){
     texto: ()=>voucherWAMessage(voucher),
   });
 }
-async function sendDocPDF({btnId, sourceId, nombre, titulo, aviso, phone, texto}){
+async function sendDocPDF({btnId, crear, nombre, titulo, aviso, phone, texto}){
   const btn = document.getElementById(btnId);
   const originalLabel = btn ? btn.innerHTML : null;
   if(btn){ btn.innerHTML = `<span class="spin">${ic('sparkle')}</span> Generando...`; btn.disabled = true; }
@@ -12599,7 +12767,7 @@ async function sendDocPDF({btnId, sourceId, nombre, titulo, aviso, phone, texto}
   // Igual que en downloadVoucherPDF: la ventana se abre ya, dentro del toque.
   const win = puedeCompartir ? null : window.open("", "_blank");
   try{
-    const blob = await voucherPDFBlob(sourceId);
+    const blob = await crear();
     if(puedeCompartir){
       await shareVoucherFile(new File([blob], nombre, {type:'application/pdf'}), titulo);
     }else{
