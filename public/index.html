@@ -12740,8 +12740,14 @@ async function downloadVoucherPDF(voucherId){
 function voucherFileName(voucher){
   return `${VOUCHER_META[voucher.type].label} ${formatVoucherNumber(voucher.type, voucher.number)}`.replace(/[^\w]+/g,'-')+'.pdf';
 }
+// En la compu se va directo a WhatsApp Web, donde ya está la sesión abierta:
+// wa.me pasa por una página intermedia y puede abrir la app de escritorio.
+const ES_CELULAR = /Android|iPhone|iPad|iPod/i.test(navigator.userAgent) || (navigator.maxTouchPoints>1 && /Macintosh/.test(navigator.userAgent));
 function waChatUrl(phone, msg){
-  return "https://wa.me/" + (phone ? phone.replace(/\D/g,'') : WA_NUMBER) + "?text=" + encodeURIComponent(msg);
+  const numero = phone ? phone.replace(/\D/g,'') : WA_NUMBER;
+  return ES_CELULAR
+    ? "https://wa.me/" + numero + "?text=" + encodeURIComponent(msg)
+    : "https://web.whatsapp.com/send?phone=" + numero + "&text=" + encodeURIComponent(msg);
 }
 // En el celular comparte el archivo y se elige WhatsApp y el contacto. En la
 // compu el navegador no puede pasarle un archivo a WhatsApp: se descarga y se
@@ -12763,7 +12769,9 @@ async function sendDocPDF({btnId, crear, nombre, titulo, aviso, phone, texto}){
   const btn = document.getElementById(btnId);
   const originalLabel = btn ? btn.innerHTML : null;
   if(btn){ btn.innerHTML = `<span class="spin">${ic('sparkle')}</span> Generando...`; btn.disabled = true; }
-  const puedeCompartir = !!(navigator.canShare && navigator.canShare({files:[new File(['x'], nombre, {type:'application/pdf'})]}));
+  // En la compu el menú de compartir de Windows pasa por la app de WhatsApp de
+  // escritorio, que pide iniciar sesión: ahí se descarga y se abre WhatsApp Web.
+  const puedeCompartir = ES_CELULAR && !!(navigator.canShare && navigator.canShare({files:[new File(['x'], nombre, {type:'application/pdf'})]}));
   // Igual que en downloadVoucherPDF: la ventana se abre ya, dentro del toque.
   const win = puedeCompartir ? null : window.open("", "_blank");
   try{
@@ -12779,7 +12787,7 @@ async function sendDocPDF({btnId, crear, nombre, titulo, aviso, phone, texto}){
       a.remove();
       const url = waChatUrl(phone, `${titulo}\n${aviso}`);
       if(win && !win.closed) win.location.href = url; else window.open(url, "_blank");
-      toast("PDF descargado: adjuntalo en el chat de WhatsApp", "ok");
+      toast("PDF descargado: arrastralo desde Descargas al chat de WhatsApp", "ok");
     }
   }catch(err){
     console.error(err);
