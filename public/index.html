@@ -2028,6 +2028,14 @@ function activePromo(product){
   const today = new Date().toISOString().slice(0,10);
   return product.promoUntil >= today ? product.promoPrice : null;
 }
+// Al mayorista solo le llega la Súper Oferta (nunca la campaña de %), y solo
+// cuando es más barata que su precio mayorista: paga el menor de los dos.
+function wholesaleBasePrice(p){ return p.sellByWeight ? (p.wholesalePricePerKg || p.pricePerKg) : (p.wholesalePrice || p.price); }
+function wholesaleSuperOffer(p){
+  if(!p || !p.superOffer) return null;
+  const promo = activePromo(p);
+  return promo !== null && promo < wholesaleBasePrice(p) ? promo : null;
+}
 // Productos con oferta activa que además la reflejan en el precio final
 // (excluye a los mayoristas por completo: ellos tienen su propio acuerdo de
 // precios y no deben ver ofertas pensadas para el público minorista).
@@ -2076,12 +2084,7 @@ function homePromoBannerHtml(){
 // Productos marcados Súper Oferta con su precio fijo todavía activo —
 // separados de la campaña general de % (ver productsOnCampaignPromo).
 function productsOnSuperOffer(){
-  const client = state.currentClientPhone ? state.clients[state.currentClientPhone] : null;
-  return state.products.filter(p=>{
-    if(!p.superOffer || p.hidden) return false;
-    if(wholesaleModeActive(client)) return false;
-    return activePromo(p) !== null;
-  });
+  return state.products.filter(p=>p.superOffer && !p.hidden && activePromo(p) !== null);
 }
 // Contenido auto-generado para una celda de la grilla de 4 fotos cuando el
 // admin la deja SIN foto pero le pone el enlace "🔥 Súper Oferta": así no
@@ -2090,9 +2093,13 @@ function superOfertaCellHtml(){
   const products = productsOnSuperOffer();
   if(products.length===0) return null;
   let maxPct = 0;
+  const client = state.currentClientPhone ? state.clients[state.currentClientPhone] : null;
+  const mayorista = wholesaleModeActive(client);
   products.forEach(p=>{
-    const basePrice = p.sellByWeight ? p.pricePerKg : p.price;
-    const pct = Math.round((1-activePromo(p)/basePrice)*100);
+    // Al mayorista, el % que realmente le baja sobre su precio mayorista.
+    const promo = mayorista ? wholesaleSuperOffer(p) : activePromo(p);
+    const basePrice = mayorista ? wholesaleBasePrice(p) : (p.sellByWeight ? p.pricePerKg : p.price);
+    const pct = promo !== null ? Math.round((1-promo/basePrice)*100) : 0;
     if(pct>maxPct) maxPct = pct;
   });
   return `
@@ -2418,7 +2425,8 @@ function effectivePrice(product){
   const client = state.currentClientPhone ? state.clients[state.currentClientPhone] : null;
   const isWholesaleClient = wholesaleModeActive(client);
   if(isWholesaleClient){
-    return product.wholesalePrice || product.price;
+    const superOffer = wholesaleSuperOffer(product);
+    return superOffer !== null ? superOffer : (product.wholesalePrice || product.price);
   }
   const promo = activePromo(product);
   return promo !== null ? promo : product.price;
@@ -3088,8 +3096,8 @@ function renderProductDetail(id){
     const pricePerKgEff = effectivePriceForWeight(p);
     const lineTotal = (pricePerKgEff/1000)*grams;
     const _clWt = state.currentClientPhone ? state.clients[state.currentClientPhone] : null;
-    const _pdPromoW = wholesaleModeActive(_clWt) ? null : activePromo(p);
-    const _pdPromoPctW = _pdPromoW!==null ? Math.round((1-_pdPromoW/p.pricePerKg)*100) : null;
+    const _pdPromoW = wholesaleModeActive(_clWt) ? wholesaleSuperOffer(p) : activePromo(p);
+    const _pdPromoPctW = _pdPromoW!==null ? Math.round((1-_pdPromoW/(wholesaleModeActive(_clWt) ? wholesaleBasePrice(p) : p.pricePerKg))*100) : null;
     return `
     <div class="screen">
       <div class="topbar">
@@ -3135,8 +3143,8 @@ function renderProductDetail(id){
   const _isWholesale = wholesaleModeActive(_clW);
   const _hasDisp = !_isWholesale && p.displayQty && p.displayDiscount && qty >= p.displayQty;
   const _lineTotal = _hasDisp ? Math.round(_unitPr * (1 - p.displayDiscount/100)) * qty : _unitPr * qty;
-  const _pdPromo = _isWholesale ? null : activePromo(p);
-  const _pdPromoPct = _pdPromo!==null ? Math.round((1-_pdPromo/p.price)*100) : null;
+  const _pdPromo = _isWholesale ? wholesaleSuperOffer(p) : activePromo(p);
+  const _pdPromoPct = _pdPromo!==null ? Math.round((1-_pdPromo/(_isWholesale ? wholesaleBasePrice(p) : p.price))*100) : null;
   return `
   <div class="screen">
     <div class="topbar">
@@ -3232,7 +3240,8 @@ function effectivePriceForWeight(product){
   const client = state.currentClientPhone ? state.clients[state.currentClientPhone] : null;
   const isWholesaleClient = wholesaleModeActive(client);
   if(isWholesaleClient){
-    return product.wholesalePricePerKg || product.pricePerKg;
+    const superOffer = wholesaleSuperOffer(product);
+    return superOffer !== null ? superOffer : (product.wholesalePricePerKg || product.pricePerKg);
   }
   const promo = activePromo(product);
   return promo !== null ? promo : product.pricePerKg;
@@ -3274,8 +3283,8 @@ function promoBadge(pct, sm=false){
 function pcPriceHtml(p){
   const client = state.currentClientPhone ? state.clients[state.currentClientPhone] : null;
   const isWholesaleClient = wholesaleModeActive(client);
-  const isWholesale = isWholesaleClient && !!p.wholesalePrice;
-  const promo = isWholesaleClient ? null : activePromo(p);
+  const promo = isWholesaleClient ? wholesaleSuperOffer(p) : activePromo(p);
+  const isWholesale = isWholesaleClient && !!p.wholesalePrice && promo === null;
   const base = isWholesale ? p.wholesalePrice : (promo !== null ? promo : p.price);
   const pct = p.superOffer ? 0 : clientDiscountPct();
   const final = pct > 0 ? Math.round(base*(1-pct/100)) : base;
@@ -3286,8 +3295,8 @@ function pcPriceHtml(p){
   }
   if(isWholesale) return money(base)+mayoristaTag;
   if(promo !== null){
-    const badgePct = Math.round((1-promo/p.price)*100);
-    return `<span style="text-decoration:line-through;opacity:.45;font-size:13px;font-weight:500;display:block;">${money(p.price)}</span><span style="color:#c62222;">${money(promo)}</span>${promoBadge(badgePct,true)}`;
+    const ref = isWholesaleClient ? wholesaleBasePrice(p) : p.price, badgePct = Math.round((1-promo/ref)*100);
+    return `<span style="text-decoration:line-through;opacity:.45;font-size:13px;font-weight:500;display:block;">${money(ref)}</span><span style="color:#c62222;">${money(promo)}</span>${promoBadge(badgePct,true)}`;
   }
   return money(p.price);
 }
@@ -3298,9 +3307,9 @@ function pcImgBadgeHtml(p){
   let html = '';
   const client = state.currentClientPhone ? state.clients[state.currentClientPhone] : null;
   const isWholesaleClient = wholesaleModeActive(client);
-  const promo = isWholesaleClient ? null : activePromo(p);
+  const promo = isWholesaleClient ? wholesaleSuperOffer(p) : activePromo(p);
   if(promo !== null){
-    const basePrice = p.sellByWeight ? p.pricePerKg : p.price;
+    const basePrice = isWholesaleClient ? wholesaleBasePrice(p) : (p.sellByWeight ? p.pricePerKg : p.price);
     const pct = Math.round((1-promo/basePrice)*100);
     html += `<span class="pc-promo-badge">🔥 -${pct}%</span>`;
   }
@@ -3333,8 +3342,8 @@ function pcCardBodyHtml(p){
 function pcWeightPriceHtml(p){
   const client = state.currentClientPhone ? state.clients[state.currentClientPhone] : null;
   const isWholesaleClient = wholesaleModeActive(client);
-  const isWholesale = isWholesaleClient && !!p.wholesalePricePerKg;
-  const promo = isWholesaleClient ? null : activePromo(p);
+  const promo = isWholesaleClient ? wholesaleSuperOffer(p) : activePromo(p);
+  const isWholesale = isWholesaleClient && !!p.wholesalePricePerKg && promo === null;
   const base = isWholesale ? p.wholesalePricePerKg : (promo !== null ? promo : p.pricePerKg);
   const pct = p.superOffer ? 0 : clientDiscountPct();
   const final = pct > 0 ? Math.round(base*(1-pct/100)) : base;
@@ -3344,16 +3353,16 @@ function pcWeightPriceHtml(p){
   }
   if(isWholesale) return money(base)+'/kg'+mayoristaTag;
   if(promo !== null){
-    const badgePct = Math.round((1-promo/p.pricePerKg)*100);
-    return `<span style="text-decoration:line-through;opacity:.45;font-size:13px;font-weight:500;display:block;">${money(p.pricePerKg)}</span><span style="color:#c62222;">${money(promo)}</span>/kg${promoBadge(badgePct,true)}`;
+    const ref = isWholesaleClient ? wholesaleBasePrice(p) : p.pricePerKg, badgePct = Math.round((1-promo/ref)*100);
+    return `<span style="text-decoration:line-through;opacity:.45;font-size:13px;font-weight:500;display:block;">${money(ref)}</span><span style="color:#c62222;">${money(promo)}</span>/kg${promoBadge(badgePct,true)}`;
   }
   return money(p.pricePerKg)+'/kg';
 }
 function pdPriceHtml(p){
   const client = state.currentClientPhone ? state.clients[state.currentClientPhone] : null;
   const isWholesaleClient = wholesaleModeActive(client);
-  const isWholesale = isWholesaleClient && !!p.wholesalePrice;
-  const promo = isWholesaleClient ? null : activePromo(p);
+  const promo = isWholesaleClient ? wholesaleSuperOffer(p) : activePromo(p);
+  const isWholesale = isWholesaleClient && !!p.wholesalePrice && promo === null;
   const base = isWholesale ? p.wholesalePrice : (promo !== null ? promo : p.price);
   const pct = p.superOffer ? 0 : clientDiscountPct();
   const final = pct > 0 ? Math.round(base*(1-pct/100)) : base;
@@ -3363,16 +3372,16 @@ function pdPriceHtml(p){
   }
   if(isWholesale) return money(base)+mayoristaTag;
   if(promo !== null){
-    const badgePct = Math.round((1-promo/p.price)*100);
-    return `<span style="text-decoration:line-through;opacity:.45;font-size:16px;">${money(p.price)}</span> <span style="color:#c62222;">${money(promo)}</span>${promoBadge(badgePct)}`;
+    const ref = isWholesaleClient ? wholesaleBasePrice(p) : p.price, badgePct = Math.round((1-promo/ref)*100);
+    return `<span style="text-decoration:line-through;opacity:.45;font-size:16px;">${money(ref)}</span> <span style="color:#c62222;">${money(promo)}</span>${promoBadge(badgePct)}`;
   }
   return money(p.price);
 }
 function pdWeightPriceHtml(p){
   const client = state.currentClientPhone ? state.clients[state.currentClientPhone] : null;
   const isWholesaleClient = wholesaleModeActive(client);
-  const isWholesale = isWholesaleClient && !!p.wholesalePricePerKg;
-  const promo = isWholesaleClient ? null : activePromo(p);
+  const promo = isWholesaleClient ? wholesaleSuperOffer(p) : activePromo(p);
+  const isWholesale = isWholesaleClient && !!p.wholesalePricePerKg && promo === null;
   const base = isWholesale ? p.wholesalePricePerKg : (promo !== null ? promo : p.pricePerKg);
   const pct = p.superOffer ? 0 : clientDiscountPct();
   const final = pct > 0 ? Math.round(base*(1-pct/100)) : base;
@@ -3382,8 +3391,8 @@ function pdWeightPriceHtml(p){
   }
   if(isWholesale) return money(base)+'/kg'+mayoristaTag;
   if(promo !== null){
-    const badgePct = Math.round((1-promo/p.pricePerKg)*100);
-    return `<span style="text-decoration:line-through;opacity:.45;font-size:16px;">${money(p.pricePerKg)}</span> <span style="color:#c62222;">${money(promo)}</span>/kg${promoBadge(badgePct)}`;
+    const ref = isWholesaleClient ? wholesaleBasePrice(p) : p.pricePerKg, badgePct = Math.round((1-promo/ref)*100);
+    return `<span style="text-decoration:line-through;opacity:.45;font-size:16px;">${money(ref)}</span> <span style="color:#c62222;">${money(promo)}</span>/kg${promoBadge(badgePct)}`;
   }
   return money(p.pricePerKg)+'/kg';
 }
@@ -8190,10 +8199,10 @@ function repriceOrder(orderId){
     if(!p) return null;
     const promo = activePromo(p);
     if(it.grams){
-      const kg = isWholesale ? (p.wholesalePricePerKg || p.pricePerKg) : (promo !== null ? promo : p.pricePerKg);
+      const kg = isWholesale ? (wholesaleSuperOffer(p) ?? (p.wholesalePricePerKg || p.pricePerKg)) : (promo !== null ? promo : p.pricePerKg);
       return kg ? {price: kg, lineTotal: (kg/1000)*it.grams} : null;
     }
-    const u = isWholesale ? (p.wholesalePrice || p.price) : (promo !== null ? promo : p.price);
+    const u = isWholesale ? (wholesaleSuperOffer(p) ?? (p.wholesalePrice || p.price)) : (promo !== null ? promo : p.price);
     return u ? {price: u, lineTotal: u*(it.qty||1)} : null;
   });
   const sim = order.items.reduce((s,it,i)=> s + (it.sinStock ? 0 : Number((nuevos[i]||it).lineTotal||0)), 0);
@@ -8366,14 +8375,14 @@ function replaceOrderItemProduct(orderId, itemIndex, newProductId){
   it.sinStock = false;
   if(newProduct.sellByWeight){
     const grams = it.grams || newProduct.minGrams || 50;
-    const pricePerKg = isWholesale ? (newProduct.wholesalePricePerKg || newProduct.pricePerKg) : (promo !== null ? promo : newProduct.pricePerKg);
+    const pricePerKg = isWholesale ? (wholesaleSuperOffer(newProduct) ?? (newProduct.wholesalePricePerKg || newProduct.pricePerKg)) : (promo !== null ? promo : newProduct.pricePerKg);
     it.price = pricePerKg;
     it.grams = grams;
     delete it.qty;
     it.lineTotal = (pricePerKg/1000)*grams;
   } else {
     const qty = it.qty || 1;
-    const unitPrice = isWholesale ? (newProduct.wholesalePrice || newProduct.price) : (promo !== null ? promo : newProduct.price);
+    const unitPrice = isWholesale ? (wholesaleSuperOffer(newProduct) ?? (newProduct.wholesalePrice || newProduct.price)) : (promo !== null ? promo : newProduct.price);
     it.price = unitPrice;
     it.qty = qty;
     delete it.grams;
@@ -8465,12 +8474,12 @@ function confirmAddOrderItem(orderId, productId){
 
   const newItem = { id: Number(product.id), name: product.name };
   if(product.sellByWeight){
-    const pricePerKg = isWholesale ? (product.wholesalePricePerKg || product.pricePerKg) : (promo !== null ? promo : product.pricePerKg);
+    const pricePerKg = isWholesale ? (wholesaleSuperOffer(product) ?? (product.wholesalePricePerKg || product.pricePerKg)) : (promo !== null ? promo : product.pricePerKg);
     newItem.price = pricePerKg;
     newItem.grams = val;
     newItem.lineTotal = (pricePerKg/1000)*val;
   } else {
-    const unitPrice = isWholesale ? (product.wholesalePrice || product.price) : (promo !== null ? promo : product.price);
+    const unitPrice = isWholesale ? (wholesaleSuperOffer(product) ?? (product.wholesalePrice || product.price)) : (promo !== null ? promo : product.price);
     newItem.price = unitPrice;
     newItem.qty = val;
     newItem.lineTotal = unitPrice*val;
