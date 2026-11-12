@@ -887,6 +887,12 @@ let state = {
   posBanner:{image:'', title:'', subtitle:'', active:false},
   vouchers: [],
   voucherCounters:{factura:0, remito:0, ticket:0, presupuesto:0},
+  // Ids de comprobantes que este dispositivo ya vio en el servidor (null =
+  // todavía no sincronizó nunca con esta versión), los que quedaron en duda
+  // al actualizar y los borrados que no se pudieron borrar del servidor.
+  voucherKnownIds: null,
+  voucherDoubtful: [],
+  voucherPendingDeletes: [],
   suggestions: [],
   rewards: [],
   signQueue: [],
@@ -943,8 +949,16 @@ let stockCountQuery = '';
 let barcodeCatalogLoaded = false;
 let _pmEditingExisting = false;
 
+let _saveStateWarned = false;
 function saveState(){
-  try{ localStorage.setItem(STORAGE_KEY, JSON.stringify(state)); }catch(e){}
+  try{ localStorage.setItem(STORAGE_KEY, JSON.stringify(state)); }
+  catch(e){
+    console.warn('No se pudo guardar en este dispositivo:', e);
+    if(!_saveStateWarned && typeof toast==='function'){
+      _saveStateWarned = true;
+      toast('Este dispositivo se quedó sin espacio para guardar datos. Lo que cargues puede perderse si cerrás la app.', 'err');
+    }
+  }
 }
 function loadState(){
   try{
@@ -1141,8 +1155,27 @@ async function adminSignOut(){
 }
 // Igual que supaFetch, pero autenticado como el admin logueado (en vez del anon key).
 // Requerido para leer/escribir clients, orders, chat_messages, admin_users, etc.
+function adminSessionLost(){
+  if(!state.adminAuthed) return;
+  state.adminAuthed = false; state.adminIsSuperAdmin = false; state.adminLoggedName = ""; state.adminLoggedPerms = [];
+  render();
+  toast('Se venció la sesión de admin: volvé a ingresar para que se sincronice.', 'err');
+}
+// Último error de sincronización del admin, para mostrarlo arriba del panel
+// en vez de quedar solo en la consola (si no, se ven datos viejos sin aviso).
+let adminSyncErrors = {};
+function adminSyncResult(key, err){
+  const had = Object.keys(adminSyncErrors).length;
+  if(err) adminSyncErrors[key] = err.message || String(err); else delete adminSyncErrors[key];
+  if(had !== Object.keys(adminSyncErrors).length) render();
+}
+function retryAdminSync(){
+  adminSyncErrors = {};
+  apiSyncClients(); apiSyncOrders(); apiSyncPosSales(); apiSyncVouchers(); apiSyncClientPayments();
+  render();
+}
 async function adminFetch(path, method, body, prefer, _retried){
-  if(!adminSession || !adminSession.access_token) throw new Error('No hay sesión de admin');
+  if(!adminSession || !adminSession.access_token){ adminSessionLost(); throw new Error('No hay sesión de admin'); }
   const url = SUPABASE_URL + '/rest/v1' + path;
   const headers = {
     'Content-Type': 'application/json',
@@ -1155,6 +1188,7 @@ async function adminFetch(path, method, body, prefer, _retried){
   if(res.status === 401 && !_retried && await adminTryRefresh()){
     return adminFetch(path, method, body, prefer, true);
   }
+  if(res.status === 401 && !adminSession) adminSessionLost();
   const text = await res.text();
   if(!res.ok){
     let err; try{ err = JSON.parse(text); }catch(e){ err = {message: text}; }
@@ -1702,12 +1736,13 @@ async function apiSyncOrders(){
   try{
     const rows = await adminFetch('/orders?select=*&order=created_at.desc&limit=500', 'GET');
     const mapped = (rows||[]).map(mapOrderRow);
+    adminSyncResult('pedidos');
     if(JSON.stringify(mapped) !== JSON.stringify(state.orders)){
       state.orders = mapped;
       saveState();
       render();
     }
-  }catch(e){ console.warn('Sync orders:', e); }
+  }catch(e){ console.warn('Sync orders:', e); adminSyncResult('pedidos', e); }
 }
 
 // Ventas de mostrador (caja-venta.html) — mismo patrón que apiSyncOrders,
@@ -1776,32 +1811,78 @@ function mapVoucherRow(row){
   };
 }
 
-// Trae los comprobantes guardados en el servidor: agrega los que falten
-// localmente, actualiza los que hayan cambiado (editados desde otro
-// dispositivo), y sube los contadores locales al máximo visto en el
-// servidor por tipo para no repetir números entre dispositivos.
+// Trae los comprobantes guardados en el servidor y deja este dispositivo
+// igual: agrega los que falten, actualiza los editados en otro dispositivo,
+// saca los que se borraron en otro y vuelve a subir los que no llegaron al
+// servidor (si falló la subida, antes quedaban solo en este dispositivo y se
+// perdían al borrar el caché). También sube los contadores locales al máximo
+// visto en el servidor por tipo para no repetir números entre dispositivos.
+async function apiVoucherServerIds(){
+  const ids = new Set();
+  for(let offset=0;;offset+=1000){
+    const page = await adminFetch('/vouchers?select=id&order=id&limit=1000&offset='+offset, 'GET');
+    (page||[]).forEach(r=>ids.add(r.id));
+    if(!page || page.length<1000) return ids;
+  }
+}
+function markVoucherOnServer(id){
+  if(state.voucherKnownIds && !state.voucherKnownIds.includes(id)) state.voucherKnownIds.push(id);
+  state.voucherDoubtful = (state.voucherDoubtful||[]).filter(x=>x!==id);
+}
+function voucherOnlyLocal(v){
+  return !!state.voucherKnownIds && !state.voucherKnownIds.includes(v.id);
+}
 async function apiSyncVouchers(){
   if(!IS_ADMIN_APP || !state.adminAuthed) return;
   try{
+    // Primero los borrados que quedaron pendientes, para no traerlos de vuelta.
+    const pendingDel = (state.voucherPendingDeletes||[]).slice();
+    for(const id of pendingDel){
+      try{ await adminFetch('/vouchers?id=eq.'+encodeURIComponent(id), 'DELETE'); state.voucherPendingDeletes = state.voucherPendingDeletes.filter(x=>x!==id); }
+      catch(e){ console.warn('Reintento de borrado de comprobante:', e); }
+    }
+    const pendingDelSet = new Set(state.voucherPendingDeletes||[]);
     const rows = await adminFetch('/vouchers?select=*&order=created_at.desc&limit=500', 'GET');
     if(!rows) return;
-    let changed = false;
+    const serverIds = await apiVoucherServerIds();
+    let changed = pendingDel.length !== (state.voucherPendingDeletes||[]).length;
     rows.forEach(row=>{
+      if(pendingDelSet.has(row.id)) return;
       const mapped = mapVoucherRow(row);
       const idx = state.vouchers.findIndex(v=>v.id===row.id);
       if(idx===-1){ state.vouchers.push(mapped); changed = true; }
       else if(JSON.stringify(state.vouchers[idx])!==JSON.stringify(mapped)){ state.vouchers[idx] = mapped; changed = true; }
     });
+    // Los que están acá y no en el servidor. Si el servidor no devolvió
+    // nada no se toca nada, por si fue un error de lectura.
+    if(serverIds.size){
+      const firstRun = !state.voucherKnownIds;
+      const known = new Set(state.voucherKnownIds||[]);
+      const doubtful = new Set(state.voucherDoubtful||[]);
+      const toUpload = [];
+      state.vouchers = state.vouchers.filter(v=>{
+        if(serverIds.has(v.id)) return true;
+        if(known.has(v.id)){ changed = true; return false; }   // se borró en otro dispositivo
+        if(firstRun) doubtful.add(v.id);                         // de antes de esta versión: decide el usuario
+        else if(!doubtful.has(v.id)) toUpload.push(v);           // se hizo acá y no se pudo subir
+        return true;
+      });
+      state.voucherDoubtful = [...doubtful].filter(id=>state.vouchers.some(v=>v.id===id));
+      state.voucherKnownIds = [...new Set([...known, ...serverIds])];
+      changed = true;
+      for(const v of toUpload) await apiSaveVoucher(v, true);
+    }
     state.vouchers.sort((a,b)=> new Date(b.date) - new Date(a.date));
     Object.keys(VOUCHER_META).forEach(type=>{
       const maxServer = rows.filter(r=>r.type===type).reduce((m,r)=>Math.max(m, r.number||0), 0);
       state.voucherCounters[type] = Math.max(state.voucherCounters[type]||0, maxServer);
     });
+    adminSyncResult('comprobantes');
     if(changed){ saveState(); render(); }
-  }catch(e){ console.warn('Sync comprobantes:', e); }
+  }catch(e){ console.warn('Sync comprobantes:', e); adminSyncResult('comprobantes', e); }
 }
 
-async function apiSaveVoucher(voucher){
+async function apiSaveVoucher(voucher, silent){
   try{
     const body = {
       id: voucher.id,
@@ -1834,16 +1915,43 @@ async function apiSaveVoucher(voucher){
       } : {}),
     };
     await adminFetch('/vouchers', 'POST', body, 'resolution=merge-duplicates,return=representation');
+    markVoucherOnServer(voucher.id);
+    saveState();
+    if(silent) render();
+    return true;
   }catch(e){
     console.warn('Error guardando comprobante:', e);
-    toast('El comprobante se guardó en este dispositivo, pero no en el servidor: '+e.message, 'err');
+    if(!silent) toast('El comprobante se guardó en este dispositivo, pero todavía no en el servidor: se va a reintentar solo. '+e.message, 'err');
+    return false;
   }
 }
 
 async function apiDeleteVoucher(voucherId){
+  state.voucherDoubtful = (state.voucherDoubtful||[]).filter(x=>x!==voucherId);
   try{
     await adminFetch('/vouchers?id=eq.'+encodeURIComponent(voucherId), 'DELETE');
-  }catch(e){ console.warn('Error eliminando comprobante:', e); }
+  }catch(e){
+    // Se reintenta en el próximo sync; mientras tanto no se vuelve a traer.
+    console.warn('Error eliminando comprobante:', e);
+    if(!(state.voucherPendingDeletes||[]).includes(voucherId)){
+      state.voucherPendingDeletes = (state.voucherPendingDeletes||[]).concat(voucherId);
+      saveState();
+    }
+  }
+}
+async function uploadDoubtfulVoucher(id){
+  const v = state.vouchers.find(x=>x.id===id);
+  if(!v) return;
+  if(await apiSaveVoucher(v, true)) toast('Comprobante subido al servidor', 'ok');
+  else toast('No se pudo subir, revisá la conexión y probá de nuevo', 'err');
+}
+function discardDoubtfulVoucher(id){
+  const v = state.vouchers.find(x=>x.id===id);
+  if(!v) return;
+  if(!confirm(`¿Sacar ${VOUCHER_META[v.type].label} ${formatVoucherNumber(v.type, v.number)} de este dispositivo? No está en el servidor, así que no va a quedar en ningún lado.`)) return;
+  state.vouchers = state.vouchers.filter(x=>x.id!==id);
+  state.voucherDoubtful = (state.voucherDoubtful||[]).filter(x=>x!==id);
+  saveState(); render();
 }
 </script>
 <script>
@@ -4410,6 +4518,10 @@ function renderAdmin(){
       ${tabs.map(t=>`<button class="admin-tab ${tab===t.key?'active':''}" data-tab="${t.key}" onclick="setAdminTab('${t.key}')">${t.label}${t.badge>0?`<span class="admin-tab-badge">${t.badge>99?'99+':t.badge}</span>`:''}</button>`).join('')}
     </div>
     <div style="flex:1; padding-bottom:30px;">
+      ${Object.keys(adminSyncErrors).length ? `<div style="margin:12px 16px; padding:12px 14px; border-radius:12px; background:rgba(224,80,80,0.12); border:1px solid var(--danger); font-size:13px;">
+        <b>No se pudo sincronizar</b> (${escapeHtml(Object.keys(adminSyncErrors).join(', '))}): lo que ves puede estar desactualizado. ${escapeHtml(Object.values(adminSyncErrors)[0])}
+        <button class="btn-secondary" style="margin-top:8px; padding:6px 12px; font-size:12px;" onclick="retryAdminSync()">Reintentar</button>
+      </div>` : ''}
       ${tab==="pedidos" ? renderAdminPedidos() : ""}
       ${tab==="productos" ? `
         <div style="padding:10px 16px 4px; position:sticky; top:0; z-index:10; background:var(--navy2);">
@@ -4510,6 +4622,7 @@ async function tryAdminLogin(){
     await loadAdminIdentity(adminSession.uid);
     render();
     if(state.adminIsSuperAdmin) apiSyncAdminUsers().then(render).catch(()=>{});
+    retryAdminSync(); apiSyncSuggestions(); apiSyncRewardRedemptions(); syncAdminChats();
   }catch(e){
     if(e.message==='sin_acceso'){
       await adminSignOut();
@@ -7356,21 +7469,36 @@ function clientPaymentsTotal(phone){
 function clientAccountBalance(phone){
   return clientPurchaseTotal(phone) - clientPaymentsTotal(phone);
 }
+async function apiFetchClientPayments(){
+  const rows = await adminFetch('/app_settings?setting_key=eq.client_payments&select=id,setting_value', 'GET');
+  const row = rows && rows[0];
+  return { exists: !!row, data: Object.assign({movements:[]}, row ? JSON.parse(row.setting_value) : {}) };
+}
 async function apiSyncClientPayments(){
+  if(!IS_ADMIN_APP || !state.adminAuthed) return;
   try{
-    const rows = await adminFetch('/app_settings?setting_key=eq.client_payments&select=setting_value', 'GET');
-    const row = rows && rows[0];
-    if(row){
-      const parsed = JSON.parse(row.setting_value);
-      state.clientPayments = Object.assign({movements:[]}, parsed);
-    }
+    const { data } = await apiFetchClientPayments();
+    const changed = JSON.stringify(data) !== JSON.stringify(state.clientPayments);
+    state.clientPayments = data;
     clientPaymentsLoaded = true;
-    saveState(); render();
+    adminSyncResult('pagos a cuenta');
+    if(changed){ saveState(); render(); }
   }catch(e){
+    console.warn('Sync pagos de clientes:', e);
     clientPaymentsLoaded = true;
-    toast('Error cargando pagos de clientes: '+e.message, 'err');
-    render();
+    adminSyncResult('pagos a cuenta', e);
   }
+}
+// Aplica un cambio a los pagos sobre lo último del servidor y lo guarda.
+// Si falla no queda nada a medias: se avisa y no se toca la lista.
+async function changeClientPayments(change){
+  const { exists, data } = await apiFetchClientPayments();
+  change(data);
+  const val = JSON.stringify(data);
+  if(exists) await adminFetch('/app_settings?setting_key=eq.client_payments', 'PATCH', {setting_value: val});
+  else await adminFetch('/app_settings', 'POST', {setting_key: 'client_payments', setting_value: val});
+  state.clientPayments = data;
+  saveState(); render();
 }
 function openClientPaymentModal(phone){
   const overlay = document.createElement("div");
@@ -7398,17 +7526,15 @@ async function saveClientPayment(phone){
   const note = document.getElementById("cp-note").value.trim();
   if(!amount || amount<=0){ toast("Ingresá un monto válido", "err"); return; }
   if(!date){ toast("Elegí una fecha", "err"); return; }
-  state.clientPayments.movements.push({id:paymentsId('cp'), phone, amount, date, note});
+  const mov = {id:paymentsId('cp'), phone, amount, date, note};
   closeClientPaymentModal();
-  saveState(); render();
-  try{ await apiSaveSetting('client_payments', state.clientPayments); toast("Pago registrado", "ok"); }
-  catch(e){ toast("Error al guardar: "+e.message, "err"); }
+  try{ await changeClientPayments(d=>d.movements.push(mov)); toast("Pago registrado", "ok"); }
+  catch(e){ toast("No se guardó el pago, volvé a cargarlo: "+e.message, "err"); }
 }
 async function deleteClientPayment(id){
   if(!confirm("¿Eliminar este pago?")) return;
-  state.clientPayments.movements = state.clientPayments.movements.filter(m=>m.id!==id);
-  saveState(); render();
-  try{ await apiSaveSetting('client_payments', state.clientPayments); } catch(e){ toast("Error al guardar: "+e.message, "err"); }
+  try{ await changeClientPayments(d=>{ d.movements = d.movements.filter(m=>m.id!==id); }); }
+  catch(e){ toast("No se pudo eliminar el pago: "+e.message, "err"); }
 }
 function clientAccountRows(phone){
   const compras = state.orders.filter(o=>o.customer.phone===phone && o.status!=='Cancelado')
@@ -11053,12 +11179,13 @@ function openAdminClientDetail(phone){
 }
 function closeAdminClientDetail(){
   state.adminClientDetailPhone = null;
+  state._paymentsSyncedFor = null;
   render();
 }
 function renderAdminClientDetail(phone){
   const c = state.clients[phone];
   if(!c){ state.adminClientDetailPhone = null; return renderAdminClientes(); }
-  if(c.wholesale && !clientPaymentsLoaded){ apiSyncClientPayments(); }
+  if(c.wholesale && state._paymentsSyncedFor !== phone){ state._paymentsSyncedFor = phone; apiSyncClientPayments(); }
   const tier = tierFor(c.points);
   const clientOrders = state.orders.filter(o=>o.customer.phone===phone).sort((a,b)=>new Date(b.date)-new Date(a.date));
   const totalGastado = clientOrders.reduce((s,o)=>s+(o.total||0), 0);
@@ -12848,12 +12975,26 @@ function renderAdminComprobantes(){
   if(state.vouchers.length===0){
     return `<div class="empty-state">${ic('receipt')}<p>Todavía no generaste comprobantes.</p></div>`;
   }
-  return state.vouchers.map(v=>`
+  const doubtful = state.vouchers.filter(v=>(state.voucherDoubtful||[]).includes(v.id));
+  const pending = state.vouchers.filter(v=>voucherOnlyLocal(v) && !(state.voucherDoubtful||[]).includes(v.id));
+  const aviso = doubtful.length ? `
+    <div style="margin:12px 16px; padding:12px 14px; border-radius:12px; background:rgba(224,80,80,0.12); border:1px solid var(--danger); font-size:13px;">
+      <b>${doubtful.length===1 ? 'Hay 1 comprobante' : `Hay ${doubtful.length} comprobantes`} solo en este dispositivo.</b>
+      No están en el servidor, así que los otros dispositivos no los ven. Si son ventas reales tocá <b>Subir</b>; si los borraste a propósito en otro dispositivo tocá <b>Descartar</b>.
+    </div>` : pending.length ? `
+    <div style="margin:12px 16px; padding:12px 14px; border-radius:12px; background:var(--glass); border:1px solid var(--gold2); font-size:13px;">
+      ${pending.length===1 ? '1 comprobante todavía no se subió' : `${pending.length} comprobantes todavía no se subieron`} al servidor. Se reintenta solo; no borres los datos del navegador hasta que desaparezca este aviso.
+    </div>` : '';
+  return aviso + state.vouchers.map(v=>`
     <div class="voucher-row" onclick="viewVoucher('${v.id}')">
       <div class="voucher-row-icon">${ic('receipt')}</div>
       <div class="voucher-row-body">
         <h4>${VOUCHER_META[v.type].label} ${formatVoucherNumber(v.type, v.number)}</h4>
         <p>${escapeHtml(v.customer.name)} · ${new Date(v.date).toLocaleDateString('es-AR')}</p>
+        ${(state.voucherDoubtful||[]).includes(v.id) ? `<div style="display:flex; gap:6px; margin-top:6px;">
+          <button class="btn-primary" style="padding:6px 12px; font-size:12px;" onclick="event.stopPropagation(); uploadDoubtfulVoucher('${v.id}')">Subir</button>
+          <button class="btn-secondary" style="padding:6px 12px; font-size:12px;" onclick="event.stopPropagation(); discardDoubtfulVoucher('${v.id}')">Descartar</button>
+        </div>` : voucherOnlyLocal(v) ? `<p style="color:var(--gold2); font-size:11px;">Sin subir al servidor · se reintenta solo</p>` : ''}
       </div>
       <div class="voucher-row-amount">${v.type!=="remito"?money(v.total):v.items.reduce((s,it)=>s+it.qty,0)+' u.'}</div>
       <button class="icon-btn" style="flex:none; margin-left:8px; color:var(--danger);" onclick="event.stopPropagation(); confirmDeleteVoucher('${v.id}')">${ic('trash')}</button>
@@ -14721,7 +14862,7 @@ apiSyncProducts();
 apiSyncContent();
 if(IS_ADMIN_APP){
   tryRestoreAdminSession().then(()=>{
-    if(state.adminAuthed){ apiSyncClients(); apiSyncOrders(); apiSyncPosSales(); apiSyncSuggestions(); apiSyncRewardRedemptions(); apiSyncVouchers(); syncAdminChats(); }
+    if(state.adminAuthed){ apiSyncClients(); apiSyncOrders(); apiSyncPosSales(); apiSyncSuggestions(); apiSyncRewardRedemptions(); apiSyncVouchers(); apiSyncClientPayments(); syncAdminChats(); }
   });
 }else if(state.currentClientPhone){ syncClientChat(); refreshCurrentClient(); }
 startChatPoll();
@@ -14745,7 +14886,7 @@ function autoSync(returning){
     if(IS_ADMIN_APP) apiSyncClients();
   }
   if(IS_ADMIN_APP){
-    if(due('admin')){ _lastSync.admin = now; apiSyncOrders(); apiSyncPosSales(); apiSyncSuggestions(); apiSyncRewardRedemptions(); apiSyncVouchers(); }
+    if(due('admin')){ _lastSync.admin = now; apiSyncOrders(); apiSyncPosSales(); apiSyncSuggestions(); apiSyncRewardRedemptions(); apiSyncVouchers(); apiSyncClientPayments(); }
   }else if(due('client')){
     _lastSync.client = now; refreshCurrentClient(); refreshMyOrders();
   }
