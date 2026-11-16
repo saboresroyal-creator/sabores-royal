@@ -5588,6 +5588,7 @@ const FLUJO_SUP = [
   ['compras','Compras nuevas a proveedores por mes','money',40000000,'Las que se pagan con cheque o transferencia.'],
   ['lagc','Días de plazo de las compras nuevas','int',30,'Las compras nuevas se empiezan a pagar a los N días de hoy; antes están los cheques ya emitidos.'],
   ['pctef','Parte de las facturas pendientes que se paga en efectivo','pct',0.5,'El resto, por transferencia.'],
+  ['costoExtra','Mercadería para la venta de más (% de la venta extra)','pct',0.55,'Si en "Venta estimada por mes" ponés más que el promedio, se compra más mercadería y se paga por banco en el mismo mes. 55% sale del análisis del estudio (81,5% de recargo sobre el costo).'],
   ['diasViejos','Cheques sin marcar: tomar como cobrados los de más de N días','int',3,'Se puede corregir uno por uno más abajo.'],
   ['BANCO'],
   ['tdesc','Tasa anual del descubierto','pct',0.449,''],
@@ -5642,7 +5643,7 @@ function flujoDefault(){
     ],
     pagos:[...deuda, ...plan, ...visa, ...agui],
     acuerdos: acu,
-    factFecha:{}, chequesCuentan:{}
+    factFecha:{}, chequesCuentan:{}, ventasMes:{'2026-12':120000000}
   };
 }
 const FLUJO_GRUPOS = {deuda:'Deuda fiscal atrasada', afip:'Plan AFIP W875057', visa:'Visa: cuotas', otro:'Otros pagos'};
@@ -5718,14 +5719,22 @@ function flujoCalc(){
   // Pagos puntuales
   const pag = {};
   (F.pagos||[]).forEach(p=>{ if(p.incluir===false) return; const d = fMax(p.fecha || base60, hoy); (pag[d] = pag[d] || {}); add(pag[d], p.grupo||'otro', +p.monto||0); });
+  // Venta estimada por mes: escala los promedios para que el mes sume lo cargado
+  const ventasMes = F.ventasMes || {}, factor = {}, ventaProm = {};
+  for(let t = hoy.slice(0,7)+'-01'; t <= fin; t = fDia(t, 1)){
+    const m = t.slice(0,7), p = prom[fDow(t)];
+    ventaProm[m] = (ventaProm[m]||0) + p.ef + p.tj;
+  }
+  Object.keys(ventaProm).forEach(m=>{ const v = +ventasMes[m]; factor[m] = (v > 0 && ventaProm[m] > 0) ? v / ventaProm[m] : 1; });
+  const fx = d=>factor[d.slice(0,7)] || 1;
   // Día por día
   const rows = [];
   let bank = +S.saldo0||0, caja = +S.caja0||0, iacc = 0, pacc = 0;
   const lag = +S.lag||0, desc = +S.desc||0, inicioCompras = fDia(hoy, +S.lagc||0);
   for(let t = hoy, i = 0; t <= fin; t = fDia(t, 1), i++){
-    const P = prom[fDow(t)];
+    const P0 = prom[fDow(t)], k = fx(t), P = {ef:P0.ef*k, tj:P0.tj*k, g:P0.g};
     const dPrev = fDia(t, -lag);
-    const tjPrev = dPrev < hoy ? (tjReal[dPrev]||0) : prom[fDow(dPrev)].tj;
+    const tjPrev = dPrev < hoy ? (tjReal[dPrev]||0) : prom[fDow(dPrev)].tj * fx(dPrev);
     const r = {t, ef:P.ef, gastos:P.g};
     r.acred = tjPrev * (1 - desc);
     r.otros = (+S.otros||0) * 12 / 365;
@@ -5736,6 +5745,7 @@ function flujoCalc(){
     r.dep = antes - (+S.tope||0); caja = antes - r.dep; r.caja = caja;
     r.prov = (fac[t]||0) * (1 - (+S.pctef||0));
     r.compras = t >= inicioCompras ? (+S.compras||0) * 12 / 365 : 0;
+    r.cextra = (P0.ef + P0.tj) * (k - 1) * (+S.costoExtra||0);
     r.cheques = chq[t]||0;
     r.cuotas = cuo[t]||0;
     r.fijos = {};
@@ -5753,7 +5763,7 @@ function flujoCalc(){
     r.idesc = dia === dim ? iacc : 0;
     r.i60 = dia === dim ? pacc : 0;
     const sf = Object.values(r.fijos).reduce((s,v)=>s+v,0), sp = Object.values(r.pagos).reduce((s,v)=>s+v,0);
-    r.salidasBanco = r.prov + r.compras + r.cheques + r.cuotas + sf + sp + r.idesc + r.i60;
+    r.salidasBanco = r.prov + r.compras + r.cextra + r.cheques + r.cuotas + sf + sp + r.idesc + r.i60;
     bank = bank + r.acred + r.otros + r.margen + r.prest + r.dep - r.salidasBanco;
     r.bank = bank;
     r.lim = (F.acuerdos||[]).reduce((s,a)=>s + ((a.alta||'') <= t && (a.renueva || (a.fin||'') >= t) ? (+a.monto||0) : 0), 0);
@@ -5762,7 +5772,7 @@ function flujoCalc(){
     r.salidas = r.gastos + r.provef + r.salidasBanco;
     rows.push(r);
   }
-  return {S, hoy, fin, rows, prom, viejos, facturas};
+  return {S, hoy, fin, rows, prom, viejos, facturas, ventaProm, ventasMes};
 }
 
 function renderFlujo(){
@@ -5771,7 +5781,8 @@ function renderFlujo(){
   if(!state.flujo || !state.flujo.version){ state.flujo = flujoDefault(); save(); }
   const F = state.flujo;
   ['fijos','pagos','acuerdos'].forEach(k=>{ if(!Array.isArray(F[k])) F[k] = []; });
-  ['factFecha','chequesCuentan','sup'].forEach(k=>{ if(!F[k] || Array.isArray(F[k])) F[k] = {}; });
+  if(F.ventasMes===undefined) F.ventasMes = {'2026-12':120000000};
+  ['factFecha','chequesCuentan','sup','ventasMes'].forEach(k=>{ if(!F[k] || Array.isArray(F[k])) F[k] = {}; });
   destroyCharts();
   const R = flujoCalc(); flujoUltimo = R;
   const {S, hoy, fin, rows} = R;
@@ -5792,7 +5803,7 @@ function renderFlujo(){
     const m = r.t.slice(0,7);
     if(!porMes[m]){ porMes[m] = {m, fijos:{}, pagos:{}, min:r.bank, exc:0}; meses.push(porMes[m]); }
     const a = porMes[m];
-    ['ef','acred','otros','margen','prest','gastos','provef','prov','compras','cheques','cuotas','idesc','i60','dep','entradas','salidas'].forEach(k=>a[k] = (a[k]||0) + r[k]);
+    ['ef','acred','otros','margen','prest','gastos','provef','prov','compras','cextra','cheques','cuotas','idesc','i60','dep','entradas','salidas'].forEach(k=>a[k] = (a[k]||0) + r[k]);
     Object.entries(r.fijos).forEach(([k,v])=>a.fijos[k] = (a.fijos[k]||0) + v);
     Object.entries(r.pagos).forEach(([k,v])=>a.pagos[k] = (a.pagos[k]||0) + v);
     a.fin = r.bank; a.caja = r.caja; a.min = Math.min(a.min, r.bank); if(r.estado==='EXCEDIDO') a.exc++;
@@ -5804,7 +5815,7 @@ function renderFlujo(){
     ['Total entradas', a=>a.entradas, 'b'],
     ['SALIDAS'],
     ['Gastos de caja', a=>a.gastos], ['Facturas pendientes (efectivo)', a=>a.provef], ['Facturas pendientes (transferencia)', a=>a.prov],
-    ['Compras nuevas', a=>a.compras], ['Cheques', a=>a.cheques], ['Cuotas de préstamos', a=>a.cuotas],
+    ['Compras nuevas', a=>a.compras], ...(Object.values(R.ventasMes).some(v=>+v>0) ? [['Mercadería por la venta de más', a=>a.cextra]] : []), ['Cheques', a=>a.cheques], ['Cuotas de préstamos', a=>a.cuotas],
     ...F.fijos.map(fx=>[fx.concepto, a=>a.fijos[fx.id]||0]),
     ...Object.keys(FLUJO_GRUPOS).map(g=>[FLUJO_GRUPOS[g], a=>a.pagos[g]||0]),
     ['Interés del descubierto', a=>a.idesc], ['Interés del préstamo de $60 M', a=>a.i60],
@@ -5833,7 +5844,7 @@ function renderFlujo(){
     let s = semanas[semanas.length-1];
     if(!s || s.lunes !== lunes){ s = {lunes, entra:0, prest:0, cheques:0, fact:0, imp:0, cuotas:0, otros:0, min:r.bank}; semanas.push(s); }
     s.entra += r.acred + r.otros + r.margen + r.dep; s.prest += r.prest; s.cheques += r.cheques;
-    s.fact += r.prov + r.compras; s.cuotas += r.cuotas;
+    s.fact += r.prov + r.compras + r.cextra; s.cuotas += r.cuotas;
     s.imp += Object.values(r.fijos).reduce((x,v)=>x+v,0) + Object.values(r.pagos).reduce((x,v)=>x+v,0);
     s.otros += r.idesc + r.i60;
     s.fin = r.bank; s.min = Math.min(s.min, r.bank);
@@ -5854,6 +5865,12 @@ function renderFlujo(){
   };
 
   // Supuestos
+  const ventasHtml = `<p class="hint" style="margin-bottom:10px;">Venta total del mes (efectivo + tarjetas). Vacío = el promedio de Carga Diaria. Si cargás un número, los días de ese mes se escalan para que sumen eso, y la mercadería extra se calcula con el % de Supuestos. En el mes en curso se toma el mes completo.</p>
+    <div style="overflow-x:auto;"><table><thead><tr><th>Mes</th><th class="num">Por promedio</th><th class="num">Venta estimada</th><th class="num">Diferencia</th></tr></thead><tbody>
+    ${Object.keys(R.ventaProm).map(m=>{ const v = +R.ventasMes[m] || 0, pr = R.ventaProm[m]; return `<tr><td style="font-family:var(--sans);">${fMes(m+'-01')}</td><td class="num" style="white-space:nowrap;">${pesos2(pr)}</td>
+      <td class="num"><input type="number" step="0.01" value="${v || ''}" placeholder="Promedio" onchange="flujoSetVenta('${m}', this.value)" style="width:150px;text-align:right;"></td>
+      <td class="num" style="white-space:nowrap;color:var(--${v ? col(v - pr) : 'muted'});">${v ? pesos2(v - pr) : '—'}</td></tr>`; }).join('')}
+    </tbody></table></div>`;
   const supHtml = `<div class="grid2">${FLUJO_SUP.map(s=>{
     if(s.length===1) return `<div style="grid-column:1/-1;font-size:11px;letter-spacing:2px;color:var(--gold);margin-top:8px;">${s[0]}</div>`;
     const [k, lab, tipo, , ayuda] = s;
@@ -5958,6 +5975,7 @@ function renderFlujo(){
     <div class="chart-wrap"><canvas id="chartFlujoSaldo"></canvas></div></div>
   <div class="card mb16">${titulo('PRÓXIMAS 10 SEMANAS')}${tablaSem}</div>
   <div class="card mb16">${titulo('RESUMEN POR MES')}${tablaMeses}</div>
+  ${det('ventas','VENTA ESTIMADA POR MES', ventasHtml)}
   ${det('sup','SUPUESTOS', supHtml)}
   ${det('fijos','GASTOS FIJOS POR MES', fijosHtml)}
   ${det('pagos','PAGOS PUNTUALES: DEUDA FISCAL, PLANES, VISA Y AGUINALDO', pagosHtml)}
@@ -6034,6 +6052,12 @@ function flujoDelItem(lista, id){
 }
 function flujoSetFact(id, fecha){
   if(fecha) state.flujo.factFecha[id] = fecha; else delete state.flujo.factFecha[id];
+  save(); renderFlujo();
+}
+function flujoSetVenta(m, v){
+  const x = flujoParse('money', v);
+  if(!state.flujo.ventasMes) state.flujo.ventasMes = {};
+  state.flujo.ventasMes[m] = x && x > 0 ? x : null;
   save(); renderFlujo();
 }
 function flujoSetCheque(id, cuenta){
