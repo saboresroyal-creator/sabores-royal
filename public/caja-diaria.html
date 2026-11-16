@@ -5575,7 +5575,8 @@ const FLUJO_SUP = [
   ['tope','Efectivo que queda en caja (el resto se deposita)','money',3200000,''],
   ['fin','Proyectar hasta','date','2027-06-30',''],
   ['PRÉSTAMO DE $60 M'],
-  ['f60','Fecha en que se acredita','date','2026-11-17','Cuando entre, actualizá el saldo del banco: si la fecha ya pasó, no se vuelve a sumar.'],
+  ['rec60','Ya se acreditó','bool',false,'Tildalo cuando entre y cargá arriba el saldo real del banco, que ya lo incluye. Así no se suma dos veces.'],
+  ['f60','Fecha en que se acredita (o se acreditó)','date','2026-11-17','Desde esta fecha corre el interés. Las facturas vencidas se reparten en 6 semanas desde acá.'],
   ['m60','Monto','money',60000000,''],
   ['t60','Tasa anual (solo interés)','pct',0.20,'El interés se paga el último día de cada mes.'],
   ['VENTAS Y COMPRAS'],
@@ -5656,6 +5657,7 @@ function fMes(s){ const m = ['ene','feb','mar','abr','may','jun','jul','ago','se
 
 function flujoSup(){
   const F = state.flujo, S = Object.assign({}, F.sup);
+  S.rec60 = !!S.rec60;
   FLUJO_SUP.forEach(s=>{ if(s.length>1 && (S[s[0]]===undefined || (S[s[0]]===null && s[3]!==null) || S[s[0]]==='')) S[s[0]] = s[3]; });
   if(S.saldo0===null || S.saldo0===undefined || S.saldo0==='') { S.saldo0 = -deudaDescubiertoActual(); S._saldoAuto = true; }
   if(S.caja0===null || S.caja0===undefined || S.caja0==='') {
@@ -5705,7 +5707,7 @@ function flujoCalc(){
   const fac = {}, facturas = [];
   let k = 0;
   (state.facturas||[]).filter(f=>f.estado!=='pagada').sort((a,b)=>(a.fechaVence||'').localeCompare(b.fechaVence||'')).forEach(f=>{
-    const def = (f.fechaVence||hoy) < hoy ? fDia(base60, 7*(k++ % 6)) : f.fechaVence;
+    const def = (f.fechaVence||hoy) < hoy ? fDia(f60, 7*(k++ % 6)) : f.fechaVence;
     const fecha = fMax(F.factFecha[f.id] || def, hoy);
     facturas.push({f, def, fecha, propia: !!F.factFecha[f.id]});
     add(fac, fecha, +f.monto||0);
@@ -5728,7 +5730,7 @@ function flujoCalc(){
     r.acred = tjPrev * (1 - desc);
     r.otros = (+S.otros||0) * 12 / 365;
     r.margen = (P.ef + P.tj) * (+S.margen||0);
-    r.prest = (t === f60 && f60 >= hoy) ? (+S.m60||0) : 0;
+    r.prest = (!S.rec60 && t === base60) ? (+S.m60||0) : 0;
     r.provef = (fac[t]||0) * (+S.pctef||0);
     const antes = caja + P.ef - P.g - r.provef;
     r.dep = antes - (+S.tope||0); caja = antes - r.dep; r.caja = caja;
@@ -5844,6 +5846,7 @@ function renderFlujo(){
 
   const det = (id, tit, cuerpo)=>`<details class="card mb16" ${flujoAbiertos[id]?'open':''} ontoggle="flujoAbiertos['${id}']=this.open"><summary style="cursor:pointer;list-style:none;">${titulo(tit+' ▾')}</summary><div style="margin-top:12px;">${cuerpo}</div></details>`;
   const inpt = (tipo, val, on, extra='')=>{
+    if(tipo==='bool') return `<input type="checkbox" ${val?'checked':''} onchange="${on.replace('this.value','this.checked')}" style="width:auto;" ${extra}>`;
     if(tipo==='date') return `<input type="date" value="${val||''}" onchange="${on}" style="width:auto;" ${extra}>`;
     if(tipo==='text') return `<input type="text" value="${escHtml(val||'')}" onchange="${on}" ${extra}>`;
     if(tipo==='pct') return `<input type="number" step="0.1" value="${val===null||val===undefined||val===''?'':r2(val*100)}" onchange="${on}" style="width:110px;" ${extra}>`;
