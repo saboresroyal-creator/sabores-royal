@@ -1,3 +1,5 @@
+-- OBSOLETA: reemplazada por supabase-migration-caja-diaria-usuarios.sql.
+-- NO CORRER: volvería a dejar un PIN en texto plano y sin límite de intentos.
 -- =====================================================================
 -- Sabores Royal — Proteger Caja Diaria con PIN
 -- =====================================================================

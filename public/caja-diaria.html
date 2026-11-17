@@ -415,6 +415,7 @@ tr:hover td { background:var(--surface2); }
   </div>
   <div style="display:flex;align-items:center;gap:12px;">
     <div id="backupStatus" style="font-size:11px;color:var(--muted);font-family:var(--mono);"></div>
+    <div id="usuarioHeader" style="display:flex;gap:6px;"></div>
     <button class="btn btn-green" onclick="exportData(true)" style="font-size:11px;padding:6px 14px;">⬇ Guardar backup</button>
     <div class="header-date" id="headerDate"></div>
   </div>
@@ -429,7 +430,8 @@ tr:hover td { background:var(--surface2); }
   <div class="tab" onclick="switchTab('cheques',this)" id="tabCheques">💳 Cheques</div>
   <div class="tab" onclick="switchTab('deuda',this)" id="tabDeuda">📑 Deuda Proveedores</div>
   <div class="tab" onclick="switchTab('bancos',this)" id="tabBancos">🏦 Bancos</div>
-  <div class="tab" onclick="switchTab('costo',this)" id="tabCosto">💸 Costo Financiero</div>
+  <!-- Oculta a pedido del dueño (16/11/2026). Para volver a mostrarla, sacar el style="display:none;". -->
+  <div class="tab" onclick="switchTab('costo',this)" id="tabCosto" style="display:none;">💸 Costo Financiero</div>
   <div class="tab" onclick="switchTab('flujo',this)" id="tabFlujo">🌊 Flujo de Caja</div>
   <div class="tab" onclick="switchTab('fondos',this)">🐷 Fondos</div>
   <div class="tab" onclick="switchTab('finales',this)">📈 Finales</div>
@@ -1163,12 +1165,13 @@ async function cajaFetch(path, method, body){
   if(!res.ok){ let err; try{ err=JSON.parse(text); }catch(e){ err={message:text}; } throw new Error(err.message || 'HTTP '+res.status); }
   return text ? JSON.parse(text) : null;
 }
-// Los datos de caja (plata real) ya no se leen/escriben directo contra la
-// tabla — pasan por estas dos funciones RPC, que validan el PIN del lado
-// del servidor (ver supabase-migration-caja-diaria-pin.sql). Chequearlo
-// solo acá en JS no alcanzaría: cualquiera podría pegarle directo a la
-// API sin pasar por esta pantalla.
-async function cajaRpc(name, args){
+// Los datos de caja (plata real) no se leen/escriben directo contra la
+// tabla: pasan por funciones RPC que piden una sesión válida del lado del
+// servidor (ver supabase-migration-caja-diaria-usuarios.sql). Cada persona
+// entra con su PIN, recibe un token de sesión (12 horas) y con ese token se
+// leen y guardan los datos. Chequearlo solo acá en JS no alcanzaría:
+// cualquiera podría pegarle directo a la API sin pasar por esta pantalla.
+async function cajaRpcRaw(name, args){
   const res = await fetch(SUPABASE_URL + '/rest/v1/rpc/' + name, {
     method: 'POST',
     headers: {'Content-Type':'application/json','apikey':SUPABASE_KEY,'Authorization':'Bearer '+SUPABASE_KEY},
@@ -1178,16 +1181,37 @@ async function cajaRpc(name, args){
   if(!res.ok){ let err; try{ err=JSON.parse(text); }catch(e){ err={message:text}; } throw new Error(err.message || 'HTTP '+res.status); }
   return text ? JSON.parse(text) : null;
 }
+// Si la sesión venció (12 horas, bloqueo por inactividad o el dueño dio de
+// baja al usuario), pide el PIN de nuevo y reintenta una vez.
+async function cajaRpc(name, args){
+  try{ return await cajaRpcRaw(name, args); }
+  catch(e){
+    if(!/Sesión vencida/.test(e.message) || !args || !('p_pin' in args || 'p_token' in args)) throw e;
+    await cajaRelogin();
+    const a = Object.assign({}, args);
+    if('p_pin' in a) a.p_pin = CAJA_PIN;
+    if('p_token' in a) a.p_token = CAJA_PIN;
+    return await cajaRpcRaw(name, a);
+  }
+}
+
+// CAJA_PIN guarda el token de la sesión (no el PIN), así el resto del
+// código y api/factura-foto.js siguen igual.
 let CAJA_PIN = null;
-function promptCajaPin(wrongPin){
+let CAJA_USER = null;      // {nombre, rol, debil}
+let _reloginPromise = null;
+const CAJA_INACTIVIDAD_MIN = 30;
+
+function promptCajaPin(mensaje){
   return new Promise(resolve=>{
     const overlay = document.createElement('div');
+    overlay.id = 'cajaPinOverlay';
     overlay.style.cssText = 'position:fixed;inset:0;background:#0f1c45;display:flex;flex-direction:column;align-items:center;justify-content:center;z-index:99999;gap:14px;padding:24px;';
     overlay.innerHTML = `
       <div style="color:#fff;font-size:19px;font-weight:700;">🔒 Caja Diaria</div>
-      <div style="color:rgba(255,255,255,.6);font-size:13px;text-align:center;max-width:260px;">Ingresá el PIN para entrar</div>
-      ${wrongPin ? `<div style="color:#e5566d;font-size:12.5px;font-weight:700;">PIN incorrecto, probá de nuevo</div>` : ''}
-      <input id="cajaPinInput" type="password" inputmode="numeric" autocomplete="off" style="width:180px;padding:14px;border-radius:12px;border:1px solid rgba(255,255,255,.2);background:rgba(255,255,255,.08);color:#fff;font-size:22px;text-align:center;letter-spacing:6px;">
+      <div style="color:rgba(255,255,255,.6);font-size:13px;text-align:center;max-width:260px;">Ingresá tu PIN para entrar</div>
+      ${mensaje ? `<div style="color:#e5566d;font-size:12.5px;font-weight:700;text-align:center;max-width:280px;">${escHtml(mensaje)}</div>` : ''}
+      <input id="cajaPinInput" type="password" inputmode="numeric" autocomplete="off" maxlength="12" style="width:200px;padding:14px;border-radius:12px;border:1px solid rgba(255,255,255,.2);background:rgba(255,255,255,.08);color:#fff;font-size:22px;text-align:center;letter-spacing:6px;">
       <button id="cajaPinBtn" style="padding:12px 34px;border-radius:12px;border:none;background:#c5a028;color:#0f1c45;font-weight:700;font-size:14px;cursor:pointer;">Entrar</button>
     `;
     document.body.appendChild(overlay);
@@ -1198,25 +1222,165 @@ function promptCajaPin(wrongPin){
     input.addEventListener('keydown', e=>{ if(e.key==='Enter') submit(); });
   });
 }
-// Pide el PIN (recordado en esta pestaña con sessionStorage, así no hay
-// que reescribirlo en cada guardado — pero se vuelve a pedir si se cierra
-// la pestaña) hasta que uno válido confirme contra el servidor.
+function cajaSetSesion(token, user){
+  CAJA_PIN = token; CAJA_USER = user;
+  if(token) sessionStorage.setItem('caja_token', token); else sessionStorage.removeItem('caja_token');
+  sessionStorage.removeItem('caja_pin'); // el esquema viejo guardaba el PIN
+  renderUsuarioHeader();
+}
+// Pide el PIN hasta que el servidor dé una sesión. El token queda en
+// sessionStorage (se borra al cerrar la pestaña).
 async function ensureCajaPin(){
-  const cached = sessionStorage.getItem('caja_pin');
+  const cached = sessionStorage.getItem('caja_token');
   if(cached){
-    try{ await cajaRpc('get_caja_diaria', {p_pin: cached}); CAJA_PIN = cached; return; }
-    catch(e){ sessionStorage.removeItem('caja_pin'); }
+    try{ const u = await cajaRpcRaw('caja_quien', {p_token: cached}); cajaSetSesion(cached, u); }
+    catch(e){ cajaSetSesion(null, null); }
   }
-  let wrong = false;
-  while(true){
-    const pin = await promptCajaPin(wrong);
+  let msg = '';
+  while(!CAJA_PIN){
+    const pin = await promptCajaPin(msg);
     try{
-      await cajaRpc('get_caja_diaria', {p_pin: pin});
-      CAJA_PIN = pin;
-      sessionStorage.setItem('caja_pin', pin);
-      return;
-    }catch(e){ wrong = true; }
+      const r = await cajaRpcRaw('caja_login', {p_pin: pin});
+      if(r && r.ok){ cajaSetSesion(r.token, {nombre:r.nombre, rol:r.rol, debil:r.debil}); }
+      else msg = (r && r.error) || 'PIN incorrecto, probá de nuevo';
+    }catch(e){ msg = 'No se pudo conectar: ' + e.message; }
   }
+  cajaMarcarActividad();
+  if(CAJA_USER && CAJA_USER.debil) await cajaForzarCambioPin();
+}
+function cajaRelogin(){
+  if(!_reloginPromise){
+    cajaSetSesion(null, null);
+    _reloginPromise = ensureCajaPin().finally(()=>{ _reloginPromise = null; });
+  }
+  return _reloginPromise;
+}
+async function cajaSalir(){
+  const t = CAJA_PIN;
+  // Antes de salir se sube lo pendiente, para no perder nada.
+  try{ clearTimeout(_remoteSyncTimer); await pushRemoteState(); }catch(e){}
+  try{ if(t) await cajaRpcRaw('caja_logout', {p_token: t}); }catch(e){}
+  cajaSetSesion(null, null);
+  location.reload();
+}
+
+// Bloqueo por inactividad: a los 30 minutos sin tocar nada se cierra la
+// sesión y hay que volver a poner el PIN (lo cargado ya quedó guardado).
+let _cajaUltimaActividad = Date.now();
+function cajaMarcarActividad(){ _cajaUltimaActividad = Date.now(); }
+['pointerdown','keydown','scroll','touchstart'].forEach(ev=>document.addEventListener(ev, cajaMarcarActividad, {passive:true, capture:true}));
+setInterval(async ()=>{
+  if(!CAJA_PIN || _reloginPromise) return;
+  if(Date.now() - _cajaUltimaActividad < CAJA_INACTIVIDAD_MIN * 60000) return;
+  const t = CAJA_PIN;
+  try{ clearTimeout(_remoteSyncTimer); await pushRemoteState(); }catch(e){}
+  try{ await cajaRpcRaw('caja_logout', {p_token: t}); }catch(e){}
+  await cajaRelogin();
+  pullRemoteState();
+}, 30000);
+
+function renderUsuarioHeader(){
+  const el = document.getElementById('usuarioHeader');
+  if(!el) return;
+  if(!CAJA_USER){ el.innerHTML = ''; return; }
+  el.innerHTML = `<button class="btn btn-ghost btn-sm" onclick="abrirUsuarios()" title="${CAJA_USER.rol==='dueno' ? 'Usuarios y actividad' : 'Cambiar mi PIN'}">👤 ${escHtml(CAJA_USER.nombre)}</button>
+    <button class="btn btn-ghost btn-sm" onclick="cajaSalir()" title="Cerrar sesión">Salir</button>`;
+}
+
+// ---------- Ventanas
+function cajaModal(html, cerrable){
+  const bg = document.createElement('div');
+  bg.className = 'modal-bg'; bg.style.zIndex = '1000';
+  bg.innerHTML = `<div class="modal" style="max-width:${cerrable==='ancho' ? '720px' : '380px'};max-height:90vh;overflow:auto;">${html}</div>`;
+  if(cerrable) bg.addEventListener('click', e=>{ if(e.target===bg) bg.remove(); });
+  document.body.appendChild(bg);
+  return bg;
+}
+// ---------- Cambiar PIN propio
+function cajaFormPin(titulo, texto, cerrable){
+  return new Promise(resolve=>{
+    const m = cajaModal(`<h2>${titulo}</h2><p class="hint">${texto}</p>
+      <label>PIN actual</label><input type="password" inputmode="numeric" maxlength="12" class="pinActual" style="margin-bottom:10px;">
+      <label>PIN nuevo (6 a 12 números)</label><input type="password" inputmode="numeric" maxlength="12" class="pinNuevo" style="margin-bottom:10px;">
+      <label>Repetí el PIN nuevo</label><input type="password" inputmode="numeric" maxlength="12" class="pinNuevo2">
+      <div class="pinErr" style="color:var(--red);font-size:12px;margin-top:10px;min-height:16px;"></div>
+      <div class="modal-actions">${cerrable ? '<button class="btn btn-ghost pinCancel">Cancelar</button>' : ''}<button class="btn btn-green pinOk">Guardar</button></div>`, cerrable);
+    const q = s=>m.querySelector(s), err = q('.pinErr');
+    if(q('.pinCancel')) q('.pinCancel').onclick = ()=>{ m.remove(); resolve(false); };
+    q('.pinOk').onclick = async ()=>{
+      const a = q('.pinActual').value.trim(), b = q('.pinNuevo').value.trim(), c = q('.pinNuevo2').value.trim();
+      if(b !== c){ err.textContent = 'Los dos PIN nuevos no coinciden.'; return; }
+      try{
+        const r = await cajaRpc('caja_cambiar_pin', {p_token: CAJA_PIN, p_actual: a, p_nuevo: b});
+        if(!r.ok){ err.textContent = r.error; return; }
+        if(CAJA_USER) CAJA_USER.debil = false;
+        m.remove(); resolve(true);
+      }catch(e){ err.textContent = e.message; }
+    };
+    q('.pinActual').focus();
+  });
+}
+function cajaForzarCambioPin(){
+  return cajaFormPin('🔐 Elegí un PIN nuevo', 'Tu PIN es corto o quedó a la vista. Elegí uno nuevo de al menos 6 números, que no sea fácil de adivinar (nada de 123456 ni números repetidos). Es solo tuyo: no lo compartas.', false);
+}
+
+// ---------- Usuarios (solo el dueño) y actividad
+async function abrirUsuarios(){
+  if(!CAJA_USER) return;
+  if(CAJA_USER.rol !== 'dueno'){
+    if(await cajaFormPin('🔐 Cambiar mi PIN', 'Elegí un PIN nuevo de 6 a 12 números.', true)) alert('Listo, PIN cambiado.');
+    return;
+  }
+  let data;
+  try{ data = await cajaRpc('caja_usuarios_listar', {p_token: CAJA_PIN}); }
+  catch(e){ alert('No se pudieron traer los usuarios: ' + e.message); return; }
+  window._cajaUsuarios = data.usuarios;
+  const fh = s=>{ if(!s) return '—'; const d = new Date(s); return fmtFecha(localDateStr(d)) + ' ' + d.toLocaleTimeString('es-AR',{hour:'2-digit',minute:'2-digit'}); };
+  const filas = data.usuarios.map(u=>`<tr style="${u.activo ? '' : 'opacity:.5;'}">
+      <td style="font-family:var(--sans);">${escHtml(u.nombre)}${u.id===data.yo ? ' (vos)' : ''}</td>
+      <td style="font-family:var(--sans);">${u.rol==='dueno' ? 'Dueño' : 'Usuario'}</td>
+      <td style="font-family:var(--sans);">${u.activo ? 'Activo' : 'De baja'}</td>
+      <td style="white-space:nowrap;">${fh(u.ultimo_ingreso)}</td>
+      <td><button class="btn btn-ghost btn-sm" onclick="usuarioEditar(${u.id})">Editar</button></td></tr>`).join('');
+  const act = data.actividad.map(a=>`<tr><td style="white-space:nowrap;">${fh(a.ts)}</td><td style="font-family:var(--sans);">${escHtml(a.nombre||'—')}</td>
+      <td style="font-family:var(--sans);${a.accion==='PIN incorrecto' ? 'color:var(--red);' : ''}">${escHtml(a.accion)}${a.detalle ? ': ' + escHtml(a.detalle) : ''}</td><td style="font-size:11px;color:var(--muted);">${escHtml(a.ip||'')}</td></tr>`).join('');
+  const m = cajaModal(`<h2>👤 Usuarios</h2>
+    <p class="hint">Cada persona entra con su propio PIN. "Dueño" además puede ver esta pantalla y dar de alta o de baja usuarios. Al dar de baja a alguien se le cierra la sesión al instante.</p>
+    <div style="overflow-x:auto;"><table><thead><tr><th>Nombre</th><th>Rol</th><th>Estado</th><th>Última entrada</th><th></th></tr></thead><tbody>${filas}</tbody></table></div>
+    <div class="modal-actions" style="flex-wrap:wrap;">
+      <button class="btn btn-green" onclick="usuarioEditar(null)">+ Nuevo usuario</button>
+      <button class="btn btn-ghost" onclick="this.closest('.modal-bg').remove(); cajaFormPin('🔐 Cambiar mi PIN','Elegí un PIN nuevo de 6 a 12 números.', true)">Cambiar mi PIN</button>
+      <button class="btn btn-ghost" onclick="this.closest('.modal-bg').remove()">Cerrar</button>
+    </div>
+    <h2 style="margin-top:22px;">🕑 Actividad reciente</h2>
+    <p class="hint">Entradas, PIN incorrectos, cambios de usuarios y guardados (uno cada 10 minutos por persona).</p>
+    <div style="overflow:auto;max-height:300px;"><table><thead><tr><th>Cuándo</th><th>Quién</th><th>Qué</th><th>Conexión</th></tr></thead><tbody>${act || '<tr><td colspan="4">Sin actividad todavía.</td></tr>'}</tbody></table></div>`, 'ancho');
+  m.id = 'modalUsuarios';
+}
+function usuarioEditar(id){
+  const nuevo = id === null;
+  const u = nuevo ? {id:null, nombre:'', rol:'usuario', activo:true} : (window._cajaUsuarios||[]).find(x=>x.id===id);
+  if(!u) return;
+  const m = cajaModal(`<h2>${nuevo ? '+ Nuevo usuario' : 'Editar ' + escHtml(u.nombre)}</h2>
+    <p class="hint">${nuevo ? 'Elegí el PIN y pasáselo en persona. Puede cambiarlo después tocando su nombre arriba.' : 'Dejá el PIN vacío para no cambiarlo.'}</p>
+    <label>Nombre</label><input type="text" class="uNombre" value="${escHtml(u.nombre)}" style="margin-bottom:10px;">
+    <label>PIN ${nuevo ? '(6 a 12 números)' : 'nuevo (opcional)'}</label><input type="password" inputmode="numeric" maxlength="12" class="uPin" style="margin-bottom:10px;">
+    <label>Rol</label><select class="uRol" style="margin-bottom:10px;"><option value="usuario" ${u.rol!=='dueno'?'selected':''}>Usuario: ve y carga todo</option><option value="dueno" ${u.rol==='dueno'?'selected':''}>Dueño: además maneja usuarios</option></select>
+    ${nuevo ? '' : `<label style="display:flex;align-items:center;gap:8px;text-transform:none;"><input type="checkbox" class="uActivo" style="width:auto;" ${u.activo?'checked':''}> Activo (destildá para dar de baja)</label>`}
+    <div class="uErr" style="color:var(--red);font-size:12px;margin-top:10px;min-height:16px;"></div>
+    <div class="modal-actions"><button class="btn btn-ghost uCancel">Cancelar</button><button class="btn btn-green uOk">Guardar</button></div>`, true);
+  const q = s=>m.querySelector(s);
+  q('.uCancel').onclick = ()=>m.remove();
+  q('.uOk').onclick = async ()=>{
+    try{
+      const r = await cajaRpc('caja_usuario_guardar', {p_token: CAJA_PIN, p_id: u.id, p_nombre: q('.uNombre').value, p_pin: q('.uPin').value.trim(), p_rol: q('.uRol').value, p_activo: nuevo ? true : q('.uActivo').checked});
+      if(!r.ok){ q('.uErr').textContent = r.error; return; }
+      m.remove();
+      const lista = document.getElementById('modalUsuarios'); if(lista) lista.remove();
+      abrirUsuarios();
+    }catch(e){ q('.uErr').textContent = e.message; }
+  };
+  q('.uNombre').focus();
 }
 // ============================================================
 // SINCRONIZACIÓN ENTRE DISPOSITIVOS
