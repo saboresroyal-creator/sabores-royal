@@ -951,6 +951,7 @@ let _pmEditingExisting = false;
 
 let _saveStateWarned = false;
 function saveState(){
+  cartRemoteSchedule();
   try{ localStorage.setItem(STORAGE_KEY, JSON.stringify(state)); }
   catch(e){
     console.warn('No se pudo guardar en este dispositivo:', e);
@@ -2098,6 +2099,65 @@ function cartTotal(){
 function cartCount(){
   return state.cart.reduce((s,i)=>s+(i.grams?1:i.qty),0);
 }
+/* Carrito guardado también en el servidor (tabla carritos, ver
+   supabase-migration-carritos.sql). El del navegador se perdía cuando el
+   navegador borraba los datos (navegador interno de WhatsApp/Instagram,
+   Safari, entrar por otro link) y el cliente tenía que empezar de cero.
+   Ahora: cada cambio se sube a los 1,5 s; al abrir la app con el carrito
+   vacío se recupera el último abierto de este dispositivo o de su teléfono;
+   y el admin los ve en la solapa Carritos. */
+const CART_DEVICE_KEY = 'sr_device_id';
+function cartDeviceId(){
+  try{
+    let id = localStorage.getItem(CART_DEVICE_KEY);
+    if(!id){
+      id = (window.crypto && crypto.randomUUID) ? crypto.randomUUID() : (Date.now().toString(36) + Math.random().toString(36).slice(2) + Math.random().toString(36).slice(2));
+      localStorage.setItem(CART_DEVICE_KEY, id);
+    }
+    return id;
+  }catch(e){ return null; }
+}
+let _cartRemoteLast = '[]';   // lo último subido (vacío = no se sube nada hasta que cambie)
+let _cartRemoteTimer = null;
+let _cartProxEstado = null;   // 'comprado' cuando el carrito se vacía por un pedido
+function cartRemoteSchedule(){
+  try{ if(IS_ADMIN_APP) return; }catch(e){ return; } // todavía no arrancó la app
+  if(JSON.stringify(state.cart||[]) === _cartRemoteLast) return;
+  clearTimeout(_cartRemoteTimer);
+  _cartRemoteTimer = setTimeout(cartRemotePush, _cartProxEstado ? 0 : 1500);
+}
+async function cartRemotePush(){
+  const dev = cartDeviceId(); if(!dev) return;
+  const key = JSON.stringify(state.cart||[]);
+  const items = (state.cart||[]).map(it=>{
+    const p = state.products.find(pr=>pr.id===it.id);
+    return Object.assign({}, it, {name: p ? p.name : '', price: Math.round(cartItemLineTotal(it)*100)/100});
+  });
+  const estado = _cartProxEstado || (items.length ? 'abierto' : 'vaciado');
+  _cartProxEstado = null;
+  const phone = state.currentClientPhone || null;
+  const cl = phone ? state.clients[phone] : null;
+  try{
+    await rpcFetch('guardar_carrito', {p_device: dev, p_phone: phone, p_nombre: (cl && cl.name) || null, p_items: items,
+      p_unidades: cartCount(), p_total: Math.round(cartTotal()*100)/100, p_estado: estado, p_dominio: location.hostname});
+    _cartRemoteLast = key;
+  }catch(e){ console.warn('No se pudo guardar el carrito en el servidor:', e); }
+}
+async function cartRemoteRestore(){
+  if((state.cart||[]).length) return;
+  try{
+    const items = await rpcFetch('traer_carrito', {p_device: cartDeviceId(), p_phone: state.currentClientPhone || null});
+    if(!Array.isArray(items) || !items.length || (state.cart||[]).length) return;
+    state.cart = items.filter(it=>it && it.id!=null).map(it=>{
+      const o = {id: String(it.id), qty: Number(it.qty)||1};
+      if(it.grams) o.grams = Number(it.grams);
+      if(it.variant) o.variant = String(it.variant);
+      return o;
+    });
+    saveState(); render();
+    toast('Recuperamos el pedido que habías empezado', 'ok');
+  }catch(e){ console.warn('No se pudo recuperar el carrito:', e); }
+}
 function money(n){
   return "$" + Number(n).toLocaleString("es-AR");
 }
@@ -2586,6 +2646,7 @@ async function placeOrder(customer, clientDiscountPct=0, pointsAmount=0){
     if(p && !it.grams) p.stock = Math.max(0, p.stock - it.qty);
   });
   creditPointsToClient(customer, order.total, order.id);
+  _cartProxEstado = 'comprado';
   state.cart = [];
   saveState();
   notifyNewOrderPush(order);
@@ -2631,6 +2692,7 @@ function placeOrderLocalFallback(customer, clientDiscountPct=0, pointsAmount=0){
   if(ptsAmt > 0){ order.pointsDiscount = ptsAmt; order.specialPct = specialPct; }
   state.orders.unshift(order);
   creditPointsToClient(customer, order.total, order.id);
+  _cartProxEstado = 'comprado';
   state.cart = [];
   saveState();
   return order;
@@ -4481,6 +4543,7 @@ function renderAdmin(){
   const newClientsCount = Object.values(state.clients).filter(c=>!c.seen).length;
   const ALL_TABS = [
     {key:"pedidos",       label:"Pedidos", badge:pendingOrdersCount},
+    {key:"carritos",      label:"Carritos"},
     {key:"productos",     label:"Productos", badge:lowStockCount},
     {key:"conteo",        label:"Conteo de Stock"},
     {key:"categorias",    label:"Categorías"},
@@ -4523,6 +4586,7 @@ function renderAdmin(){
         <button class="btn-secondary" style="margin-top:8px; padding:6px 12px; font-size:12px;" onclick="retryAdminSync()">Reintentar</button>
       </div>` : ''}
       ${tab==="pedidos" ? renderAdminPedidos() : ""}
+      ${tab==="carritos" ? renderAdminCarritos() : ""}
       ${tab==="productos" ? `
         <div style="padding:10px 16px 4px; position:sticky; top:0; z-index:10; background:var(--navy2);">
           <div style="display:flex; align-items:center; gap:8px; background:var(--glass); border:1px solid var(--glass-bd); border-radius:12px; padding:0 12px;">
@@ -4641,6 +4705,67 @@ async function adminLogout(){
   nav("home");
 }
 function setAdminTab(tab){ state.adminTab = tab; render(); }
+
+/* ---------- Carritos de los clientes (lo que están armando ahora) ---------- */
+let adminCarritos = null, adminCarritosLoading = false, adminCarritosVer = 'abierto';
+async function apiSyncCarritos(){
+  adminCarritosLoading = true; render();
+  try{
+    adminCarritos = await adminFetch('/carritos?select=*&order=actualizado.desc&limit=300', 'GET') || [];
+    adminSyncResult('carritos');
+  }catch(e){ adminSyncResult('carritos', e); if(adminCarritos===null) adminCarritos = []; }
+  adminCarritosLoading = false; render();
+}
+function carritoHace(ts){
+  const min = Math.max(0, Math.round((Date.now() - new Date(ts).getTime()) / 60000));
+  if(min < 1) return 'recién';
+  if(min < 60) return 'hace ' + min + ' min';
+  const h = Math.round(min / 60);
+  if(h < 24) return 'hace ' + h + ' h';
+  const d = Math.round(h / 24);
+  return 'hace ' + d + (d===1 ? ' día' : ' días');
+}
+function carritoFecha(ts){
+  const d = new Date(ts), z = n=>String(n).padStart(2,'0');
+  return z(d.getDate()) + '/' + z(d.getMonth()+1) + '/' + d.getFullYear() + ' ' + z(d.getHours()) + ':' + z(d.getMinutes());
+}
+function renderAdminCarritos(){
+  if(adminCarritos===null && !adminCarritosLoading) setTimeout(apiSyncCarritos, 0);
+  const todos = (adminCarritos||[]).filter(c=>(c.items||[]).length || c.estado!=='abierto');
+  const cuenta = k=>todos.filter(c=>k==='todos' || c.estado===k).length;
+  const lista = todos.filter(c=>adminCarritosVer==='todos' || c.estado===adminCarritosVer);
+  const chips = [['abierto','🛒 Armando'],['comprado','✅ Compraron'],['vaciado','🗑 Vaciados'],['todos','Todos']]
+    .map(([k,l])=>`<button class="chip ${adminCarritosVer===k?'active':''}" onclick="adminCarritosVer='${k}'; render()">${l} (${cuenta(k)})</button>`).join('');
+  const estadoTxt = {abierto:'Armando el pedido', comprado:'Compró', vaciado:'Vació el carrito'};
+  const card = c=>{
+    const items = c.items||[];
+    const tel = c.phone ? String(c.phone).replace(/\D/g,'') : '';
+    const msg = encodeURIComponent('¡Hola' + (c.nombre ? ' ' + c.nombre.split(' ')[0] : '') + '! Vimos que dejaste un pedido sin terminar en la app de Sabores Royal. ¿Te ayudamos a completarlo?');
+    return `<div style="margin:10px 16px; padding:12px 14px; border-radius:14px; background:var(--glass); border:1px solid var(--glass-bd);">
+      <div style="display:flex; justify-content:space-between; gap:10px; align-items:flex-start;">
+        <div style="min-width:0;">
+          <div style="font-weight:700; color:var(--white);">${c.nombre ? escapeHtml(c.nombre) : 'Cliente sin identificar'}</div>
+          <div style="font-size:12px; color:rgba(255,255,255,0.55);">${c.phone ? escapeHtml(c.phone) + ' · ' : ''}${estadoTxt[c.estado]||c.estado} · ${carritoHace(c.actualizado)} (${carritoFecha(c.actualizado)})</div>
+        </div>
+        <div style="text-align:right; flex-shrink:0;">
+          <div style="font-weight:700; color:var(--gold2);">${money(Number(c.total)||0)}</div>
+          <div style="font-size:12px; color:rgba(255,255,255,0.55);">${Number(c.unidades)||0} u.</div>
+        </div>
+      </div>
+      ${items.length ? `<details style="margin-top:8px;"><summary style="cursor:pointer; font-size:12.5px; color:var(--gold2);">Ver ${items.length} producto${items.length===1?'':'s'}</summary>
+        <div style="margin-top:6px; font-size:13px;">${items.map(it=>`<div style="display:flex; justify-content:space-between; gap:8px; padding:4px 0; border-bottom:1px solid var(--glass-bd);">
+          <span>${it.grams ? escapeHtml(String(it.grams)) + ' g' : (Number(it.qty)||1) + ' ×'} ${escapeHtml(it.name || ('Producto ' + it.id))}${it.variant ? ' (' + escapeHtml(it.variant) + ')' : ''}</span>
+          <span style="white-space:nowrap;">${money(Number(it.price)||0)}</span></div>`).join('')}</div></details>` : ''}
+      ${tel && c.estado==='abierto' ? `<a href="https://wa.me/${tel}?text=${msg}" target="_blank" rel="noopener" class="btn-secondary" style="display:inline-block; margin-top:10px; padding:6px 12px; font-size:12px; text-decoration:none; width:auto;">💬 Escribirle por WhatsApp</a>` : ''}
+    </div>`;
+  };
+  return `<div style="padding:12px 16px 4px;">
+      <p style="font-size:12.5px; color:rgba(255,255,255,0.6); margin-bottom:8px;">Lo que los clientes tienen en el carrito de la app, se actualiza a los segundos de que agregan o sacan algo. Los que no se identificaron todavía aparecen sin nombre. Se guardan 60 días.</p>
+      <div style="display:flex; gap:8px; flex-wrap:wrap; align-items:center;">${chips}
+        <button class="btn-secondary" style="padding:6px 12px; font-size:12px; width:auto;" onclick="apiSyncCarritos()">${adminCarritosLoading ? 'Actualizando…' : '↻ Actualizar'}</button></div>
+    </div>
+    ${adminCarritos===null ? '<p style="padding:16px; opacity:.6;">Cargando…</p>' : (lista.length ? lista.map(card).join('') : '<p style="padding:16px; opacity:.6;">No hay carritos acá todavía.</p>')}`;
+}
 
 /* =========================================================
    COMPARADOR DE PRECIOS (solo superadmin)
@@ -14865,6 +14990,7 @@ if(IS_ADMIN_APP){
     if(state.adminAuthed){ apiSyncClients(); apiSyncOrders(); apiSyncPosSales(); apiSyncSuggestions(); apiSyncRewardRedemptions(); apiSyncVouchers(); apiSyncClientPayments(); syncAdminChats(); }
   });
 }else if(state.currentClientPhone){ syncClientChat(); refreshCurrentClient(); }
+if(!IS_ADMIN_APP) cartRemoteRestore();
 startChatPoll();
 
 // Actualización automática. Antes cada pestaña abierta bajaba el catálogo
