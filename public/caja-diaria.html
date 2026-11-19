@@ -895,6 +895,9 @@ tr:hover td { background:var(--surface2); }
   <!-- Deuda por proveedor -->
   <div id="deudaPorProveedor"></div>
 
+  <!-- Cuenta corriente por proveedor -->
+  <div id="deudaCtaCte"></div>
+
   <!-- Buscador -->
   <div style="margin-bottom:12px;">
     <input type="search" id="deudaBuscar" placeholder="🔍 Buscar por proveedor o N° de comprobante..." oninput="setDeudaBusqueda(this.value)" style="width:100%;background:var(--surface2);border:1px solid var(--border);color:var(--text);border-radius:8px;padding:10px 12px;font-size:13px;font-family:var(--mono);">
@@ -1626,6 +1629,7 @@ function normalizeState(){
   if(!state.cheques) state.cheques = [];
   if(!state.chequesBorrador) state.chequesBorrador = [];
   if(!state.facturas) state.facturas = [];
+  if(!state.ctaCteHist) state.ctaCteHist = [];
   if(!state.finales || Array.isArray(state.finales)) state.finales = {};
   if(!state.prestamos || Array.isArray(state.prestamos)) state.prestamos = {};
   if(!state.descubiertos || Array.isArray(state.descubiertos)) state.descubiertos = {};
@@ -4668,12 +4672,182 @@ function renderDeudaPorProveedor() {
             <td class="num">${fmtFecha(f.proxVence)}</td>
             <td class="num" style="color:${f.vencido?'var(--red)':'var(--muted)'}">${f.vencido?pesos2(f.vencido):'—'}</td>
             <td class="num yellow" style="font-weight:700;">${pesos2(f.total)}</td>
-            <td class="num"><button class="btn btn-ghost btn-sm" style="white-space:nowrap;" onclick="event.stopPropagation();abrirPagoACuenta(this.closest('tr').dataset.p)">Pago a cuenta</button></td>
+            <td class="num" style="white-space:nowrap;"><button class="btn btn-ghost btn-sm" style="white-space:nowrap;" onclick="event.stopPropagation();setCtaCteProv(provKey(this.closest('tr').dataset.p))">📒 Cta. cte.</button> <button class="btn btn-ghost btn-sm" style="white-space:nowrap;" onclick="event.stopPropagation();abrirPagoACuenta(this.closest('tr').dataset.p)">Pago a cuenta</button></td>
           </tr>
         `).join('')}</tbody>
       </table>
     </div>
   </div>`;
+}
+
+// ── CUENTA CORRIENTE POR PROVEEDOR ──
+// Todo lo que pasó con un proveedor en orden de fecha: comprobantes (debe),
+// notas de crédito, pagos a cuenta y pagos (haber), con el saldo corrido.
+// Sale de los mismos comprobantes de esta pestaña. Además se puede pegar el
+// historial viejo de una planilla (state.ctaCteHist), que se ve solo acá y
+// no cambia la deuda de las otras pestañas.
+let ctaCteProv = '';
+let ctaCteImportAbierto = false;
+function ctaCteProveedores() {
+  const m = {};
+  [...(state.facturas||[]), ...(state.cheques||[]), ...(state.ctaCteHist||[])].forEach(x=>{
+    const k = provKey(x.proveedor);
+    if(k && !m[k]) m[k] = (x.proveedor||'').trim();
+  });
+  return Object.entries(m).sort((a,b)=>a[1].localeCompare(b[1]));
+}
+function ctaCteMovimientos(key) {
+  const movs = [];
+  (state.ctaCteHist||[]).filter(h=>provKey(h.proveedor)===key).forEach(h=>movs.push({
+    fecha: h.fecha, orden: h.tipo==='pago' ? 1 : 0, hist: h.id,
+    concepto: (h.tipo==='pago' ? 'Pago a cuenta' : 'Factura') + ' · planilla' + (h.nota ? ' · ' + h.nota : ''),
+    debe: h.tipo==='pago' ? 0 : h.monto, haber: h.tipo==='pago' ? h.monto : 0}));
+  const grupos = {};
+  (state.facturas||[]).filter(f=>provKey(f.proveedor)===key).forEach(f=>{
+    if(f.tipo==='acuenta') {
+      // El saldo que deja un pago de más ya está dentro de ese pago.
+      if(!String(f.origenPagoId||'').startsWith('P')) {
+        const ms = f.pagoMedios||[];
+        movs.push({fecha: f.fechaIngreso, orden: 1, debe: 0, haber: f.monto,
+          concepto: (esPagoACuenta(f) ? 'Pago a cuenta' : 'Saldo a favor') + (ms.length ? ' · ' + ms.map(m=>FORMAS_PAGO[m.forma]||m.forma).join(' + ') : '')});
+      }
+    } else if(f.tipo==='nc') {
+      movs.push({fecha: f.fechaIngreso, orden: 1, debe: 0, haber: f.monto, concepto: compLabel(f)});
+    } else {
+      movs.push({fecha: f.fechaIngreso, orden: 0, debe: f.monto, haber: 0,
+        concepto: compLabel(f) + (f.estado==='pagada' ? '' : facturaVencida(f) ? ' · VENCIDA' : ' · pendiente'), pendiente: f.estado!=='pagada'});
+    }
+    if(f.estado==='pagada') { const g = f.pagoId || ('S' + f.id); (grupos[g] = grupos[g] || []).push(f); }
+  });
+  Object.values(grupos).forEach(g=>{
+    if(!g.some(f=>!esNC(f))) return;
+    const monto = totalPagadoGrupo(g);
+    if(monto<=0) return;
+    const p = principalDePago(g), ms = mediosDePago(g);
+    movs.push({fecha: p.fechaPagada || p.fechaIngreso, orden: 2, debe: 0, haber: monto,
+      concepto: 'Pago' + (ms.length ? ' · ' + ms.map(m=>FORMAS_PAGO[m.forma]||m.forma).join(' + ') : '') + (g.length>1 ? ` (${g.length} comprob.)` : '')});
+  });
+  movs.sort((a,b)=>(a.fecha||'').localeCompare(b.fecha||'') || a.orden-b.orden);
+  let saldo = 0;
+  movs.forEach(m=>{ saldo = r2(saldo + m.debe - m.haber); m.saldo = saldo; });
+  return movs;
+}
+function setCtaCteProv(key) {
+  ctaCteProv = key || '';
+  ctaCteImportAbierto = false;
+  renderCtaCte();
+  if(ctaCteProv) { const el = document.getElementById('deudaCtaCte'); if(el) el.scrollIntoView({behavior:'smooth', block:'start'}); }
+}
+function renderCtaCte() {
+  const el = document.getElementById('deudaCtaCte');
+  if(!el) return;
+  const provs = ctaCteProveedores();
+  if(ctaCteProv && !provs.some(p=>p[0]===ctaCteProv)) ctaCteProv = '';
+  const nombre = ctaCteProv ? provs.find(p=>p[0]===ctaCteProv)[1] : '';
+  let cuerpo = '';
+  if(ctaCteProv) {
+    const movs = ctaCteMovimientos(ctaCteProv);
+    const saldo = movs.length ? movs[movs.length-1].saldo : 0;
+    const debe = r2(movs.reduce((s,m)=>s+m.debe,0)), haber = r2(movs.reduce((s,m)=>s+m.haber,0));
+    const hist = (state.ctaCteHist||[]).filter(h=>provKey(h.proveedor)===ctaCteProv);
+    const chqPend = (state.cheques||[]).filter(c=>c.estado==='pendiente' && provKey(c.proveedor)===ctaCteProv);
+    cuerpo = `
+      <div class="grid3 mb16" style="margin-top:12px;">
+        <div class="stat"><div class="stat-label">Compras (debe)</div><div class="stat-value">${pesos2(debe)}</div></div>
+        <div class="stat"><div class="stat-label">Pagos y créditos (haber)</div><div class="stat-value green">${pesos2(haber)}</div></div>
+        <div class="stat"><div class="stat-label">${saldo<0 ? 'Saldo a mi favor' : 'Saldo: le debo'}</div><div class="stat-value" style="color:${saldo>0?'var(--gold)':'var(--green)'}">${pesos2(Math.abs(saldo))}</div></div>
+      </div>
+      ${chqPend.length ? `<p class="hint" style="margin:-6px 0 12px;">Además hay ${chqPend.length} cheque(s) a ${escHtml(nombre)} sin cobrar por ${pesos2(chqPend.reduce((s,c)=>s+c.monto,0))}. Si los usaste para pagar facturas, ya están en los pagos de esta cuenta.</p>` : ''}
+      ${movs.length ? `<div style="overflow:auto;max-height:520px;">
+        <table>
+          <thead><tr><th>Fecha</th><th>Concepto</th><th class="num">Debe</th><th class="num">Haber</th><th class="num yellow">Saldo</th><th></th></tr></thead>
+          <tbody>${movs.map(m=>`<tr>
+            <td style="white-space:nowrap;">${m.fecha ? fmtFecha(m.fecha) : '—'}</td>
+            <td style="font-family:var(--sans);${m.hist?'color:var(--muted);':''}${m.pendiente?'color:var(--gold);':''}">${escHtml(m.concepto)}</td>
+            <td class="num">${m.debe ? pesos2(m.debe) : ''}</td>
+            <td class="num" style="color:var(--green);">${m.haber ? pesos2(m.haber) : ''}</td>
+            <td class="num yellow" style="font-weight:600;">${pesos2(m.saldo)}</td>
+            <td class="num">${m.hist ? `<button class="btn btn-ghost btn-sm" title="Borrar este renglón de la planilla" onclick="borrarCtaCteHist(${m.hist})">🗑</button>` : ''}</td>
+          </tr>`).join('')}</tbody>
+        </table>
+      </div>` : `<div style="color:var(--muted);font-size:13px;padding:12px 0;">Todavía no hay movimientos de ${escHtml(nombre)}.</div>`}
+      <div class="flex" style="margin-top:12px;flex-wrap:wrap;gap:8px;">
+        <button class="btn btn-ghost btn-sm" onclick="ctaCteImportAbierto=!ctaCteImportAbierto;renderCtaCte();">📋 Importar historial (pegar desde Excel)</button>
+        ${hist.length ? `<button class="btn btn-ghost btn-sm" onclick="borrarCtaCteHistTodo()">🗑 Borrar el historial importado (${hist.length})</button>` : ''}
+      </div>
+      ${ctaCteImportAbierto ? `<div style="margin-top:12px;">
+        <p class="hint" style="margin-bottom:8px;">Copiá de la planilla las columnas <b>Fecha</b>, <b>Factura</b> y <b>A cuenta</b> (en ese orden, sin el título) y pegalas acá. Cada renglón puede tener factura, pago o las dos cosas. El historial se ve solo en esta cuenta corriente: no cambia la deuda de las otras pestañas.</p>
+        <textarea id="ctaCteImpTexto" placeholder="19/12/2025&#9;494001&#9;281352,51&#10;19/12/2025&#9;373680" oninput="previewCtaCteImport()" style="width:100%;min-height:140px;background:var(--surface2);border:1px solid var(--border);color:var(--text);border-radius:8px;padding:10px 12px;font-size:12px;font-family:var(--mono);resize:vertical;"></textarea>
+        <div id="ctaCteImpPrev" style="font-size:12px;margin:8px 0;"></div>
+        <button class="btn btn-gold btn-sm" onclick="importarCtaCteHist()">Importar a ${escHtml(nombre)}</button>
+      </div>` : ''}`;
+  }
+  el.innerHTML = `<div class="card mb16">
+    <div class="card-title"><div class="dot"></div>CUENTA CORRIENTE POR PROVEEDOR</div>
+    <select onchange="setCtaCteProv(this.value)" style="max-width:420px;">
+      <option value="">Elegí un proveedor…</option>
+      ${provs.map(p=>`<option value="${escHtml(p[0])}" ${p[0]===ctaCteProv?'selected':''}>${escHtml(p[1])}</option>`).join('')}
+    </select>
+    ${cuerpo}
+  </div>`;
+}
+// Fecha de una celda pegada: 19/12/2025, 19-12-25, 2025-12-19 o el número de Excel.
+function ctaCteFecha(s) {
+  s = String(s||'').trim();
+  let m = s.match(/^(\d{4})-(\d{1,2})-(\d{1,2})/);
+  if(m) return `${m[1]}-${m[2].padStart(2,'0')}-${m[3].padStart(2,'0')}`;
+  m = s.match(/^(\d{1,2})[\/\-.](\d{1,2})[\/\-.](\d{2,4})$/);
+  if(m) { const y = m[3].length===2 ? '20'+m[3] : m[3]; return `${y}-${m[2].padStart(2,'0')}-${m[1].padStart(2,'0')}`; }
+  if(/^\d{5}$/.test(s)) { const d = new Date(Date.UTC(1899,11,30) + (+s)*86400000); return d.toISOString().slice(0,10); }
+  return '';
+}
+function leerCtaCteImport() {
+  const txt = (document.getElementById('ctaCteImpTexto')||{}).value || '';
+  const filas = [], malas = [];
+  txt.split(/\r?\n/).forEach(l=>{
+    if(!l.trim()) return;
+    const c = l.split('\t').length > 1 ? l.split('\t') : l.trim().split(/\s{2,}|;/);
+    const fecha = ctaCteFecha(c[0]);
+    const fac = r2(leerMonto(c[1])), pag = r2(leerMonto(c[2]));
+    if(!fecha || (fac<=0 && pag<=0)) { malas.push(l.trim()); return; }
+    filas.push({fecha, fac: fac>0 ? fac : 0, pag: pag>0 ? pag : 0});
+  });
+  return {filas, malas};
+}
+function previewCtaCteImport() {
+  const el = document.getElementById('ctaCteImpPrev');
+  if(!el) return;
+  const {filas, malas} = leerCtaCteImport();
+  if(!filas.length) { el.innerHTML = malas.length ? `<span style="color:var(--red);">No reconozco ningún renglón. Tiene que empezar con la fecha.</span>` : ''; return; }
+  const fac = r2(filas.reduce((s,f)=>s+f.fac,0)), pag = r2(filas.reduce((s,f)=>s+f.pag,0));
+  const hasta = filas.map(f=>f.fecha).sort().pop();
+  const yaCargados = (state.facturas||[]).filter(f=>provKey(f.proveedor)===ctaCteProv && f.fechaIngreso && f.fechaIngreso<=hasta).length;
+  el.innerHTML = `${filas.length} renglón(es) · facturas ${pesos2(fac)} · pagos ${pesos2(pag)} · saldo ${pesos2(r2(fac-pag))} (hasta el ${fmtFecha(hasta)})`
+    + (malas.length ? `<br><span style="color:var(--yellow);">Se saltean ${malas.length} renglón(es) sin fecha o sin importe (por ejemplo los títulos).</span>` : '')
+    + (yaCargados ? `<br><span style="color:var(--yellow);">⚠ Ya hay ${yaCargados} comprobante(s) de este proveedor cargados hasta esa fecha en esta pestaña: si son los mismos, se contarían dos veces.</span>` : '');
+}
+function importarCtaCteHist() {
+  const {filas} = leerCtaCteImport();
+  if(!filas.length) { alert('Pegá al menos un renglón con fecha e importe.'); return; }
+  const nombre = (ctaCteProveedores().find(p=>p[0]===ctaCteProv)||[])[1] || ctaCteProv;
+  if(!state.ctaCteHist) state.ctaCteHist = [];
+  let id = Date.now();
+  filas.forEach(f=>{
+    if(f.fac) state.ctaCteHist.push({id: id++, proveedor: nombre, fecha: f.fecha, tipo: 'factura', monto: f.fac, nota: ''});
+    if(f.pag) state.ctaCteHist.push({id: id++, proveedor: nombre, fecha: f.fecha, tipo: 'pago', monto: f.pag, nota: ''});
+  });
+  ctaCteImportAbierto = false;
+  save(); renderCtaCte();
+}
+function borrarCtaCteHist(id) {
+  if(!confirm('¿Borrar este renglón del historial importado?')) return;
+  state.ctaCteHist = (state.ctaCteHist||[]).filter(h=>h.id!==id);
+  save(); renderCtaCte();
+}
+function borrarCtaCteHistTodo() {
+  if(!confirm('¿Borrar todo el historial importado de este proveedor? Los comprobantes de esta pestaña no se tocan.')) return;
+  state.ctaCteHist = (state.ctaCteHist||[]).filter(h=>provKey(h.proveedor)!==ctaCteProv);
+  save(); renderCtaCte();
 }
 
 // Número de comprobante sin importar ceros adelante, guiones ni espacios:
@@ -4689,6 +4863,7 @@ function renderDeuda() {
   renderDeudaPagoPanel();
   renderDeudaResumen();
   renderDeudaPorProveedor();
+  renderCtaCte();
   updateChequesProveedoresDatalist();
   updateDeudaBadge();
   const provWrap = document.getElementById('deudaProvFiltroWrap');
