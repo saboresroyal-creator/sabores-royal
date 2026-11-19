@@ -4688,8 +4688,10 @@ function renderDeudaPorProveedor() {
 // no cambia la deuda de las otras pestañas.
 let ctaCteProv = '';
 let ctaCteImportAbierto = false;
+let ctaCteNuevo = ''; // proveedor escrito a mano que todavía no tiene nada cargado
 function ctaCteProveedores() {
   const m = {};
+  if(ctaCteNuevo) m[provKey(ctaCteNuevo)] = ctaCteNuevo;
   [...(state.facturas||[]), ...(state.cheques||[]), ...(state.ctaCteHist||[])].forEach(x=>{
     const k = provKey(x.proveedor);
     if(k && !m[k]) m[k] = (x.proveedor||'').trim();
@@ -4733,6 +4735,13 @@ function ctaCteMovimientos(key) {
   return movs;
 }
 function setCtaCteProv(key) {
+  if(key==='__nuevo__') {
+    const nombre = (prompt('Nombre del proveedor (como lo escribís en las facturas):') || '').trim();
+    if(!nombre) { renderCtaCte(); return; }
+    const ya = ctaCteProveedores().find(p=>p[0]===provKey(nombre));
+    if(!ya) ctaCteNuevo = nombre;
+    key = provKey(nombre);
+  }
   ctaCteProv = key || '';
   ctaCteImportAbierto = false;
   renderCtaCte();
@@ -4787,6 +4796,7 @@ function renderCtaCte() {
     <select onchange="setCtaCteProv(this.value)" style="max-width:420px;">
       <option value="">Elegí un proveedor…</option>
       ${provs.map(p=>`<option value="${escHtml(p[0])}" ${p[0]===ctaCteProv?'selected':''}>${escHtml(p[1])}</option>`).join('')}
+      <option value="__nuevo__">➕ Otro proveedor (escribir el nombre)…</option>
     </select>
     ${cuerpo}
   </div>`;
