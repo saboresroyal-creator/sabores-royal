@@ -732,12 +732,15 @@ tr:hover td { background:var(--surface2); }
     </div>
   </div>
 
+  <!-- Deuda en cheques por proveedor -->
+  <div id="chequesPorProveedor"></div>
+
   <!-- Plazo promedio por proveedor -->
   <div id="chequesPlazoProveedor"></div>
 
   <!-- Buscador -->
   <div style="margin-bottom:12px;">
-    <input type="search" id="chequesBuscarNumero" placeholder="🔍 Buscar por N° de cheque..." oninput="setChequesBusqueda(this.value)" style="width:100%;background:var(--surface2);border:1px solid var(--border);color:var(--text);border-radius:8px;padding:10px 12px;font-size:13px;font-family:var(--mono);">
+    <input type="search" id="chequesBuscarNumero" placeholder="🔍 Buscar por N° de cheque o proveedor..." oninput="setChequesBusqueda(this.value)" style="width:100%;background:var(--surface2);border:1px solid var(--border);color:var(--text);border-radius:8px;padding:10px 12px;font-size:13px;font-family:var(--mono);">
   </div>
 
   <!-- Filtros -->
@@ -749,6 +752,7 @@ tr:hover td { background:var(--surface2); }
     <button class="ptab" onclick="setChequesFiltro('vencido',this)">Vencidos</button>
   </div>
   <div id="chequesHastaHoy"></div>
+  <div id="chequesProvFiltroWrap"></div>
   <div id="chequesDiaFiltroWrap" style="display:none;margin:-10px 0 16px;">
     <button class="btn btn-ghost btn-sm" onclick="chequesCalSeleccionarDia(null)">✕ Ver todos los días — filtrando por <span id="chequesDiaFiltroLabel"></span></button>
   </div>
@@ -3113,6 +3117,8 @@ function updateBadge() {
 // ============================================================
 let chequesFiltro = 'todos';
 let chequesBusqueda = '';
+let chequesProveedorSel = ''; // proveedor elegido en "Deuda en cheques por proveedor" (en mayúsculas)
+let chequesProvKeys = [];
 let chequesCalDiaSel = null;
 let chequesSoloHastaHoy = false; // ver solo los pendientes que vencen hasta hoy
 const CHEQUE_ALERTA_DIAS = 5;
@@ -3596,6 +3602,80 @@ function renderChequesResumen() {
   `;
 }
 
+// ── DEUDA EN CHEQUES POR PROVEEDOR ──
+// Lo que falta pagar a cada proveedor en cheques pendientes (sin cobrar).
+// Tocando un proveedor, la lista de abajo muestra solo sus cheques.
+function chequeProvKey(s){ return (s||'').trim().toUpperCase(); }
+function renderChequesPorProveedor() {
+  const el = document.getElementById('chequesPorProveedor');
+  if(!el) return;
+  const hoy = todayStr();
+  const por = {};
+  state.cheques.forEach(c=>{
+    const key = chequeProvKey(c.proveedor);
+    if(!key) return;
+    if(!por[key]) por[key] = {key, proveedor:(c.proveedor||'').trim(), cant:0, pendiente:0, vencido:0, proximo:''};
+    const p = por[key];
+    if(c.estado!=='pendiente') return;
+    p.cant++; p.pendiente += c.monto;
+    if(c.fechaPago && c.fechaPago<hoy) p.vencido += c.monto;
+    if(c.fechaPago && c.fechaPago>=hoy && (!p.proximo || c.fechaPago<p.proximo)) p.proximo = c.fechaPago;
+  });
+  const filas = Object.values(por).filter(p=>p.cant).sort((a,b)=>b.pendiente-a.pendiente);
+  chequesProvKeys = Object.keys(por);
+  if(!filas.length){ el.innerHTML = ''; return; }
+  const total = filas.reduce((s,f)=>s+f.pendiente,0);
+  el.innerHTML = `<div class="card mb16">
+    <div class="card-title"><div class="dot"></div>DEUDA EN CHEQUES POR PROVEEDOR (pendientes de cobro)</div>
+    <p class="hint" style="margin:-4px 0 10px;">Tocá un proveedor para ver solo sus cheques.</p>
+    <div style="overflow-x:auto;">
+      <table>
+        <thead><tr>
+          <th>Proveedor</th>
+          <th class="num">Cheques</th>
+          <th class="num">Próximo venc.</th>
+          <th class="num">Vencidos sin cobrar</th>
+          <th class="num yellow">Debo</th>
+        </tr></thead>
+        <tbody>${filas.map(f=>`
+          <tr onclick="chequesVerProveedor(${chequesProvKeys.indexOf(f.key)})" style="cursor:pointer;${chequesProveedorSel===f.key?'background:var(--surface2);':''}" title="Ver los cheques de ${escHtml(f.proveedor)}">
+            <td>${chequesProveedorSel===f.key?'▶ ':''}${escHtml(f.proveedor)}</td>
+            <td class="num">${f.cant}</td>
+            <td class="num">${f.proximo?fmtFecha(f.proximo):'—'}</td>
+            <td class="num" style="color:${f.vencido?'var(--red)':'var(--muted)'}">${f.vencido?pesos(f.vencido):'—'}</td>
+            <td class="num yellow" style="font-weight:700;">${pesos(f.pendiente)}</td>
+          </tr>`).join('')}
+          <tr><td style="font-weight:700;">TOTAL</td><td class="num">${filas.reduce((s,f)=>s+f.cant,0)}</td><td></td><td></td><td class="num yellow" style="font-weight:700;">${pesos(total)}</td></tr>
+        </tbody>
+      </table>
+    </div>
+  </div>`;
+}
+function chequesVerProveedor(i) {
+  const key = chequesProvKeys[i] || '';
+  chequesProveedorSel = (key && key!==chequesProveedorSel) ? key : '';
+  renderCheques();
+  if(chequesProveedorSel){ const w = document.getElementById('chequesProvFiltroWrap'); if(w) w.scrollIntoView({behavior:'smooth', block:'start'}); }
+}
+function renderChequesProvFiltro() {
+  const el = document.getElementById('chequesProvFiltroWrap');
+  if(!el) return;
+  if(!chequesProveedorSel){ el.innerHTML = ''; return; }
+  const de = state.cheques.filter(c=>chequeProvKey(c.proveedor)===chequesProveedorSel);
+  const pend = de.filter(c=>c.estado==='pendiente');
+  const nombre = de.length ? de[0].proveedor.trim() : chequesProveedorSel;
+  el.innerHTML = `<div class="card mb16" style="border-color:var(--gold);display:flex;align-items:center;justify-content:space-between;flex-wrap:wrap;gap:8px;padding:14px 18px;">
+    <div>
+      <div style="font-size:11px;letter-spacing:1px;text-transform:uppercase;color:var(--muted);">Cheques de ${escHtml(nombre)}</div>
+      <div style="font-size:12px;color:var(--muted);margin-top:4px;">${pend.length} pendiente(s) de ${de.length} cargado(s) · <a href="#" onclick="chequesProveedorSel='';renderCheques();return false;" style="color:var(--gold);">✕ ver todos los proveedores</a></div>
+    </div>
+    <div style="text-align:right;">
+      <div style="font-size:11px;color:var(--muted);">Debo</div>
+      <div style="font-family:var(--mono);font-size:22px;font-weight:600;color:var(--gold);">${pesos(pend.reduce((s,c)=>s+c.monto,0))}</div>
+    </div>
+  </div>`;
+}
+
 // ── PLAZO PROMEDIO (emisión → vencimiento) POR PROVEEDOR ──
 function renderChequesPlazoProveedor() {
   const el = document.getElementById('chequesPlazoProveedor');
@@ -3651,6 +3731,8 @@ function renderChequesPlazoProveedor() {
 function renderCheques() {
   renderChequesResumen();
   renderChequesCalendario();
+  renderChequesPorProveedor();
+  renderChequesProvFiltro();
   renderChequesPlazoProveedor();
   updateChequesProveedoresDatalist();
   const diaWrap = document.getElementById('chequesDiaFiltroWrap');
@@ -3664,9 +3746,10 @@ function renderCheques() {
   if(chequesSoloHastaHoy) list = list.filter(c=>c.estado==='pendiente' && c.fechaPago<=todayStr());
   if(chequesFiltro !== 'todos') list = list.filter(c=>c.estado===chequesFiltro);
   if(chequesCalDiaSel) list = list.filter(c=>c.fechaPago===chequesCalDiaSel);
-  if(chequesBusqueda) list = list.filter(c=>(c.numero||'').toLowerCase().includes(chequesBusqueda));
+  if(chequesProveedorSel) list = list.filter(c=>chequeProvKey(c.proveedor)===chequesProveedorSel);
+  if(chequesBusqueda) list = list.filter(c=>(c.numero||'').toLowerCase().includes(chequesBusqueda) || (c.proveedor||'').toLowerCase().includes(chequesBusqueda));
   if(!list.length) {
-    const hayFiltro = chequesFiltro!=='todos' || chequesCalDiaSel || chequesBusqueda || chequesSoloHastaHoy;
+    const hayFiltro = chequesFiltro!=='todos' || chequesCalDiaSel || chequesBusqueda || chequesSoloHastaHoy || chequesProveedorSel;
     container.innerHTML = `<div class="card" style="text-align:center;color:var(--muted);padding:40px;">No hay cheques${hayFiltro?' para este filtro':' cargados'}${chequesBusqueda?` (buscando N° "${chequesBusqueda}")`:''}.</div>`;
     updateChequesBadge();
     return;
