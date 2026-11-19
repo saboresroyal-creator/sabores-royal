@@ -85,6 +85,66 @@ const DETALLE_SCHEMA = {
   },
   required: [...COMPROBANTE_SCHEMA.required, 'letra', 'items'],
 };
+
+// Modo presupuesto (Cajas Navideñas en el admin): la foto de un presupuesto
+// o pedido de cajas navideñas, para armar el pedido con su caja.
+const PRESUPUESTO_PROMPT = `Leés presupuestos y pedidos de cajas navideñas para Sabores Royal, un comercio de Rosario (Argentina), a partir de una foto o un PDF. Puede ser un presupuesto impreso o escrito a mano, una lista, la captura de un mensaje de WhatsApp o el presupuesto de otro comercio.
+
+Devolvé:
+- legible: false si la imagen no es un presupuesto, pedido o lista de productos; true si sí.
+- cliente: el nombre del cliente o empresa al que va dirigido, si figura; si no, "".
+- telefono: el teléfono del cliente tal como figura; si no, "".
+- fechaEntrega: la fecha de entrega en formato AAAA-MM-DD si figura (las fechas argentinas vienen como DD/MM/AAAA); si no, "".
+- cantidadCajas: cuántas cajas iguales se piden (número). 1 si no lo dice o si es una lista de artículos sueltos.
+- precioPorCaja: el precio de UNA caja si figura, número con "." decimal; 0 si no figura.
+- total: el importe total del presupuesto si figura, número; 0 si no.
+- items: el contenido de UNA caja (o la lista, si no hay cajas), un renglón por producto en el orden en que aparecen, con:
+  - descripcion: el producto tal como figura (marca, variedad y tamaño si están).
+  - cantidad: cuántas unidades lleva UNA caja de ese producto (número; 1 si no se indica).
+  - precioUnitario: el precio de una unidad si figura, número; 0 si no.
+- observaciones: una frase corta solo si hay algo dudoso que revisar (ej: "no se lee la cantidad de cajas"); si no, "".
+
+No incluyas renglones de envío, embalaje, descuentos ni subtotales como productos. No inventes datos: si algo no se ve, dejalo vacío o en 0.`;
+const FORMATO_PRESUPUESTO = `\n\nRespondé SOLO con un objeto JSON con estas claves exactas: legible (boolean), cliente (string), telefono (string), fechaEntrega (string), cantidadCajas (number), precioPorCaja (number), total (number), items (array de objetos con descripcion (string), cantidad (number), precioUnitario (number)), observaciones (string).`;
+const PRESUPUESTO_SCHEMA = {
+  type: 'object',
+  properties: {
+    legible: { type: 'boolean' }, cliente: { type: 'string' }, telefono: { type: 'string' }, fechaEntrega: { type: 'string' },
+    cantidadCajas: { type: 'number' }, precioPorCaja: { type: 'number' }, total: { type: 'number' },
+    items: {
+      type: 'array',
+      items: {
+        type: 'object',
+        properties: { descripcion: { type: 'string' }, cantidad: { type: 'number' }, precioUnitario: { type: 'number' } },
+        required: ['descripcion', 'cantidad', 'precioUnitario'],
+        additionalProperties: false,
+      },
+    },
+    observaciones: { type: 'string' },
+  },
+  required: ['legible', 'cliente', 'telefono', 'fechaEntrega', 'cantidadCajas', 'precioPorCaja', 'total', 'items', 'observaciones'],
+  additionalProperties: false,
+};
+function normalizarPresupuesto(c) {
+  c = c || {};
+  const n = (v) => (typeof v === 'number' ? v : num(v));
+  const plata = (v) => Math.max(0, Math.round(n(v) * 100) / 100);
+  return {
+    legible: c.legible === true || c.legible === 'true',
+    cliente: String(c.cliente || '').trim(),
+    telefono: String(c.telefono || '').trim(),
+    fechaEntrega: typeof c.fechaEntrega === 'string' && /^\d{4}-\d{2}-\d{2}$/.test(c.fechaEntrega) ? c.fechaEntrega : '',
+    cantidadCajas: Math.max(1, Math.round(n(c.cantidadCajas)) || 1),
+    precioPorCaja: plata(c.precioPorCaja),
+    total: plata(c.total),
+    items: (Array.isArray(c.items) ? c.items : []).map((it) => ({
+      descripcion: String(it.descripcion || '').trim(),
+      cantidad: n(it.cantidad) > 0 ? n(it.cantidad) : 1,
+      precioUnitario: plata(it.precioUnitario),
+    })).filter((it) => it.descripcion).slice(0, 200),
+    observaciones: String(c.observaciones || '').trim(),
+  };
+}
 const num = (v) => { const n = typeof v === 'number' ? v : parseFloat(String(v || '').replace(/\./g, '').replace(',', '.')); return Number.isFinite(n) ? n : 0; };
 function normalizarDetalle(c) {
   const base = normalizar(c);
@@ -287,15 +347,19 @@ export default async function handler(req, res) {
   } catch (e) {
     return res.status(401).json({ error: 'No se pudo verificar el acceso' });
   }
-  const sistema = detalle ? SYSTEM_PROMPT + DETALLE_EXTRA + FORMATO_JSON.replace(/\.$/, FORMATO_DETALLE) : SYSTEM_PROMPT + FORMATO_JSON;
-  const salida = detalle ? normalizarDetalle : normalizar;
+  const presupuesto = !!(req.body && req.body.modo === 'presupuesto');
+  // El modo presupuesto solo se usa desde el admin.
+  if (presupuesto && !adminToken) return res.status(401).json({ error: 'Entrá al admin para leer presupuestos' });
+  const sistema = presupuesto ? PRESUPUESTO_PROMPT + FORMATO_PRESUPUESTO
+    : detalle ? SYSTEM_PROMPT + DETALLE_EXTRA + FORMATO_JSON.replace(/\.$/, FORMATO_DETALLE) : SYSTEM_PROMPT + FORMATO_JSON;
+  const salida = presupuesto ? normalizarPresupuesto : detalle ? normalizarDetalle : normalizar;
   if (!data || typeof data !== 'string') return res.status(400).json({ error: 'Falta la foto' });
   if (!MEDIA_TYPES.includes(mediaType)) return res.status(400).json({ error: 'Formato no soportado (usá foto o PDF)' });
   const conocidos = Array.isArray(proveedores)
     ? proveedores.filter((p) => typeof p === 'string' && p.trim()).slice(0, 300)
     : [];
   const hoy = new Date().toLocaleDateString('es-AR', { timeZone: 'America/Argentina/Buenos_Aires' });
-  const pedido = `Hoy es ${hoy}.
+  const pedido = presupuesto ? `Hoy es ${hoy}.\n\nLeé este presupuesto de cajas navideñas.` : `Hoy es ${hoy}.
 Proveedores conocidos: ${conocidos.length ? conocidos.join(', ') : '(ninguno todavía)'}\n\nLeé este comprobante.`;
 
   // Sin clave de Anthropic: Gemini si hay clave; si no, el AI Gateway de Vercel.
@@ -330,14 +394,14 @@ Proveedores conocidos: ${conocidos.length ? conocidos.join(', ') : '(ninguno tod
     const anthropic = new Anthropic();
     const response = await anthropic.beta.messages.create({
       model: 'claude-opus-5-5',
-      max_tokens: detalle ? 16000 : 4000,
+      max_tokens: detalle || presupuesto ? 16000 : 4000,
       betas: ['server-side-fallback-2026-07-01'],
       fallbacks: 'default',
       output_config: {
         effort: 'medium',
-        format: { type: 'json_schema', schema: detalle ? DETALLE_SCHEMA : COMPROBANTE_SCHEMA },
+        format: { type: 'json_schema', schema: presupuesto ? PRESUPUESTO_SCHEMA : detalle ? DETALLE_SCHEMA : COMPROBANTE_SCHEMA },
       },
-      system: detalle ? SYSTEM_PROMPT + DETALLE_EXTRA : SYSTEM_PROMPT,
+      system: presupuesto ? PRESUPUESTO_PROMPT : detalle ? SYSTEM_PROMPT + DETALLE_EXTRA : SYSTEM_PROMPT,
       messages: [{
         role: 'user',
         content: [

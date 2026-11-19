@@ -4994,6 +4994,90 @@ async function nvPDF(id){
   doc.save(`Presupuesto_${(p.cliente||'cliente').replace(/[^\w]+/g,'_')}.pdf`);
 }
 
+// ---- Presupuesto desde una foto ----
+// La foto va a /api/factura-foto (modo presupuesto), que la lee con IA. Con lo
+// que devuelve se arma un modelo de caja propio de ese cliente y el pedido en
+// estado Presupuesto, para revisarlo antes de mandarlo.
+let nvFotoEstado = '';
+function nvEstadoFoto(html){ nvFotoEstado = html; nvRender(); }
+function nvDesdeFoto(){
+  const inp = document.createElement('input');
+  inp.type = 'file'; inp.accept = 'image/*,application/pdf';
+  inp.onchange = ()=>{ if(inp.files[0]) nvLeerPresupuesto(inp.files[0]); };
+  inp.click();
+}
+async function nvLeerPresupuesto(file){
+  nvEstadoFoto('⏳ Leyendo el presupuesto… puede tardar hasta un minuto.');
+  try{
+    const archivo = await spAchicar(file);
+    // Igual que en el ingreso de mercadería: si la IA gratuita está ocupada, reintenta sola.
+    const ESPERAS = [3, 8, 15, 25];
+    let renovado = false, r = null;
+    for(let intento = 0; ; intento++){
+      const res = await fetch('/api/factura-foto', {
+        method:'POST', headers:{'Content-Type':'application/json'},
+        body: JSON.stringify({adminToken: adminSession && adminSession.access_token, modo:'presupuesto', data: archivo.data, mediaType: archivo.mediaType}),
+      }).catch(()=>null);
+      const j = res ? await res.json().catch(()=>({})) : {};
+      if(res && res.ok){ r = j; break; }
+      if(res && res.status===401 && !renovado && await adminTryRefresh()){ renovado = true; intento--; continue; }
+      if((res && ![429,502,503,504].includes(res.status)) || intento >= ESPERAS.length) throw new Error(!res ? 'Sin conexión' : (j.error || 'Error ' + res.status));
+      for(let s = ESPERAS[intento]; s > 0; s--){
+        nvEstadoFoto(`<span style="color:var(--warn);">⏳ La IA está ocupada, reintento automático en ${s} s… no hace falta tocar nada.</span>`);
+        await new Promise(ok=>setTimeout(ok, 1000));
+      }
+      nvEstadoFoto('⏳ Leyendo de nuevo…');
+    }
+    if(!r.legible || !(r.items||[]).length){ nvEstadoFoto('<span style="color:var(--warn);">⚠ No encontré un presupuesto en esa foto. Probá con más luz y de frente.</span>'); return; }
+    await nvPedidoDesdeLectura(r);
+    nvEstadoFoto(`<span style="color:var(--ok);">✓ Leí ${r.items.length} artículos. Revisá el pedido, la caja y los costos antes de mandarlo${r.observaciones ? ': ' + escapeHtml(r.observaciones) : '.'}</span>`);
+  }catch(e){ nvEstadoFoto(`<span style="color:var(--danger);">✗ ${escapeHtml(e.message || String(e))}</span>`); }
+}
+// Busca el renglón entre los artículos ya cargados y, si hay uno solo que
+// coincida, en los productos de la app.
+function nvParecido(desc){
+  const n = normText(desc);
+  const ya = Object.values(nvData.articulos).find(a=>normText(a.nombre)===n);
+  if(ya) return {id: ya.id};
+  const palabras = n.split(/\s+/).filter(w=>w.length>2);
+  const exactos = state.products.filter(p=>normText(p.name)===n);
+  const cands = exactos.length ? exactos : (palabras.length ? state.products.filter(p=>{ const pn = normText(p.name); return palabras.every(w=>pn.includes(w)); }) : []);
+  if(cands.length!==1) return null;
+  const p = cands[0], ref = 'p:' + (p._apiId||p.id);
+  const ya2 = Object.values(nvData.articulos).find(a=>a.ref===ref);
+  return ya2 ? {id: ya2.id} : {prod: p, ref};
+}
+async function nvPedidoDesdeLectura(r){
+  const items = {}, nuevos = [];
+  r.items.forEach(it=>{
+    const m = nvParecido(it.descripcion);
+    let id = m && m.id;
+    if(!id){
+      id = nvId('na');
+      nvData.articulos[id] = m && m.prod
+        ? {id, nombre: m.prod.name, costo: 0, precio: nvR2(+m.prod.price||0), apartado: 0, ref: m.ref}
+        : {id, nombre: it.descripcion, costo: 0, precio: nvR2(it.precioUnitario), apartado: 0, ref: ''};
+      nuevos.push(id);
+    }
+    items[id] = (items[id]||0) + it.cantidad;
+  });
+  const conRef = nuevos.map(id=>nvData.articulos[id]).filter(a=>a.ref.startsWith('p:'));
+  const costos = await nvCostoCatalogo(conRef.map(a=>a.ref.slice(2)));
+  conRef.forEach(a=>{ const c = costos[a.ref.slice(2)]; if(c!=null) a.costo = nvR2(c); });
+  nuevos.forEach(id=>nvSave('articulo', id));
+  const cant = r.cantidadCajas || 1;
+  const precio = r.precioPorCaja || (r.total ? nvR2(r.total/cant) : nvR2(r.items.reduce((s,it)=>s+it.cantidad*it.precioUnitario,0)));
+  const mid = nvId('nm');
+  nvData.modelos[mid] = {id: mid, nombre: 'Caja ' + (r.cliente || 'del presupuesto'), precio, items};
+  nvSave('modelo', mid);
+  const pid = nvId('np');
+  nvData.pedidos[pid] = {id: pid, cliente: r.cliente||'', tel: nvTel(r.telefono), entrega: r.fechaEntrega||'', estado:'presupuesto',
+    notas: 'Cargado desde una foto.' + (r.observaciones ? ' ' + r.observaciones : ''), creado: nvHoy(),
+    cajas: {[nvId('nl')]: {modelo: mid, cant, precio}}, ajustes: {}, pagos: {}};
+  nvSave('pedido', pid);
+  nvVista = 'pedidos'; nvPedidoSel = pid; nvCatRes = [];
+}
+
 // ---- Modelos ----
 function nvNuevoModelo(){
   const id = nvId('nm');
@@ -5092,8 +5176,10 @@ function nvHtml(){
     ${vistas.map(([k,l])=>`<button class="nv-btn ${nvVista===k?'on':''}" onclick="nvVista='${k}';nvCatRes=[];nvRender()">${l}</button>`).join('')}
     <span style="flex:1;"></span>
     <button class="nv-btn" onclick="nvData=null;nvCargar()" title="Traer lo que cargaron otros">Actualizar</button>
+    <button class="nv-btn" onclick="nvDesdeFoto()">📷 Desde una foto</button>
     <button class="nv-btn gold" onclick="nvNuevoPedido()">+ Nuevo pedido</button>
-  </div>`;
+  </div>
+  ${nvFotoEstado ? `<div class="nv-hint" style="margin-top:10px;">${nvFotoEstado}</div>` : ''}`;
 
   if(nvVista==='pedidos'){
     const p = nvPedidoSel && nvData.pedidos[nvPedidoSel];
