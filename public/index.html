@@ -4545,6 +4545,8 @@ function renderAdmin(){
     {key:"pedidos",       label:"Pedidos", badge:pendingOrdersCount},
     {key:"carritos",      label:"Carritos"},
     {key:"productos",     label:"Productos", badge:lowStockCount},
+    {key:"catalogolocal", label:"Catálogo del local"},
+    {key:"preciospc",     label:"Precios PC vs App"},
     {key:"conteo",        label:"Conteo de Stock"},
     {key:"categorias",    label:"Categorías"},
     {key:"clientes",      label:"Clientes", badge:newClientsCount},
@@ -4640,6 +4642,8 @@ function renderAdmin(){
         </div>
         <div id="admin-productos-list">${renderAdminProductos()}</div>
       ` : ""}
+      ${tab==="catalogolocal" ? renderAdminCatalogoLocal() : ""}
+      ${tab==="preciospc" ? renderAdminPreciosPC() : ""}
       ${tab==="conteo" ? renderAdminConteo() : ""}
       ${tab==="categorias" ? renderAdminCategorias() : ""}
       ${tab==="clientes" ? renderAdminClientes() : ""}
@@ -9685,6 +9689,325 @@ function deleteProduct(id){
   apiDeleteProduct(toDelete);
 }
 
+/* ---------- CATÁLOGO DEL LOCAL (productos traídos de StarPOS) ----------
+   Tabla catalogo_local: lo que se vende en el mostrador y todavía no está
+   en la tienda. La Caja los cobra igual; acá se ven y se "activan": se abre
+   el alta de producto con los datos ya cargados y, al guardar, la fila queda
+   vinculada (product_id) y deja de aparecer duplicada en la Caja. */
+// Importes con centavos, como en el resto del dashboard.
+function money2(n){ return '$' + Number(n||0).toLocaleString('es-AR',{minimumFractionDigits:2, maximumFractionDigits:2}); }
+let catLocal = null, catLocalLoading = false, catLocalError = '';
+let _catLocalActivando = null;
+async function apiLoadCatalogoLocal(){
+  catLocalLoading = true; catLocalError = '';
+  try{
+    let out = [];
+    for(let off = 0; ; off += 1000){
+      const page = await adminFetch('/catalogo_local?select=*&order=nombre&limit=1000&offset=' + off, 'GET') || [];
+      out = out.concat(page);
+      if(page.length < 1000) break;
+    }
+    catLocal = out;
+  }catch(e){
+    catLocalError = /catalogo_local/.test(e.message||'') ? 'Falta correr supabase-migration-catalogo-local.sql y los 4 archivos de datos en Supabase.' : (e.message||'Error');
+  }
+  catLocalLoading = false;
+  if(state.adminTab === 'catalogolocal') render();
+}
+function catLocalFiltrados(){
+  const qWords = normText(state.catLocalQ||'').split(/\s+/).filter(Boolean);
+  const f = state.catLocalFiltro || 'pendientes';
+  const hace90 = new Date(Date.now() - 90*864e5).toISOString().slice(0,10);
+  return (catLocal||[]).filter(l=>{
+    if(f === 'pendientes' && l.product_id) return false;
+    if(f === 'vendidos' && (l.product_id || !l.ultima_venta || l.ultima_venta < hace90)) return false;
+    if(f === 'duplicados' && (l.product_id || !l.posible_duplicado)) return false;
+    if(f === 'activados' && !l.product_id) return false;
+    if(f === 'fueracaja' && !l.oculto_caja) return false;
+    if(state.catLocalCat && l.categoria !== state.catLocalCat) return false;
+    if(qWords.length){
+      const hay = normText(`${l.nombre} ${l.marca||''} ${l.barcode||''} ${l.referencia||''}`);
+      if(!qWords.every(w=>hay.includes(w))) return false;
+    }
+    return true;
+  });
+}
+/* Sincronización automática con StarPOS (supabase-migration-sync-starpos.sql
+   + herramientas/sincronizar-starpos.bat instalado en la PC de StarPOS). */
+let spSync = null, spSyncLoading = false, spSyncVerCambios = false;
+async function apiLoadSpSync(){
+  spSyncLoading = true;
+  try{
+    const rows = await adminFetch('/starpos_sync_log?select=*&order=id.desc&limit=100', 'GET') || [];
+    const hace7 = Date.now() - 7*864e5;
+    const cambios = [];
+    rows.filter(r=>r.ok && r.resumen && new Date(r.created_at).getTime() > hace7).forEach(r=>{
+      (r.resumen.cambios||[]).forEach(c=>cambios.push(Object.assign({fecha:r.created_at}, c)));
+    });
+    spSync = {ultimo: rows[0]||null, ultimoOk: rows.find(r=>r.ok)||null, cambios};
+  }catch(e){
+    spSync = {error: /starpos_sync/.test(e.message||'') ? 'falta' : (e.message||'Error')};
+  }
+  spSyncLoading = false;
+  if(state.adminTab === 'catalogolocal' || state.adminTab === 'preciospc') render();
+}
+function fmtFechaHora(iso){
+  if(!iso) return '—';
+  const d = new Date(iso), z = n => String(n).padStart(2,'0');
+  return z(d.getDate())+'/'+z(d.getMonth()+1)+'/'+d.getFullYear()+' '+z(d.getHours())+':'+z(d.getMinutes());
+}
+function renderSpSyncBox(){
+  if(!spSync && !spSyncLoading) apiLoadSpSync();
+  const box = inner => `<div style="margin-bottom:10px; padding:10px 12px; border-radius:12px; background:var(--glass); border:1px solid var(--glass-bd); font-size:12.5px; color:rgba(255,255,255,0.8);">${inner}</div>`;
+  const btnDesc = `<button class="btn-secondary" style="padding:7px 12px; font-size:12px;" onclick="descargarSincronizador()">Descargar sincronizador</button>`;
+  if(!spSync) return box('Sincronización con StarPOS: cargando…');
+  if(spSync.error === 'falta') return box('Para que los productos y precios de StarPOS pasen solos, falta correr <b>supabase-migration-sync-starpos.sql</b> en Supabase.');
+  if(spSync.error) return box('Sincronización con StarPOS: ' + escapeHtml(spSync.error));
+  const {ultimo, ultimoOk, cambios} = spSync;
+  let estado;
+  if(!ultimo) estado = 'Todavía no se sincronizó nunca. Bajá el sincronizador y abrilo en la PC de StarPOS.';
+  else{
+    const r = ultimoOk && ultimoOk.resumen || {};
+    const viejo = !ultimoOk || (Date.now() - new Date(ultimoOk.created_at).getTime() > 60*60*1000);
+    estado = `<b>Última sincronización con StarPOS:</b> ${fmtFechaHora(ultimoOk && ultimoOk.created_at)}` +
+      (ultimoOk ? ` — ${r.nuevos||0} nuevos, ${r.precios||0} precios cambiados` : '') +
+      (viejo ? `<br><span style="color:var(--warn);">Hace más de una hora que no sincroniza: fijate que la PC de StarPOS esté prendida y con internet.</span>` : '') +
+      (!ultimo.ok ? `<br><span style="color:var(--danger);">El último intento (${fmtFechaHora(ultimo.created_at)}) falló: ${escapeHtml(ultimo.error||'')}</span>` : '');
+  }
+  const lista = spSyncVerCambios ? (cambios.length
+      ? `<div style="margin-top:8px; max-height:220px; overflow:auto;">${cambios.map(c=>`<div style="display:flex; justify-content:space-between; gap:8px; padding:3px 0; border-bottom:1px solid var(--glass-bd);"><span>${escapeHtml(c.nombre||'')} <span style="opacity:.55;">${fmtFechaHora(c.fecha)}</span></span><span style="white-space:nowrap;">${money2(c.antes)} → <b>${money2(c.ahora)}</b></span></div>`).join('')}</div>`
+      : `<p style="margin-top:6px; opacity:.7;">No hubo cambios de precio en los últimos 7 días.</p>`) : '';
+  return box(`${estado}
+    <div style="display:flex; gap:8px; flex-wrap:wrap; margin-top:8px;">
+      <button class="btn-secondary" style="padding:7px 12px; font-size:12px;" onclick="spSyncVerCambios=!spSyncVerCambios; render()">${spSyncVerCambios?'Ocultar':'Ver'} precios cambiados (7 días)</button>
+      <button class="btn-secondary" style="padding:7px 12px; font-size:12px;" onclick="spSync=null; catLocal=null; render()">Actualizar</button>
+      ${btnDesc}
+    </div>${lista}`);
+}
+// Arma el .bat con la clave de sincronización adentro (la clave no está en el código publicado).
+async function descargarSincronizador(){
+  try{
+    const cfg = await adminFetch('/starpos_sync_config?select=token', 'GET') || [];
+    if(!cfg[0]) throw new Error('falta correr supabase-migration-sync-starpos.sql');
+    const res = await fetch('herramientas/sincronizar-starpos.bat', {cache:'no-store'});
+    if(!res.ok) throw new Error('no se encontró el archivo del sincronizador');
+    // La clave de la base de StarPOS no va en el código (el repo es público): se pide al descargar.
+    const pgPass = (prompt('Clave de la base de datos de StarPOS (usuario admin):') || '').trim();
+    if(!pgPass) return;
+    if(/'/.test(pgPass)) throw new Error('la clave no puede tener comillas simples');
+    const txt = (await res.text()).replace('__TOKEN__', cfg[0].token).replace('__ANON__', SUPABASE_KEY).replace('__PGPASS__', pgPass).replace(/\r?\n/g, '\r\n');
+    const a = document.createElement('a');
+    a.href = URL.createObjectURL(new Blob([txt], {type:'application/octet-stream'}));
+    a.download = 'sincronizar-starpos.bat';
+    document.body.appendChild(a); a.click();
+    setTimeout(()=>{ URL.revokeObjectURL(a.href); a.remove(); }, 2000);
+    toast('Descargado: abrilo con doble clic en la PC de StarPOS', 'ok');
+  }catch(e){ toast('No se pudo descargar: ' + e.message, 'err'); }
+}
+/* ---------- PRECIOS PC (StarPOS) vs APP ----------
+   starpos_precios (supabase-migration-precios-pc-vs-app.sql) la llena el
+   sincronizador de la PC cada 15 min con el precio de StarPOS de cada
+   producto que ya está en la tienda. Acá se compara con el de la App. */
+let pcPrecios = null, pcPreciosLoading = false, pcPreciosError = null;
+async function apiLoadPreciosPC(){
+  pcPreciosLoading = true; pcPreciosError = null; render();
+  try{
+    let all = [], off = 0;
+    while(true){
+      const page = await adminFetch('/starpos_precios?select=*&order=starpos_id&limit=1000&offset=' + off, 'GET') || [];
+      all = all.concat(page);
+      if(page.length < 1000) break;
+      off += 1000;
+    }
+    pcPrecios = all;
+  }catch(e){
+    pcPreciosError = /starpos_precios/.test(e.message||'') ? 'Falta correr supabase-migration-precios-pc-vs-app.sql en Supabase.' : (e.message||'Error');
+  }
+  pcPreciosLoading = false; render();
+}
+function preciosPCCambioReciente(r){
+  return r.precio_antes != null && Date.now() - new Date(r.updated_at).getTime() < 7*86400000;
+}
+function preciosPCFilas(){
+  const ahora = Date.now();
+  return (pcPrecios||[])
+    // los que hace más de 2 días que la PC no manda (borrados o desactivados en StarPOS) no cuentan
+    .filter(r => ahora - new Date(r.visto).getTime() < 2*86400000)
+    .map(r => {
+      const p = state.products.find(x => x._apiId === Number(r.product_id));
+      if(!p) return null;
+      const field = p.sellByWeight ? 'pricePerKg' : 'price';
+      const app = Number(p[field]) || 0, pc = Number(r.precio) || 0;
+      const dif = Math.round((app - pc) * 100) / 100;
+      return {r, p, field, app, pc, dif, pct: pc > 0 ? dif / pc : (app > 0 ? 1 : 0)};
+    }).filter(Boolean);
+}
+function preciosPCFiltradas(){
+  const f = state.pcPreciosFiltro || 'distintos';
+  const q = (state.pcPreciosQ || '').trim().toLowerCase();
+  return preciosPCFilas().filter(x => {
+    if(f === 'distintos' && Math.abs(x.dif) < 0.01) return false;
+    if(f === 'iguales' && Math.abs(x.dif) >= 0.01) return false;
+    if(f === 'cambiados' && !preciosPCCambioReciente(x.r)) return false;
+    if(q && !((x.p.name||'').toLowerCase().includes(q) || (x.r.nombre||'').toLowerCase().includes(q) || String(x.r.barcode||'').includes(q))) return false;
+    return true;
+  }).sort((a, b) => Math.abs(b.pct) - Math.abs(a.pct));
+}
+function renderAdminPreciosPC(){
+  if(pcPrecios === null && !pcPreciosLoading && !pcPreciosError) apiLoadPreciosPC();
+  if(pcPreciosError) return `<div class="empty-state"><p>${escapeHtml(pcPreciosError)}</p><button class="btn-secondary" onclick="apiLoadPreciosPC()">Reintentar</button></div>`;
+  if(!pcPrecios) return `<div class="empty-state"><p>Cargando precios de la PC…</p></div>`;
+  const filas = preciosPCFilas();
+  const nDist = filas.filter(x => Math.abs(x.dif) >= 0.01).length;
+  const nCamb = filas.filter(x => preciosPCCambioReciente(x.r)).length;
+  const f = state.pcPreciosFiltro || 'distintos';
+  const chip = (k, label) => `<button class="chip ${f===k?'active':''}" onclick="state.pcPreciosFiltro='${k}'; render()">${label}</button>`;
+  return `
+    <div style="padding:10px 16px 4px; position:sticky; top:0; z-index:10; background:var(--navy2);">
+      <p style="font-size:12px; color:rgba(255,255,255,0.6); margin-bottom:8px;">Precio de cada producto en la PC del local (StarPOS) comparado con el de la App. Se actualiza solo cada 15 minutos con lo que cargás en la PC. Tocá <b>Usar precio PC</b> para pasarlo a la App.</p>
+      ${renderSpSyncBox()}
+      ${!filas.length ? `<p style="font-size:12.5px; color:var(--warn); margin-bottom:8px;">Todavía no llegaron precios: aparecen en la próxima sincronización de la PC (hasta 15 minutos). Después tocá ↻ Actualizar.</p>` : ''}
+      <div style="display:flex; align-items:center; gap:8px; background:var(--glass); border:1px solid var(--glass-bd); border-radius:12px; padding:0 12px;">
+        <input type="search" placeholder="Buscar por nombre o código…" value="${escapeHtml(state.pcPreciosQ||'')}"
+          oninput="state.pcPreciosQ=this.value; renderAdminPreciosPCInPlace()"
+          style="flex:1; background:none; border:none; outline:none; color:var(--white); font-size:14px; padding:10px 0;">
+      </div>
+      <div style="display:flex; gap:6px; flex-wrap:wrap; margin-top:8px; align-items:center;">
+        ${chip('distintos','Precio distinto ('+nDist+')')}${chip('cambiados','Cambiados en la PC esta semana ('+nCamb+')')}${chip('iguales','Iguales ('+(filas.length-nDist)+')')}${chip('todos','Todos ('+filas.length+')')}
+        <button class="btn-secondary" style="padding:6px 12px; font-size:12px; width:auto;" onclick="pcPrecios=null; spSync=null; apiLoadPreciosPC()">${pcPreciosLoading ? 'Actualizando…' : '↻ Actualizar'}</button>
+      </div>
+    </div>
+    <div id="preciospc-list">${renderPreciosPCLista(preciosPCFiltradas())}</div>`;
+}
+function renderAdminPreciosPCInPlace(){
+  const el = document.getElementById('preciospc-list');
+  if(el) el.innerHTML = renderPreciosPCLista(preciosPCFiltradas());
+}
+function renderPreciosPCLista(lista){
+  if(!lista.length) return `<div class="empty-state"><p>No hay productos con ese filtro.</p></div>`;
+  const fmtD = iso => { const d = new Date(iso), z = n => String(n).padStart(2,'0'); return z(d.getDate())+'/'+z(d.getMonth()+1)+'/'+d.getFullYear(); };
+  return `<p style="padding:6px 16px; font-size:11.5px; color:rgba(255,255,255,0.5);">${lista.length} productos${lista.length>200?' — se muestran los primeros 200, buscá para encontrar el resto':''}</p>` +
+    lista.slice(0,200).map(x => {
+      const kg = x.field === 'pricePerKg' ? '/kg' : '';
+      const igual = Math.abs(x.dif) < 0.01;
+      const color = igual ? 'rgba(255,255,255,0.6)' : (x.dif > 0 ? 'var(--warn)' : 'var(--danger)');
+      const pctTxt = x.pc > 0 ? ' (' + (x.pct > 0 ? '+' : '') + (x.pct*100).toLocaleString('es-AR',{minimumFractionDigits:1, maximumFractionDigits:1}) + '%)' : '';
+      const txtDif = igual ? 'Mismo precio' : (x.dif > 0 ? 'App más cara por ' : 'App más barata por ') + money2(Math.abs(x.dif)) + pctTxt;
+      const cambio = x.r.precio_antes != null ? `<p>En la PC cambió de ${money2(x.r.precio_antes)} a ${money2(x.r.precio)} el ${fmtD(x.r.updated_at)}</p>` : '';
+      const pesoRaro = !!x.r.por_peso !== !!x.p.sellByWeight ? `<p style="color:var(--warn);">Ojo: en ${x.r.por_peso ? 'la PC' : 'la App'} se vende por kilo y en ${x.r.por_peso ? 'la App' : 'la PC'} no; el precio puede no ser comparable.</p>` : '';
+      return `<div class="prod-row-v2">
+        <div class="prod-row-v2-top"><div class="prod-row-v2-info" style="margin-left:0;">
+          <h4>${escapeHtml(x.p.name)}${x.p.hidden ? ' <span class="badge-oculto">OCULTO</span>' : ''}</h4>
+          <p>En la PC: ${escapeHtml(x.r.nombre||'')} · ${x.r.por_peso ? 'PLU ' + (x.r.plu||'—') : 'Código ' + escapeHtml(x.r.barcode||'—')}</p>
+          <p><b>App ${money2(x.app)}${kg}</b> · <b>PC ${money2(x.pc)}${kg}</b>${x.r.precio_cantidad ? ' (llevando ' + x.r.cantidad_min + ': ' + money2(x.r.precio_cantidad) + ' c/u)' : ''}</p>
+          <p style="color:${color}; font-weight:600;">${txtDif}</p>
+          ${cambio}${pesoRaro}
+        </div></div>
+        ${igual ? '' : `<div class="prod-row-v2-bottom" style="justify-content:flex-end; gap:8px;">
+          <button class="btn-primary" style="padding:8px 14px; font-size:12.5px;" onclick="preciosPCUsar('${escapeHtml(x.r.starpos_id)}')">Usar precio PC (${money2(x.pc)})</button>
+        </div>`}
+      </div>`;
+    }).join('');
+}
+function preciosPCUsar(starposId){
+  const x = preciosPCFilas().find(y => y.r.starpos_id === starposId); if(!x) return;
+  if(!confirm(`¿Cambiar el precio de "${x.p.name}" en la App de ${money2(x.app)} a ${money2(x.pc)}?`)) return;
+  updateProductPriceInline(x.p.id, x.field, String(x.pc));
+  renderAdminPreciosPCInPlace();
+}
+function renderAdminCatalogoLocal(){
+  if(catLocal === null && !catLocalLoading && !catLocalError) apiLoadCatalogoLocal();
+  if(catLocalError) return `<div class="empty-state"><p>${escapeHtml(catLocalError)}</p><button class="btn-secondary" onclick="apiLoadCatalogoLocal()">Reintentar</button></div>`;
+  if(!catLocal) return `<div class="empty-state"><p>Cargando catálogo del local…</p></div>`;
+  const f = state.catLocalFiltro || 'pendientes';
+  const cats = [...new Set(catLocal.map(l=>l.categoria).filter(Boolean))].sort((a,b)=>a.localeCompare(b,'es'));
+  const pend = catLocal.filter(l=>!l.product_id).length;
+  const lista = catLocalFiltrados();
+  const chip = (k, label) => `<button class="chip ${f===k?'active':''}" onclick="state.catLocalFiltro='${k}'; render()">${label}</button>`;
+  const fmtF = d => d ? d.slice(8,10)+'/'+d.slice(5,7)+'/'+d.slice(0,4) : '—';
+  return `
+    <div style="padding:10px 16px 4px; position:sticky; top:0; z-index:10; background:var(--navy2);">
+      <p style="font-size:12px; color:rgba(255,255,255,0.6); margin-bottom:8px;">Productos de StarPOS que no están en la tienda (${pend} pendientes). La Caja ya los cobra; tocá <b>Activar</b> para pasarlos a la tienda.</p>
+      ${renderSpSyncBox()}
+      <div style="display:flex; align-items:center; gap:8px; background:var(--glass); border:1px solid var(--glass-bd); border-radius:12px; padding:0 12px;">
+        <input type="search" placeholder="Buscar por nombre, marca o código…" value="${escapeHtml(state.catLocalQ||'')}"
+          oninput="state.catLocalQ=this.value; renderAdminCatalogoLocalInPlace()"
+          style="flex:1; background:none; border:none; outline:none; color:var(--white); font-size:14px; padding:10px 0;">
+      </div>
+      <select onchange="state.catLocalCat=this.value||null; render()" style="width:100%; margin-top:8px; padding:9px 10px; border-radius:10px; background:var(--glass); border:1px solid var(--glass-bd); color:var(--white); font-size:12.5px;">
+        <option value="" style="background:var(--navy2);">Todas las categorías</option>
+        ${cats.map(c=>`<option value="${escapeHtml(c)}" style="background:var(--navy2);" ${state.catLocalCat===c?'selected':''}>${escapeHtml(c)}</option>`).join('')}
+      </select>
+      <div style="display:flex; gap:6px; flex-wrap:wrap; margin-top:8px;">
+        ${chip('pendientes','Pendientes')}${chip('vendidos','Vendidos en 90 días')}${chip('duplicados','Posible duplicado')}${chip('activados','Ya activados')}${chip('fueracaja','Quitados de la caja')}
+      </div>
+    </div>
+    <div id="catlocal-list">${renderCatalogoLocalLista(lista, fmtF)}</div>`;
+}
+function renderAdminCatalogoLocalInPlace(){
+  const el = document.getElementById('catlocal-list');
+  const fmtF = d => d ? d.slice(8,10)+'/'+d.slice(5,7)+'/'+d.slice(0,4) : '—';
+  if(el) el.innerHTML = renderCatalogoLocalLista(catLocalFiltrados(), fmtF);
+}
+function renderCatalogoLocalLista(lista, fmtF){
+  if(!lista.length) return `<div class="empty-state"><p>No hay productos con ese filtro.</p></div>`;
+  const dupName = id => { const p = state.products.find(x=>x._apiId===id); return p ? p.name : null; };
+  return `<p style="padding:6px 16px; font-size:11.5px; color:rgba(255,255,255,0.5);">${lista.length} productos${lista.length>150?' — se muestran los primeros 150, buscá para encontrar el resto':''}</p>` +
+    lista.slice(0,150).map(l=>{
+      const dup = l.posible_duplicado ? dupName(l.posible_duplicado) : null;
+      return `<div class="prod-row-v2 ${l.oculto_caja?'is-hidden':''}">
+        <div class="prod-row-v2-top"><div class="prod-row-v2-info" style="margin-left:0;">
+          <h4>${escapeHtml(l.nombre)}${l.por_peso?' <span style="font-size:9px; color:#6db8e8;">(x kg)</span>':''}${l.product_id?' <span class="badge-oculto" style="background:#1e7e34; color:#fff;">EN LA TIENDA</span>':''}</h4>
+          <p>${escapeHtml(l.categoria||'')}${l.marca?' · '+escapeHtml(l.marca):''} · ${l.por_peso?'PLU '+(l.plu||'—'):'Código '+escapeHtml(l.barcode||'—')}${l.packs&&l.packs.length?' · bulto x'+l.packs[0].cantidad:''}</p>
+          <p>Precio ${money2(l.precio)}${l.por_peso?'/kg':''}${l.precio_cantidad?' · llevando '+l.cantidad_min+': '+money2(l.precio_cantidad)+' c/u':''} · Última venta: ${fmtF(l.ultima_venta)}</p>
+          ${dup ? `<p style="color:var(--warn);">Puede ser el mismo que "${escapeHtml(dup)}" de la tienda (que no tiene código).</p>` : ''}
+        </div></div>
+        <div class="prod-row-v2-bottom" style="justify-content:flex-end; gap:8px;">
+          ${l.product_id ? '' : `<button class="icon-btn" style="width:auto; padding:0 10px; font-size:12px; ${l.oculto_caja?'color:var(--danger); border-color:var(--danger);':''}" title="${l.oculto_caja?'No se puede cobrar en la Caja — tocá para volver a habilitarlo':'Se cobra en la Caja — tocá para sacarlo'}" onclick="catLocalToggleCaja(${l.id})">${l.oculto_caja?'Fuera de la caja':'En la caja'}</button>
+          <button class="btn-primary" style="padding:8px 14px; font-size:12.5px;" onclick="catLocalActivar(${l.id})">Activar en la tienda</button>`}
+        </div>
+      </div>`;
+    }).join('');
+}
+async function catLocalToggleCaja(id){
+  const l = (catLocal||[]).find(x=>x.id===id); if(!l) return;
+  const nuevo = !l.oculto_caja;
+  try{
+    await adminFetch('/catalogo_local?id=eq.'+id, 'PATCH', {oculto_caja: nuevo, updated_at: new Date().toISOString()});
+    l.oculto_caja = nuevo;
+    renderAdminCatalogoLocalInPlace();
+    toast(nuevo ? 'Ya no se puede cobrar en la Caja' : 'Se puede cobrar en la Caja otra vez', 'ok');
+  }catch(e){ toast('No se pudo guardar: '+e.message, 'err'); }
+}
+// Abre el alta de producto con los datos de StarPOS cargados: falta elegir
+// sección, categoría y foto. Al guardar se vincula (ver saveProductModal).
+function catLocalActivar(id){
+  const l = (catLocal||[]).find(x=>x.id===id); if(!l) return;
+  openProductModal(null);
+  _catLocalActivando = l;
+  const set = (elId, v) => { const el = document.getElementById(elId); if(el && v != null) el.value = v; };
+  set('pm-name', l.nombre);
+  if(l.por_peso){
+    const t = document.getElementById('pm-sellbyweight-toggle');
+    if(t && !t.classList.contains('on')) toggleSellByWeightField();
+    set('pm-price-per-kg', Number(l.precio)||'');
+    set('pm-plu', l.plu||'');
+  }else{
+    set('pm-price', Number(l.precio)||'');
+    set('pm-barcode', l.barcode||'');
+    if(l.packs && l.packs.length){ set('pm-display-barcode', l.packs[0].codigo); set('pm-display-qty', l.packs[0].cantidad); }
+  }
+  toast('Elegí sección, categoría y foto, y guardá', 'ok');
+}
+async function catLocalMarcarActivado(l, product){
+  if(!product._apiId){ toast('El producto no se guardó en la base: el catálogo del local no se actualizó', 'err'); return; }
+  try{
+    await adminFetch('/catalogo_local?id=eq.'+l.id, 'PATCH', {product_id: product._apiId, updated_at: new Date().toISOString()});
+    l.product_id = product._apiId;
+    if(state.adminTab === 'catalogolocal') render();
+  }catch(e){ toast('El producto se creó, pero no se pudo marcar en el catálogo del local: '+e.message, 'err'); }
+}
+
 /* ---------- PRODUCT MODAL (create/edit) ---------- */
 // Recalcula el precio mayorista (unidad o por kilo, según suffix) a partir
 // del precio normal y el % de descuento cargado, cada vez que se toca
@@ -9953,6 +10276,7 @@ function toggleSuperOfferField(){
 function closeProductModal(){
   const el = document.getElementById("product-modal-overlay");
   if(el) el.remove();
+  _catLocalActivando = null;
 }
 // Autocompleta nombre y precio si el código de barras ya está en
 // barcodeCatalog — pero solo al dar de alta un producto nuevo (no al
@@ -10093,6 +10417,11 @@ function saveProductModal(id){
   const alConteo = !id && !itemConteo && stock > 0 && !!document.getElementById('pm-to-count')?.checked;
   saveState();
   const guardado = apiSaveProduct(savedProduct);
+  if(!id && _catLocalActivando){
+    const l = _catLocalActivando;
+    guardado.then(()=>catLocalMarcarActivado(l, savedProduct));
+  }
+  _catLocalActivando = null;
   if(barcode) upsertBarcodeCatalog(barcode, name, price);
   if(itemConteo) guardado.then(()=>linkStockCountItem(itemConteo, savedProduct));
   if(alConteo) addNewProductToStockCount(savedProduct);
@@ -12398,7 +12727,7 @@ function renderAdminConfig(){
     </div>
     <div class="form-group"><label>Dígitos del PLU</label>
       <select onchange="updateBalanza('pluDigitos', Number(this.value))">
-        ${[4,5,6].map(n=>`<option value="${n}" ${balanzaCfgAdmin().pluDigitos===n?'selected':''}>${n}</option>`).join('')}
+        ${[3,4,5,6].map(n=>`<option value="${n}" ${balanzaCfgAdmin().pluDigitos===n?'selected':''}>${n}</option>`).join('')}
       </select>
     </div>
     <div class="form-group"><label>La etiqueta trae</label>
@@ -12504,7 +12833,7 @@ function saveCajero(idx){
 }
 // Formato de la etiqueta de la balanza. Lo lee caja-venta.html (parseBalanza)
 // desde pos_config.balanza — mantener los mismos defaults en los dos lados.
-function balanzaCfgAdmin(){ return Object.assign({pluDigitos:5, modo:'importe', decimales:0}, state.posConfig.balanza||{}); }
+function balanzaCfgAdmin(){ return Object.assign({pluDigitos:3, modo:'importe', decimales:2}, state.posConfig.balanza||{}); }
 function updateBalanza(key, val){
   state.posConfig.balanza = Object.assign(balanzaCfgAdmin(), {[key]: val});
   saveState();
@@ -12520,7 +12849,13 @@ function probarEtiquetaBalanza(raw){
   const cfg = balanzaCfgAdmin();
   const plu = Number(code.slice(2, 2+cfg.pluDigitos));
   const valor = Number(code.slice(2+cfg.pluDigitos, 12));
-  const p = state.products.find(x=>x.sellByWeight && Number(x.plu)===plu);
+  let p = state.products.find(x=>x.sellByWeight && Number(x.plu)===plu);
+  if(!p && catLocal){
+    // También busca en el catálogo del local (productos traídos de StarPOS).
+    const l = catLocal.find(x=>!x.product_id && !x.oculto_caja && Number(x.plu)===plu);
+    if(l) p = {name:l.nombre + ' (catálogo del local)', pricePerKg: l.por_peso ? Number(l.precio) : 0};
+  }
+  if(!p && catLocal === null && !catLocalLoading) apiLoadCatalogoLocal();
   const nombre = p ? `"${p.name}"` : 'ningún producto (falta cargar ese PLU)';
   if(cfg.modo==='peso'){
     const kg = valor/1000;
