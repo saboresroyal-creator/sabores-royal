@@ -9837,15 +9837,21 @@ function preciosPCFilas(){
       const p = state.products.find(x => x._apiId === Number(r.product_id));
       if(!p) return null;
       const field = p.sellByWeight ? 'pricePerKg' : 'price';
-      const app = Number(p[field]) || 0, pc = Number(r.precio) || 0;
-      const dif = Math.round((app - pc) * 100) / 100;
-      return {r, p, field, app, pc, dif, pct: pc > 0 ? dif / pc : (app > 0 ? 1 : 0)};
+      // Si coincidió por el código de la CAJA cerrada, en StarPOS es el precio de la caja:
+      // se compara contra precio unitario x cantidad de la caja.
+      const caja = r.via === 'caja' ? (Number(p.displayQty) || 0) : 0;
+      const sinCant = r.via === 'caja' && !caja;
+      const app = Math.round((Number(p[field]) || 0) * (caja || 1) * 100) / 100, pc = Number(r.precio) || 0;
+      const dif = sinCant ? 0 : Math.round((app - pc) * 100) / 100;
+      return {r, p, field, caja, sinCant, app, pc, dif, pct: sinCant ? 0 : (pc > 0 ? dif / pc : (app > 0 ? 1 : 0))};
     }).filter(Boolean);
 }
 function preciosPCFiltradas(){
   const f = state.pcPreciosFiltro || 'distintos';
   const q = (state.pcPreciosQ || '').trim().toLowerCase();
   return preciosPCFilas().filter(x => {
+    if(f === 'descartados') { if(!x.r.ignorado) return false; }
+    else if(x.r.ignorado) return false;
     if(f === 'distintos' && Math.abs(x.dif) < 0.01) return false;
     if(f === 'iguales' && Math.abs(x.dif) >= 0.01) return false;
     if(f === 'cambiados' && !preciosPCCambioReciente(x.r)) return false;
@@ -9857,7 +9863,9 @@ function renderAdminPreciosPC(){
   if(pcPrecios === null && !pcPreciosLoading && !pcPreciosError) apiLoadPreciosPC();
   if(pcPreciosError) return `<div class="empty-state"><p>${escapeHtml(pcPreciosError)}</p><button class="btn-secondary" onclick="apiLoadPreciosPC()">Reintentar</button></div>`;
   if(!pcPrecios) return `<div class="empty-state"><p>Cargando precios de la PC…</p></div>`;
-  const filas = preciosPCFilas();
+  const todas = preciosPCFilas();
+  const filas = todas.filter(x => !x.r.ignorado);
+  const nDesc = todas.length - filas.length;
   const nDist = filas.filter(x => Math.abs(x.dif) >= 0.01).length;
   const nCamb = filas.filter(x => preciosPCCambioReciente(x.r)).length;
   const f = state.pcPreciosFiltro || 'distintos';
@@ -9873,7 +9881,7 @@ function renderAdminPreciosPC(){
           style="flex:1; background:none; border:none; outline:none; color:var(--white); font-size:14px; padding:10px 0;">
       </div>
       <div style="display:flex; gap:6px; flex-wrap:wrap; margin-top:8px; align-items:center;">
-        ${chip('distintos','Precio distinto ('+nDist+')')}${chip('cambiados','Cambiados en la PC esta semana ('+nCamb+')')}${chip('iguales','Iguales ('+(filas.length-nDist)+')')}${chip('todos','Todos ('+filas.length+')')}
+        ${chip('distintos','Precio distinto ('+nDist+')')}${chip('cambiados','Cambiados en la PC esta semana ('+nCamb+')')}${chip('iguales','Iguales ('+(filas.length-nDist)+')')}${chip('todos','Todos ('+filas.length+')')}${nDesc ? chip('descartados','No son el mismo ('+nDesc+')') : ''}
         <button class="btn-secondary" style="padding:6px 12px; font-size:12px; width:auto;" onclick="pcPrecios=null; spSync=null; apiLoadPreciosPC()">${pcPreciosLoading ? 'Actualizando…' : '↻ Actualizar'}</button>
       </div>
     </div>
@@ -9888,7 +9896,9 @@ function renderPreciosPCLista(lista){
   const fmtD = iso => { const d = new Date(iso), z = n => String(n).padStart(2,'0'); return z(d.getDate())+'/'+z(d.getMonth()+1)+'/'+d.getFullYear(); };
   return `<p style="padding:6px 16px; font-size:11.5px; color:rgba(255,255,255,0.5);">${lista.length} productos${lista.length>200?' — se muestran los primeros 200, buscá para encontrar el resto':''}</p>` +
     lista.slice(0,200).map(x => {
-      const kg = x.field === 'pricePerKg' ? '/kg' : '';
+      const kg = x.field === 'pricePerKg' ? '/kg' : (x.caja ? ' la caja x' + x.caja : '');
+      const porque = x.r.via === 'caja' ? 'el código de la caja cerrada ' + escapeHtml(x.r.barcode||'')
+        : x.r.via === 'plu' ? 'el PLU ' + (x.r.plu||'') : 'el código ' + escapeHtml(x.r.barcode||'');
       const igual = Math.abs(x.dif) < 0.01;
       const color = igual ? 'rgba(255,255,255,0.6)' : (x.dif > 0 ? 'var(--warn)' : 'var(--danger)');
       const pctTxt = x.pc > 0 ? ' (' + (x.pct > 0 ? '+' : '') + (x.pct*100).toLocaleString('es-AR',{minimumFractionDigits:1, maximumFractionDigits:1}) + '%)' : '';
@@ -9898,22 +9908,42 @@ function renderPreciosPCLista(lista){
       return `<div class="prod-row-v2">
         <div class="prod-row-v2-top"><div class="prod-row-v2-info" style="margin-left:0;">
           <h4>${escapeHtml(x.p.name)}${x.p.hidden ? ' <span class="badge-oculto">OCULTO</span>' : ''}</h4>
-          <p>En la PC: ${escapeHtml(x.r.nombre||'')} · ${x.r.por_peso ? 'PLU ' + (x.r.plu||'—') : 'Código ' + escapeHtml(x.r.barcode||'—')}</p>
+          <p>En la PC: <b>${escapeHtml(x.r.nombre||'')}</b></p>
+          <p style="opacity:.7;">Los junté porque tienen ${porque}${x.r.via ? '' : ' (o el mismo PLU)'}. Si no son el mismo producto, uno de los dos tiene mal el código.</p>
+          ${x.sinCant ? `<p style="color:var(--warn);">En la App ese código es el de la caja cerrada, pero no tiene cargada la cantidad de la caja: no se puede comparar.</p>` : ''}
           <p><b>App ${money2(x.app)}${kg}</b> · <b>PC ${money2(x.pc)}${kg}</b>${x.r.precio_cantidad ? ' (llevando ' + x.r.cantidad_min + ': ' + money2(x.r.precio_cantidad) + ' c/u)' : ''}</p>
           <p style="color:${color}; font-weight:600;">${txtDif}</p>
           ${cambio}${pesoRaro}
         </div></div>
-        ${igual ? '' : `<div class="prod-row-v2-bottom" style="justify-content:flex-end; gap:8px;">
-          <button class="btn-primary" style="padding:8px 14px; font-size:12.5px;" onclick="preciosPCUsar('${escapeHtml(x.r.starpos_id)}')">Usar precio PC (${money2(x.pc)})</button>
-        </div>`}
+        <div class="prod-row-v2-bottom" style="justify-content:flex-end; gap:8px; flex-wrap:wrap;">
+          ${x.r.ignorado
+            ? `<button class="btn-secondary" style="padding:8px 14px; font-size:12.5px; width:auto;" onclick="preciosPCDescartar('${escapeHtml(x.r.starpos_id)}', false)">Sí es el mismo: volver a comparar</button>`
+            : `<button class="btn-secondary" style="padding:8px 14px; font-size:12.5px; width:auto;" onclick="preciosPCDescartar('${escapeHtml(x.r.starpos_id)}', true)">No es el mismo producto</button>
+               ${igual || x.sinCant ? '' : `<button class="btn-primary" style="padding:8px 14px; font-size:12.5px;" onclick="preciosPCUsar('${escapeHtml(x.r.starpos_id)}')">Usar precio PC (${money2(x.caja ? Math.round(x.pc / x.caja * 100) / 100 : x.pc)}${x.caja ? ' c/u' : ''})</button>`}`}
+        </div>
       </div>`;
     }).join('');
 }
 function preciosPCUsar(starposId){
-  const x = preciosPCFilas().find(y => y.r.starpos_id === starposId); if(!x) return;
-  if(!confirm(`¿Cambiar el precio de "${x.p.name}" en la App de ${money2(x.app)} a ${money2(x.pc)}?`)) return;
-  updateProductPriceInline(x.p.id, x.field, String(x.pc));
+  const x = preciosPCFilas().find(y => y.r.starpos_id === starposId); if(!x || x.sinCant) return;
+  // Si en la PC es el precio de la caja, a la App va el precio por unidad.
+  const nuevo = x.caja ? Math.round(x.pc / x.caja * 100) / 100 : x.pc;
+  const actual = Number(x.p[x.field]) || 0;
+  const txtCaja = x.caja ? ` (en la PC la caja x${x.caja} sale ${money2(x.pc)})` : '';
+  if(!confirm(`¿Cambiar el precio de "${x.p.name}" en la App de ${money2(actual)} a ${money2(nuevo)}${txtCaja}?`)) return;
+  updateProductPriceInline(x.p.id, x.field, String(nuevo));
   renderAdminPreciosPCInPlace();
+}
+async function preciosPCDescartar(starposId, descartar){
+  const r = (pcPrecios||[]).find(y => y.starpos_id === starposId); if(!r) return;
+  try{
+    await adminFetch('/starpos_precios?starpos_id=eq.' + encodeURIComponent(starposId), 'PATCH', {ignorado: descartar});
+    r.ignorado = descartar;
+    render();
+    toast(descartar ? 'Listo: ya no se compara. Revisá el código de barras en la App o en StarPOS.' : 'Se vuelve a comparar', 'ok');
+  }catch(e){
+    toast(/ignorado/.test(e.message||'') ? 'Falta correr supabase-migration-precios-pc-v2.sql en Supabase.' : 'No se pudo guardar: ' + e.message, 'err');
+  }
 }
 function renderAdminCatalogoLocal(){
   if(catLocal === null && !catLocalLoading && !catLocalError) apiLoadCatalogoLocal();
