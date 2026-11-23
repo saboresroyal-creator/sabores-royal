@@ -4547,6 +4547,7 @@ function renderAdmin(){
     {key:"productos",     label:"Productos", badge:lowStockCount},
     {key:"catalogolocal", label:"Catálogo del local"},
     {key:"preciospc",     label:"Precios PC vs App"},
+    {key:"starpos",       label:"StarPOS"},
     {key:"conteo",        label:"Conteo de Stock"},
     {key:"categorias",    label:"Categorías"},
     {key:"clientes",      label:"Clientes", badge:newClientsCount},
@@ -4644,6 +4645,7 @@ function renderAdmin(){
       ` : ""}
       ${tab==="catalogolocal" ? renderAdminCatalogoLocal() : ""}
       ${tab==="preciospc" ? renderAdminPreciosPC() : ""}
+      ${tab==="starpos" ? renderAdminStarpos() : ""}
       ${tab==="conteo" ? renderAdminConteo() : ""}
       ${tab==="categorias" ? renderAdminCategorias() : ""}
       ${tab==="clientes" ? renderAdminClientes() : ""}
@@ -9804,6 +9806,288 @@ async function descargarSincronizador(){
     toast('Descargado: abrilo con doble clic en la PC de StarPOS', 'ok');
   }catch(e){ toast('No se pudo descargar: ' + e.message, 'err'); }
 }
+/* ---------- STARPOS: ventas y datos del local en vivo ----------
+   Lo manda el sincronizador de la PC del local cada 5 minutos
+   (supabase-migration-starpos-datos.sql). Solo lectura. Las fechas son
+   la hora del local tal como las guarda StarPOS. */
+const SP_CAJAS = {POS001:'Caja mañana', POS002:'Caja tarde'};
+const spCaja = c => SP_CAJAS[c] || c || 'Sin caja';
+const spCajero = n => !n ? '—' : (/^\d+$/.test(String(n)) ? 'Cajero ' + n : String(n));
+const spCajeros = s => (s||'').split(',').map(x=>x.trim()).filter(Boolean).map(spCajero).join(', ') || '—';
+const spFH = ts => { if(!ts) return '—'; const s = String(ts); return s.slice(8,10)+'/'+s.slice(5,7)+'/'+s.slice(0,4)+' '+s.slice(11,16); };
+const spF = d => { const s = String(d||''); return s ? s.slice(8,10)+'/'+s.slice(5,7)+'/'+s.slice(0,4) : '—'; };
+const spISO = d => { const z = n => String(n).padStart(2,'0'); return d.getFullYear()+'-'+z(d.getMonth()+1)+'-'+z(d.getDate()); };
+const spPct = (a, b) => b ? ((a - b) / b * 100) : null;
+const spNum = (n, dec) => Number(n||0).toLocaleString('es-AR', {minimumFractionDigits:dec||0, maximumFractionDigits:dec||0});
+const SP_PERIODOS = [['hoy','Hoy'],['ayer','Ayer'],['7d','7 días'],['30d','30 días'],['mes','Este mes'],['mesant','Mes pasado']];
+const SP_VISTAS = [['ventas','Ventas'],['turnos','Turnos'],['productos','Productos'],['tickets','Tickets'],['anulaciones','Anulaciones'],['retiros','Retiros'],['stock','Stock']];
+let sp = {vista:'ventas', periodo:'hoy', caja:'', datos:null, clave:'', cargando:false, error:null, abierto:null, lineas:{}, stockQ:'', stockFiltro:'', prodQ:'', actualizado:null};
+let _spTimer = null;
+
+function spRango(p){
+  const hoy = new Date(); hoy.setHours(0,0,0,0);
+  const mas = (d, n) => { const x = new Date(d); x.setDate(x.getDate() + n); return x; };
+  let desde, hasta;                      // hasta: sin incluir
+  if(p === 'hoy'){ desde = hoy; hasta = mas(hoy, 1); }
+  else if(p === 'ayer'){ desde = mas(hoy, -1); hasta = hoy; }
+  else if(p === '7d'){ desde = mas(hoy, -6); hasta = mas(hoy, 1); }
+  else if(p === '30d'){ desde = mas(hoy, -29); hasta = mas(hoy, 1); }
+  else if(p === 'mes'){ desde = new Date(hoy.getFullYear(), hoy.getMonth(), 1); hasta = mas(hoy, 1); }
+  else { desde = new Date(hoy.getFullYear(), hoy.getMonth() - 1, 1); hasta = new Date(hoy.getFullYear(), hoy.getMonth(), 1); }
+  const dias = Math.round((hasta - desde) / 864e5);
+  let pd, ph, txt;
+  if(p === 'hoy' || p === 'ayer'){ pd = mas(desde, -7); ph = mas(hasta, -7); txt = 'el mismo día de la semana pasada'; }
+  else if(p === 'mes' || p === 'mesant'){ pd = new Date(desde.getFullYear(), desde.getMonth() - 1, 1); ph = mas(pd, dias); txt = p === 'mes' ? 'los mismos días del mes pasado' : 'el mes anterior'; }
+  else { pd = mas(desde, -dias); ph = desde; txt = 'los ' + dias + ' días anteriores'; }
+  if(p === 'hoy'){ // hoy va por la mitad: se compara contra la semana pasada hasta la misma hora
+    const ahora = new Date(); ph = new Date(pd); ph.setHours(ahora.getHours(), ahora.getMinutes(), 0, 0);
+  }
+  return {desde: spISO(desde), hasta: spISO(hasta), pdesde: spISO(pd), phasta: spISO(ph), phastaHora: p === 'hoy' ? ph.getHours() : null, txt, dias};
+}
+
+async function spTraerTodo(path){
+  let out = [];
+  for(let off = 0; ; off += 1000){
+    const page = await adminFetch(path + (path.includes('?') ? '&' : '?') + 'limit=1000&offset=' + off, 'GET') || [];
+    out = out.concat(page);
+    if(page.length < 1000) return out;
+  }
+}
+
+async function spCargar(forzar){
+  const r = spRango(sp.periodo);
+  const clave = sp.vista + '|' + sp.periodo + '|' + (sp.vista === 'stock' ? sp.stockQ + sp.stockFiltro : '') + (sp.vista === 'productos' ? sp.prodQ : '');
+  if(!forzar && sp.clave === clave && sp.datos) return;
+  sp.cargando = true; sp.error = null;
+  if(sp.clave !== clave){ sp.datos = null; sp.abierto = null; }
+  sp.clave = clave;
+  spRender();
+  try{
+    let d = {};
+    if(sp.vista === 'ventas'){
+      const [horas, medios, ult] = await Promise.all([
+        spTraerTodo('/starpos_ventas_hora?select=fecha,hora,caja,total,tickets&fecha=gte.' + r.pdesde + '&fecha=lt.' + r.hasta),
+        spTraerTodo('/starpos_ventas_medio?select=fecha,caja,medio,total,cant&fecha=gte.' + r.desde + '&fecha=lt.' + r.hasta),
+        adminFetch('/starpos_tickets?select=fecha&order=fecha.desc&limit=1', 'GET'),
+      ]);
+      d = {horas, medios, ultimo: (ult||[])[0] ? ult[0].fecha : null};
+    }else if(sp.vista === 'turnos'){
+      const turnos = await spTraerTodo('/starpos_turnos?select=*&inicio=gte.' + r.desde + '&inicio=lt.' + r.hasta + '&order=inicio.desc');
+      const ids = turnos.map(t => t.money);
+      let medios = [];
+      for(let i = 0; i < ids.length; i += 60){
+        medios = medios.concat(await adminFetch('/starpos_turno_medios?select=*&money=in.(' + ids.slice(i, i + 60).join(',') + ')', 'GET') || []);
+      }
+      d = {turnos, medios};
+    }else if(sp.vista === 'productos'){
+      d = {prods: await adminFetch('/rpc/starpos_top_productos', 'POST', {p_desde: r.desde, p_hasta: r.hasta, p_q: sp.prodQ || null}) || []};
+    }else if(sp.vista === 'tickets'){
+      d = {tickets: await spTraerTodo('/starpos_tickets?select=*&fecha=gte.' + r.desde + '&fecha=lt.' + r.hasta + '&order=fecha.desc')};
+    }else if(sp.vista === 'anulaciones'){
+      d = {filas: await spTraerTodo('/starpos_anulaciones?select=*&fecha=gte.' + r.desde + '&fecha=lt.' + r.hasta + '&order=fecha.desc')};
+    }else if(sp.vista === 'retiros'){
+      d = {filas: await spTraerTodo('/starpos_retiros?select=*&fecha=gte.' + r.desde + '&fecha=lt.' + r.hasta + '&order=fecha.desc')};
+    }else if(sp.vista === 'stock'){
+      let q = '/starpos_stock?select=*&order=nombre&limit=200';
+      if(sp.stockQ) q += '&nombre=ilike.*' + encodeURIComponent(sp.stockQ.replace(/[*,()]/g, ' ')) + '*';
+      if(sp.stockFiltro === 'neg') q += '&unidades=lt.0';
+      if(sp.stockFiltro === 'cero') q += '&unidades=eq.0';
+      const [filas, ult] = await Promise.all([adminFetch(q, 'GET'), adminFetch('/starpos_stock?select=updated_at&order=updated_at.desc&limit=1', 'GET')]);
+      d = {filas: filas || [], ultimo: (ult||[])[0] ? ult[0].updated_at : null};
+    }
+    sp.datos = d;
+    sp.actualizado = new Date();
+  }catch(e){
+    sp.error = /starpos_(ventas|turnos|turno|tickets|anulaciones|retiros|stock|top)/.test(e.message||'') && /exist|schema cache|function/.test(e.message||'')
+      ? 'Falta correr supabase-migration-starpos-datos.sql en Supabase y volver a bajar el sincronizador en la PC del local.'
+      : (e.message || 'Error');
+  }
+  sp.cargando = false;
+  spRender();
+}
+function spRender(){ if(state.adminTab === 'starpos') render(); }
+function spIr(campo, valor){ sp[campo] = valor; spCargar(); }
+// Mientras la solapa está abierta, se actualiza sola cada minuto (los datos llegan de la PC cada 5).
+function spAuto(){
+  if(_spTimer) return;
+  _spTimer = setInterval(() => {
+    if(state.adminTab !== 'starpos'){ clearInterval(_spTimer); _spTimer = null; return; }
+    if(document.visibilityState === 'visible' && ['ventas','turnos','tickets'].includes(sp.vista) && ['hoy','7d','30d','mes'].includes(sp.periodo)) spCargar(true);
+  }, 60*1000);
+}
+
+function renderAdminStarpos(){
+  spAuto();
+  if(!sp.cargando && !sp.datos && !sp.error) setTimeout(() => spCargar(), 0);
+  const chip = (campo, k, label) => `<button class="chip ${sp[campo]===k?'active':''}" onclick="spIr('${campo}','${k}')">${label}</button>`;
+  const usaPeriodo = sp.vista !== 'stock';
+  const periodos = sp.vista === 'tickets' ? SP_PERIODOS.slice(0, 3) : SP_PERIODOS;
+  let cuerpo;
+  if(sp.error) cuerpo = `<div class="empty-state"><p>${escapeHtml(sp.error)}</p><button class="btn-secondary" onclick="spCargar(true)">Reintentar</button></div>`;
+  else if(!sp.datos) cuerpo = `<div class="empty-state"><p>Cargando datos del local…</p></div>`;
+  else cuerpo = ({ventas: spVentas, turnos: spTurnos, productos: spProductos, tickets: spTickets, anulaciones: spAnulaciones, retiros: spRetiros, stock: spStock})[sp.vista]();
+  return `
+    <div style="padding:10px 16px 4px; position:sticky; top:0; z-index:10; background:var(--navy2);">
+      <div style="display:flex; gap:6px; overflow-x:auto; padding-bottom:6px; -webkit-overflow-scrolling:touch;">
+        ${SP_VISTAS.map(([k, l]) => chip('vista', k, l)).join('')}
+      </div>
+      ${usaPeriodo ? `<div style="display:flex; gap:6px; overflow-x:auto; padding-bottom:6px;">${periodos.map(([k, l]) => chip('periodo', k, l)).join('')}</div>` : ''}
+      <div style="display:flex; justify-content:space-between; align-items:center; font-size:11.5px; color:rgba(255,255,255,0.55); padding-bottom:4px;">
+        <span>${sp.cargando ? 'Actualizando…' : (sp.actualizado ? 'Visto a las ' + String(sp.actualizado.getHours()).padStart(2,'0') + ':' + String(sp.actualizado.getMinutes()).padStart(2,'0') : '')}</span>
+        <button class="btn-secondary" style="padding:4px 10px; font-size:11.5px; width:auto;" onclick="spCargar(true)">↻ Actualizar</button>
+      </div>
+    </div>
+    <div style="padding:6px 16px 20px;">${cuerpo}</div>`;
+}
+
+const spCaja1 = (titulo, valor, sub) => `<div style="flex:1; min-width:140px; padding:12px 14px; border-radius:14px; background:var(--glass); border:1px solid var(--glass-bd);">
+  <div style="font-size:11.5px; color:rgba(255,255,255,0.6);">${titulo}</div>
+  <div style="font-size:20px; font-weight:700; color:var(--gold2); margin-top:2px;">${valor}</div>
+  ${sub ? `<div style="font-size:11.5px; color:rgba(255,255,255,0.6); margin-top:2px;">${sub}</div>` : ''}</div>`;
+const spSeccion = (titulo, html) => `<h4 style="margin:18px 0 8px; font-size:13px; color:var(--gold2); text-transform:uppercase; letter-spacing:.04em;">${titulo}</h4>${html}`;
+const spFila = (izq, der, sub) => `<div style="display:flex; justify-content:space-between; gap:10px; padding:8px 0; border-bottom:1px solid var(--glass-bd); font-size:13.5px;">
+  <span>${izq}${sub ? `<br><span style="font-size:11.5px; color:rgba(255,255,255,0.55);">${sub}</span>` : ''}</span><span style="white-space:nowrap; text-align:right;">${der}</span></div>`;
+const spVar = (pct, txt) => pct == null ? '' : `<span style="color:${pct >= 0 ? 'var(--success,#2ecc71)' : 'var(--danger)'}; font-weight:600;">${pct >= 0 ? '▲' : '▼'} ${spNum(Math.abs(pct), 1)}%</span> vs ${txt}`;
+
+function spVentas(){
+  const r = spRango(sp.periodo), {horas, medios, ultimo} = sp.datos;
+  const enRango = h => h.fecha >= r.desde && h.fecha < r.hasta;
+  const act = horas.filter(enRango);
+  // Período anterior; si es "hoy", solo hasta la misma hora de la semana pasada.
+  const prevRows = horas.filter(h => r.phastaHora != null ? (h.fecha === r.pdesde && h.hora < r.phastaHora) : (h.fecha >= r.pdesde && h.fecha < r.phasta));
+  const sum = (rows, k) => rows.reduce((s, x) => s + Number(x[k]||0), 0);
+  const total = sum(act, 'total'), tickets = sum(act, 'tickets'), prev = sum(prevRows, 'total');
+  if(!act.length) return `<div class="empty-state"><p>No hay ventas de StarPOS en este período${sp.periodo === 'hoy' ? ' todavía' : ''}.</p>
+    <p style="font-size:12px; opacity:.7;">${ultimo ? 'Último ticket recibido: ' + spFH(ultimo) : 'Todavía no llegaron datos: fijate que el sincronizador esté instalado en la PC del local.'}</p></div>`;
+  // por caja
+  const porCaja = {};
+  act.forEach(h => { const c = porCaja[h.caja] = porCaja[h.caja] || {total:0, tickets:0}; c.total += Number(h.total); c.tickets += Number(h.tickets); });
+  // por medio
+  const porMedio = {};
+  medios.forEach(m => { const c = porMedio[m.medio] = porMedio[m.medio] || {total:0, cant:0}; c.total += Number(m.total); c.cant += Number(m.cant); });
+  const mediosOrd = Object.entries(porMedio).sort((a, b) => b[1].total - a[1].total);
+  // por hora o por día
+  let detalle;
+  if(r.dias <= 2){
+    const porHora = {};
+    act.forEach(h => { const c = porHora[h.hora] = porHora[h.hora] || {total:0, tickets:0}; c.total += Number(h.total); c.tickets += Number(h.tickets); });
+    detalle = spSeccion('Por hora', Object.keys(porHora).map(Number).sort((a, b) => a - b).map(hh =>
+      spFila(String(hh).padStart(2,'0') + ':00 a ' + String(hh + 1).padStart(2,'0') + ':00', '<b>' + money2(porHora[hh].total) + '</b>', porHora[hh].tickets + ' tickets')).join(''));
+  }else{
+    const porDia = {};
+    act.forEach(h => { const c = porDia[h.fecha] = porDia[h.fecha] || {total:0, tickets:0}; c.total += Number(h.total); c.tickets += Number(h.tickets); });
+    const DIAS = ['Dom','Lun','Mar','Mié','Jue','Vie','Sáb'];
+    detalle = spSeccion('Por día', Object.keys(porDia).sort().reverse().map(f => {
+      const dd = new Date(f + 'T12:00:00');
+      return spFila(DIAS[dd.getDay()] + ' ' + spF(f), '<b>' + money2(porDia[f].total) + '</b>', porDia[f].tickets + ' tickets · promedio ' + money2(porDia[f].tickets ? porDia[f].total / porDia[f].tickets : 0));
+    }).join(''));
+  }
+  return `
+    <div style="display:flex; gap:10px; flex-wrap:wrap;">
+      ${spCaja1('Vendido', money2(total), spVar(spPct(total, prev), r.txt + (r.phastaHora != null ? ' a esta hora' : '')))}
+      ${spCaja1('Tickets', spNum(tickets), 'Promedio por ticket ' + money2(tickets ? total / tickets : 0))}
+    </div>
+    ${sp.periodo === 'hoy' && ultimo ? `<p style="font-size:11.5px; color:rgba(255,255,255,0.55); margin-top:8px;">Último ticket recibido de la PC: ${spFH(ultimo)}. Llegan cada 5 minutos.</p>` : ''}
+    ${spSeccion('Por caja', Object.entries(porCaja).sort().map(([c, v]) => spFila(spCaja(c), '<b>' + money2(v.total) + '</b>', v.tickets + ' tickets')).join(''))}
+    ${spSeccion('Por medio de pago', mediosOrd.map(([m, v]) => spFila(escapeHtml(m), '<b>' + money2(v.total) + '</b>', spNum(total ? v.total / total * 100 : 0, 1) + '% · ' + v.cant + ' pagos')).join(''))}
+    ${detalle}`;
+}
+
+function spTurnos(){
+  const {turnos, medios} = sp.datos;
+  if(!turnos.length) return `<div class="empty-state"><p>No hay turnos de caja en este período.</p></div>`;
+  const tot = turnos.reduce((s, t) => s + Number(t.total), 0);
+  return `<p style="font-size:12px; color:rgba(255,255,255,0.6); margin-bottom:6px;">${turnos.length} turnos · ${money2(tot)}. Tocá un turno para ver cuánto entró por cada medio de pago.</p>` +
+    turnos.map(t => {
+      const abierto = sp.abierto === t.money;
+      const ms = medios.filter(m => m.money === t.money).sort((a, b) => b.total - a.total);
+      const efectivo = ms.filter(m => /efectivo/i.test(m.medio)).reduce((s, m) => s + Number(m.total), 0);
+      return `<div class="prod-row-v2" style="cursor:pointer;" onclick="sp.abierto = sp.abierto === '${t.money}' ? null : '${t.money}'; spRender()">
+        <div class="prod-row-v2-top"><div class="prod-row-v2-info" style="margin-left:0;">
+          <h4>${spCaja(t.caja)} · turno ${t.numero || ''}${t.fin ? '' : ' <span class="badge-oculto" style="background:#1e7e34; color:#fff;">ABIERTO</span>'}</h4>
+          <p>${spFH(t.inicio)} → ${t.fin ? spFH(t.fin).slice(11) + (String(t.fin).slice(0,10) !== String(t.inicio).slice(0,10) ? ' del ' + spF(t.fin) : '') : 'sigue abierto'} · ${escapeHtml(spCajeros(t.cajeros))}</p>
+          <p><b>${money2(t.total)}</b> · ${t.tickets} tickets${Number(t.retiros) ? ' · retiros ' + money2(t.retiros) : ''}${t.anulados ? ' · <span style="color:var(--warn);">' + t.anulados + ' anulados</span>' : ''}</p>
+          ${abierto ? `<div style="margin-top:6px;">${ms.map(m => spFila(escapeHtml(m.medio), money2(m.total), m.cant + ' pagos')).join('') || '<p>Sin pagos.</p>'}
+            ${efectivo ? `<p style="margin-top:6px; font-size:12px;">Efectivo que debería quedar en la caja: <b>${money2(efectivo - Number(t.retiros||0))}</b> (efectivo ${money2(efectivo)} − retiros ${money2(t.retiros||0)}, sin contar el cambio inicial).</p>` : ''}</div>` : ''}
+        </div></div></div>`;
+    }).join('');
+}
+
+function spProductos(){
+  const {prods} = sp.datos;
+  const r = spRango(sp.periodo);
+  const buscador = `<input type="search" placeholder="Buscar producto…" value="${escapeHtml(sp.prodQ)}" onchange="sp.prodQ=this.value.trim(); spCargar()"
+    style="width:100%; margin-bottom:8px; padding:10px 12px; border-radius:12px; background:var(--glass); border:1px solid var(--glass-bd); color:var(--white); font-size:14px;">`;
+  if(r.desde < spISO(new Date(Date.now() - 120*864e5))) return buscador + `<div class="empty-state"><p>El detalle por producto se guarda de los últimos 120 días.</p></div>`;
+  if(!prods.length) return buscador + `<div class="empty-state"><p>No hay productos vendidos en este período.</p></div>`;
+  const tot = prods.reduce((s, p) => s + Number(p.total), 0);
+  return buscador + `<p style="font-size:12px; color:rgba(255,255,255,0.6); margin-bottom:6px;">Más vendidos por importe${prods.length > 100 ? ' (los primeros 100: buscá para ver otros)' : ''}.</p>` +
+    prods.slice(0, 100).map((p, i) => spFila((i + 1) + '. ' + escapeHtml(p.nombre || ''), '<b>' + money2(p.total) + '</b>',
+      spNum(p.unidades, Number(p.unidades) % 1 ? 3 : 0) + ' unidades · ' + spNum(tot ? p.total / tot * 100 : 0, 1) + '%')).join('');
+}
+
+async function spVerLineas(id){
+  if(sp.abierto === id){ sp.abierto = null; spRender(); return; }
+  sp.abierto = id; spRender();
+  if(!sp.lineas[id]){
+    try{ sp.lineas[id] = await adminFetch('/starpos_ticket_lineas?select=*&ticket=eq.' + encodeURIComponent(id) + '&order=linea', 'GET') || []; }
+    catch(e){ sp.lineas[id] = []; toast('No se pudo cargar el ticket: ' + e.message, 'err'); }
+    spRender();
+  }
+}
+function spTickets(){
+  const lista = sp.datos.tickets.filter(t => !sp.caja || t.caja === sp.caja);
+  const cajas = [...new Set(sp.datos.tickets.map(t => t.caja).filter(Boolean))].sort();
+  const filtro = cajas.length > 1 ? `<div style="display:flex; gap:6px; margin-bottom:8px;">${[['', 'Las dos cajas']].concat(cajas.map(c => [c, spCaja(c)])).map(([k, l]) => `<button class="chip ${sp.caja===k?'active':''}" onclick="sp.caja='${k}'; spRender()">${l}</button>`).join('')}</div>` : '';
+  if(!lista.length) return filtro + `<div class="empty-state"><p>No hay tickets en este período (se guardan los últimos 20 días).</p></div>`;
+  return filtro + `<p style="font-size:12px; color:rgba(255,255,255,0.6); margin-bottom:6px;">${lista.length} tickets${lista.length > 300 ? ' — se muestran los últimos 300' : ''}. Tocá uno para ver qué se llevó.</p>` +
+    lista.slice(0, 300).map(t => {
+      const abierto = sp.abierto === t.id, ls = sp.lineas[t.id];
+      const medios = (t.medios || '').split('|').filter(Boolean).map(x => { const i = x.lastIndexOf(':'); return escapeHtml(x.slice(0, i)) + ' ' + money2(x.slice(i + 1)); }).join(' + ');
+      return `<div class="prod-row-v2" style="cursor:pointer;" onclick="spVerLineas('${t.id}')">
+        <div class="prod-row-v2-top"><div class="prod-row-v2-info" style="margin-left:0;">
+          <h4>${spFH(t.fecha).slice(11)} · ${money2(t.total)}${Number(t.tipo) === 1 ? ' <span class="badge-oculto">DEVOLUCIÓN</span>' : ''}</h4>
+          <p>${spF(String(t.fecha).slice(0,10))} · ticket ${t.numero || ''} · ${spCaja(t.caja)} · ${escapeHtml(spCajero(t.cajero))}</p>
+          <p>${medios}</p>
+          ${abierto ? (ls ? `<div style="margin-top:6px;">${ls.map(l => spFila(escapeHtml(l.descripcion || ''), money2(l.total), spNum(l.unidades, Number(l.unidades) % 1 ? 3 : 0) + (Number(l.unidades) % 1 ? ' kg' : ' u.'))).join('') || '<p>Sin detalle.</p>'}</div>` : '<p>Cargando…</p>') : ''}
+        </div></div></div>`;
+    }).join('');
+}
+
+function spAnulaciones(){
+  const filas = sp.datos.filas;
+  if(!filas.length) return `<div class="empty-state"><p>No hubo tickets anulados en este período.</p></div>`;
+  const tot = filas.reduce((s, a) => s + Number(a.total), 0);
+  const porCajero = {};
+  filas.forEach(a => { const k = spCajero(a.cajero); const c = porCajero[k] = porCajero[k] || {n:0, total:0}; c.n++; c.total += Number(a.total); });
+  return `<div style="display:flex; gap:10px; flex-wrap:wrap;">${spCaja1('Tickets anulados', filas.length, 'por ' + money2(tot))}</div>
+    ${spSeccion('Por cajero', Object.entries(porCajero).sort((a, b) => b[1].n - a[1].n).map(([k, v]) => spFila(escapeHtml(k), v.n + ' anulados', money2(v.total))).join(''))}
+    ${spSeccion('Detalle', filas.map(a => spFila(spFH(a.fecha) + ' · ' + spCaja(a.caja) + ' · ' + escapeHtml(spCajero(a.cajero)), '<b>' + money2(a.total) + '</b>',
+      a.items + ' productos: ' + escapeHtml(a.detalle || ''))).join(''))}`;
+}
+
+function spRetiros(){
+  const filas = sp.datos.filas;
+  if(!filas.length) return `<div class="empty-state"><p>No hubo retiros de caja en este período.</p></div>`;
+  const ret = filas.filter(x => Number(x.monto) > 0).reduce((s, x) => s + Number(x.monto), 0);
+  const ing = filas.filter(x => Number(x.monto) < 0).reduce((s, x) => s - Number(x.monto), 0);
+  return `<div style="display:flex; gap:10px; flex-wrap:wrap;">${spCaja1('Retirado de la caja', money2(ret), filas.length + ' movimientos' + (ing ? ' · ingresos ' + money2(ing) : ''))}</div>` +
+    spSeccion('Detalle', filas.map(x => spFila(spFH(x.fecha) + ' · ' + spCaja(x.caja), '<b>' + (Number(x.monto) < 0 ? 'Ingreso ' + money2(-x.monto) : money2(x.monto)) + '</b>',
+      escapeHtml(spCajero(x.cajero)) + (x.descripcion ? ' · ' + escapeHtml(x.descripcion) : ''))).join(''));
+}
+
+function spStock(){
+  const {filas, ultimo} = sp.datos;
+  const chip = (k, l) => `<button class="chip ${sp.stockFiltro===k?'active':''}" onclick="sp.stockFiltro='${k}'; spCargar()">${l}</button>`;
+  return `<input type="search" placeholder="Buscar producto…" value="${escapeHtml(sp.stockQ)}" onchange="sp.stockQ=this.value.trim(); spCargar()"
+      style="width:100%; margin-bottom:8px; padding:10px 12px; border-radius:12px; background:var(--glass); border:1px solid var(--glass-bd); color:var(--white); font-size:14px;">
+    <div style="display:flex; gap:6px; margin-bottom:8px;">${chip('', 'Todos')}${chip('neg', 'Negativos')}${chip('cero', 'En cero')}</div>
+    <p style="font-size:11.5px; color:rgba(255,255,255,0.55); margin-bottom:6px;">Stock según StarPOS${ultimo ? ' (actualizado ' + fmtFechaHora(ultimo) + ')' : ''}. Se actualiza una vez por hora. Muchos negativos indican que en StarPOS no se cargan todas las compras.</p>` +
+    (filas.length ? filas.map(s => spFila(escapeHtml(s.nombre || ''), '<b style="color:' + (Number(s.unidades) < 0 ? 'var(--danger)' : 'inherit') + ';">' + spNum(s.unidades, Number(s.unidades) % 1 ? 3 : 0) + '</b>')).join('') +
+      (filas.length >= 200 ? '<p style="font-size:12px; opacity:.6; margin-top:6px;">Se muestran los primeros 200: buscá para encontrar el resto.</p>' : '')
+    : `<div class="empty-state"><p>${sp.stockQ || sp.stockFiltro ? 'No hay productos con ese filtro.' : 'Todavía no llegó el stock: se manda una vez por hora.'}</p></div>`);
+}
+
 /* ---------- PRECIOS PC (StarPOS) vs APP ----------
    starpos_precios (supabase-migration-precios-pc-vs-app.sql) la llena el
    sincronizador de la PC cada 15 min con el precio de StarPOS de cada
