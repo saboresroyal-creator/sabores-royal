@@ -578,6 +578,34 @@ img{display:block; max-width:100%;}
 .client-row-body{flex:1;}
 .client-row-body h4{font-size:13.5px; color:var(--white);}
 .client-row-body p{font-size:11px; color:rgba(255,255,255,0.5);}
+/* Solapa Clientes del admin */
+.cl-tools{position:sticky; top:var(--admin-hdr,0px); z-index:10; background:var(--navy2); padding:10px 16px 8px; display:flex; flex-direction:column; gap:8px; border-bottom:1px solid var(--glass-bd);}
+.cl-search{display:flex; align-items:center; gap:8px; background:var(--glass); border:1px solid var(--glass-bd); border-radius:12px; padding:0 12px;}
+.cl-search input{flex:1; min-width:0; background:none; border:none; outline:none; color:var(--white); font-size:14px; padding:10px 0;}
+.cl-chips{display:flex; gap:6px; overflow-x:auto; scrollbar-width:none; margin:0 -16px; padding:0 16px;}
+.cl-chips::-webkit-scrollbar{display:none;}
+.cl-chip{flex:none; display:flex; align-items:center; gap:5px; padding:6px 11px; border-radius:16px; font-size:12px; font-weight:600; white-space:nowrap;
+  color:rgba(255,255,255,0.6); background:var(--glass); border:1px solid var(--glass-bd);}
+.cl-chip em{font-style:normal; font-size:11px; opacity:.7;}
+.cl-chip.active{background:var(--gold); color:var(--navy); border-color:var(--gold);}
+.cl-meta{display:flex; align-items:center; justify-content:space-between; gap:8px; font-size:11.5px; color:rgba(255,255,255,0.45);}
+.cl-meta b{color:rgba(255,255,255,0.7); font-weight:600;}
+.cl-meta select{flex:none; background:var(--glass); color:var(--white); border:1px solid var(--glass-bd); border-radius:8px; font-size:11.5px; padding:4px 6px;}
+.cl-meta select option{background:var(--navy2); color:var(--white);}
+.cl-row{display:flex; align-items:center; gap:12px; padding:12px 16px; border-bottom:1px solid var(--glass-bd); cursor:pointer;}
+.cl-row:hover{background:rgba(255,255,255,0.03);}
+.cl-av{width:36px; height:36px; border-radius:50%; flex:none; display:flex; align-items:center; justify-content:center; font-size:13px; font-weight:700;
+  background:var(--navy3); color:var(--goldlight); border:1px solid var(--glass-bd);}
+.cl-av-oro{background:rgba(197,160,40,0.25); border-color:rgba(224,187,74,0.5);}
+.cl-av-plata{background:rgba(200,210,230,0.15);}
+.cl-body{flex:1; min-width:0; display:flex; flex-direction:column; gap:3px;}
+.cl-name{display:flex; align-items:center; gap:5px; flex-wrap:wrap; font-size:13.5px; font-weight:600; color:var(--white);}
+.cl-tag{font-size:9.5px; font-weight:700; letter-spacing:.03em; padding:2px 6px; border-radius:6px;}
+.cl-tag-nuevo{background:rgba(230,60,60,0.25); color:#ff8a8a;}
+.cl-tag-may{background:rgba(60,150,220,0.25); color:#6db8e8;}
+.cl-tag-desc{background:rgba(197,160,40,0.2); color:var(--gold2);}
+.cl-sub{font-size:11.5px; color:rgba(255,255,255,0.45); white-space:nowrap; overflow:hidden; text-overflow:ellipsis;}
+.cl-pts{flex:none; display:flex; align-items:center; gap:4px; font-size:13px; font-weight:700; color:var(--gold2);}
 .client-pts{font-weight:700; color:var(--gold2); font-size:14px;}
 
 .settings-row{display:flex; justify-content:space-between; align-items:center; padding:14px 16px; border-bottom:1px solid var(--glass-bd);}
@@ -1541,7 +1569,7 @@ async function apiSyncSuggestions(){
 async function apiSyncClients(){
   if(!IS_ADMIN_APP || !state.adminAuthed) return;
   try{
-    const rows = await adminFetch('/clients?select=full_name,phone,address,email,points,wholesale,rubro&order=created_at.desc&limit=500','GET');
+    const rows = await adminFetch('/clients?select=full_name,phone,address,email,points,wholesale,rubro,created_at&order=created_at.desc&limit=500','GET');
     if(!rows || rows.length===0) return;
     let changed = false;
     rows.forEach(c=>{
@@ -1551,9 +1579,10 @@ async function apiSyncClients(){
       const wholesale = !!c.wholesale;
       const existing = state.clients[phone];
       if(!existing){
-        state.clients[phone] = { phone, name:c.full_name||'', address:c.address||'', email:c.email||'', doc:'', city:'', province:'', points, orders:[], wholesale, rubro:c.rubro||'' };
+        state.clients[phone] = { phone, name:c.full_name||'', address:c.address||'', email:c.email||'', doc:'', city:'', province:'', points, orders:[], wholesale, rubro:c.rubro||'', createdAt:c.created_at||null };
         changed = true;
       }else{
+        if(c.created_at && existing.createdAt !== c.created_at){ existing.createdAt = c.created_at; changed = true; }
         if(existing.points !== points){ existing.points = points; changed = true; }
         if(c.full_name && existing.name !== c.full_name){ existing.name = c.full_name; changed = true; }
         if(c.address && existing.address !== c.address){ existing.address = c.address; changed = true; }
@@ -12670,33 +12699,139 @@ async function mergeDuplicateClients(){
   try{ await apiSaveClientDiscounts(); }catch(e){}
   toast(`${merged} cliente${merged!==1?'s':''} fusionado${merged!==1?'s':''}`, 'ok');
 }
+/* ---------- Solapa Clientes: buscar, filtrar y ordenar ----------
+   La última compra y el total gastado salen de los pedidos de la app
+   (state.orders, sin contar los cancelados). Las ventas del local por
+   StarPOS no están acá, así que un cliente que solo compra en el local
+   figura como "Nunca compró". */
+const CLIENT_INACTIVE_DAYS = 60;
+const CLIENT_FILTERS = [
+  {key:'todos',  label:'Todos',            fn:()=>true},
+  {key:'nuevos', label:'Nuevos',           fn:c=>!c.seen},
+  {key:'may',    label:'Mayoristas',       fn:c=>!!c.wholesale},
+  {key:'desc',   label:'Con descuento',    fn:c=>(c.discountPct||0)>0},
+  {key:'oro',    label:'Oro',              fn:c=>tierFor(c.points||0).key==='oro'},
+  {key:'plata',  label:'Plata',            fn:c=>tierFor(c.points||0).key==='plata'},
+  {key:'bronce', label:'Bronce',           fn:c=>tierFor(c.points||0).key==='bronce'},
+  {key:'inact',  label:`Sin comprar +${CLIENT_INACTIVE_DAYS} días`, fn:(c,s)=>s.days!==null && s.days>CLIENT_INACTIVE_DAYS},
+  {key:'nunca',  label:'Nunca compraron',  fn:(c,s)=>s.days===null},
+];
+const CLIENT_SORTS = {
+  pts:   {label:'Más puntos',         fn:(a,b)=>(b.c.points||0)-(a.c.points||0)},
+  last:  {label:'Última compra',      fn:(a,b)=>(a.s.days??1e9)-(b.s.days??1e9)},
+  spent: {label:'Más gastado',        fn:(a,b)=>b.s.spent-a.s.spent},
+  name:  {label:'Nombre A-Z',         fn:(a,b)=>(a.c.name||'').localeCompare(b.c.name||'','es')},
+  nuevos:{label:'Recién registrados', fn:(a,b)=>(b.c.createdAt?Date.parse(b.c.createdAt):Infinity)-(a.c.createdAt?Date.parse(a.c.createdAt):Infinity)},
+};
+function clientOrderStats(){
+  const map = {};
+  const now = Date.now();
+  state.orders.forEach(o=>{
+    if(o.status==='Cancelado') return;
+    const phone = o.customer && o.customer.phone;
+    if(!phone) return;
+    const m = map[phone] || (map[phone] = {last:0, spent:0});
+    const t = new Date(o.date).getTime();
+    if(t > m.last) m.last = t;
+    m.spent += (o.total||0);
+  });
+  return phone => {
+    const m = map[phone];
+    if(!m || !m.last) return {days:null, spent:m?m.spent:0};
+    return {days:Math.max(0, Math.floor((now - m.last)/86400000)), spent:m.spent};
+  };
+}
+function clientAgo(d){
+  if(d===0) return 'hoy';
+  if(d===1) return 'ayer';
+  if(d<30) return `hace ${d} días`;
+  if(d<60) return 'hace 1 mes';
+  if(d<365) return `hace ${Math.floor(d/30)} meses`;
+  return 'hace más de un año';
+}
+function clientInitials(name){
+  return (name||'?').trim().split(/\s+/).map(w=>w[0]).slice(0,2).join('').toUpperCase() || '?';
+}
+function adminClientEntries(){
+  const statsFor = clientOrderStats();
+  return Object.values(state.clients).map(c=>({c, s:statsFor(c.phone)}));
+}
+function renderAdminClientesList(entries){
+  entries = entries || adminClientEntries();
+  const f = CLIENT_FILTERS.find(x=>x.key===state.adminClientFilter) || CLIENT_FILTERS[0];
+  const sort = CLIENT_SORTS[state.adminClientSort] || CLIENT_SORTS.pts;
+  const q = (state.adminClientQ||'').trim().toLowerCase();
+  const qd = q.replace(/\D/g,'');
+  const list = entries
+    .filter(e=>f.fn(e.c, e.s))
+    .filter(e=> !q || (e.c.name||'').toLowerCase().includes(q) || (qd.length>=3 && ((e.c.phone||'').replace(/\D/g,'').includes(qd) || (e.c.doc||'').replace(/\D/g,'').includes(qd))))
+    .sort(sort.fn);
+  const summaryEl = document.getElementById('admin-clientes-summary');
+  const summary = (f.key==='todos' && !q)
+    ? `<b>${entries.length}</b> clientes · <b>${entries.filter(e=>e.s.days!==null && e.s.days<=30).length}</b> compraron en 30 días · <b>${entries.filter(e=>e.s.days!==null && e.s.days>CLIENT_INACTIVE_DAYS).length}</b> inactivos`
+    : `<b>${list.length}</b> de ${entries.length} clientes`;
+  if(summaryEl) summaryEl.innerHTML = summary;
+  const rows = list.length===0
+    ? `<p style="padding:36px 20px; text-align:center; font-size:13px; color:rgba(255,255,255,0.45);">No hay clientes que coincidan.</p>`
+    : list.map(({c,s})=>{
+      const tier = tierFor(c.points||0);
+      const last = s.days===null
+        ? `<span style="color:var(--danger);">Nunca compró</span>`
+        : `<span style="${s.days>CLIENT_INACTIVE_DAYS?'color:var(--warn);':''}">Compró ${clientAgo(s.days)}</span> · ${money(s.spent)}`;
+      return `<div class="cl-row" role="button" tabindex="0" onclick="openAdminClientDetail('${c.phone}')" onkeydown="if(event.key==='Enter') openAdminClientDetail('${c.phone}')">
+        <div class="cl-av cl-av-${tier.key}">${escapeHtml(clientInitials(c.name))}</div>
+        <div class="cl-body">
+          <div class="cl-name">${escapeHtml(c.name||'Sin nombre')}
+            ${!c.seen?`<span class="cl-tag cl-tag-nuevo">NUEVO</span>`:''}
+            ${c.wholesale?`<span class="cl-tag cl-tag-may">MAYORISTA</span>`:''}
+            ${c.discountPct?`<span class="cl-tag cl-tag-desc">${c.discountPct}%</span>`:''}
+            <span class="tier-badge tier-${tier.key}">${tier.label}</span>
+          </div>
+          <div class="cl-sub">${escapeHtml(c.phone)} · ${last}</div>
+        </div>
+        <div class="cl-pts">${(c.points||0).toLocaleString('es-AR')} <img src="${CROWN_DATA_URL}" alt="" style="width:14px; height:14px; object-fit:contain;"></div>
+      </div>`;
+    }).join('');
+  return {rows, summary};
+}
+function renderAdminClientesListInPlace(){
+  const el = document.getElementById('admin-clientes-list');
+  if(el) el.innerHTML = renderAdminClientesList().rows;
+}
 function renderAdminClientes(){
   if(state.adminClientDetailPhone) return renderAdminClientDetail(state.adminClientDetailPhone);
-  const list = Object.values(state.clients).sort((a,b)=>b.points-a.points);
-  if(list.length===0){
+  const entries = adminClientEntries();
+  if(entries.length===0){
     return `<div class="empty-state">${ic('user')}<p>Todavía no hay clientes registrados.</p></div>`;
   }
   const dupeGroups = findDuplicateClientGroups();
   const dupeBanner = dupeGroups.length>0 ? `
-    <div style="margin:0 16px 12px; padding:14px; border-radius:12px; background:rgba(224,168,60,0.12); border:1px solid rgba(224,168,60,0.4);">
+    <div style="margin:12px 16px 4px; padding:14px; border-radius:12px; background:rgba(224,168,60,0.12); border:1px solid rgba(224,168,60,0.4);">
       <div style="font-size:13px; color:var(--warn); font-weight:700; margin-bottom:8px;">⚠️ Encontré ${dupeGroups.length} cliente${dupeGroups.length!==1?'s':''} con filas duplicadas (mismo número, distinto formato)</div>
       <button class="btn-secondary" style="width:100%;" onclick="mergeDuplicateClients()">Fusionar duplicados</button>
     </div>` : '';
-  return dupeBanner + list.map((c,i)=>{
-    const tier = tierFor(c.points);
-    return `<div class="client-row" style="cursor:pointer;" onclick="openAdminClientDetail('${c.phone}')">
-      <div class="client-rank">${i+1}</div>
-      <div class="client-row-body">
-        <h4>${escapeHtml(c.name)} ${!c.seen?`<span class="tier-badge" style="background:rgba(230,60,60,0.25); color:#ff8a8a;">Nuevo</span>`:''} ${c.wholesale?`<span class="tier-badge" style="background:rgba(60,150,220,0.25); color:#6db8e8;">Mayorista</span>`:''}</h4>
-        <p>${escapeHtml(c.phone)}${c.doc?` · DNI/CUIT ${escapeHtml(c.doc)}`:''} · <span class="tier-badge tier-${tier.key}" style="margin-left:4px;">${tier.label}</span>${c.discountPct?` · <span style="color:var(--gold2); font-weight:600;">${c.discountPct}% desc.</span>`:''}
-        </p>
+  const curFilter = state.adminClientFilter || 'todos';
+  const curSort = CLIENT_SORTS[state.adminClientSort] ? state.adminClientSort : 'pts';
+  const {rows, summary} = renderAdminClientesList(entries);
+  return `
+    <div class="cl-tools">
+      <div class="cl-search">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" style="width:17px;height:17px;opacity:.5;flex-shrink:0;"><circle cx="11" cy="11" r="7"/><path d="M21 21l-4.3-4.3"/></svg>
+        <input type="search" id="admin-client-q" placeholder="Buscar por nombre, teléfono o DNI…" value="${escapeHtml(state.adminClientQ||'')}"
+          oninput="state.adminClientQ=this.value; renderAdminClientesListInPlace()">
       </div>
-      <div class="client-pts" style="display:flex; align-items:center; gap:5px;">${c.points} <img src="${CROWN_DATA_URL}" style="width:15px; height:15px; object-fit:contain;"></div>
-      ${state.adminIsSuperAdmin ? `<button class="icon-btn" style="flex:none; margin-left:8px; ${c.discountPct?'color:var(--gold2); border-color:var(--gold2);':''}" onclick="event.stopPropagation(); editClientDiscount('${c.phone}')" title="Descuento especial">%</button>` : ''}
-      <button class="icon-btn" style="flex:none; margin-left:8px; ${c.wholesale?'color:#6db8e8; border-color:#6db8e8;':''}" onclick="event.stopPropagation(); toggleClientWholesale('${c.phone}')" title="Marcar/desmarcar mayorista">${ic('package')}</button>
-      <button class="icon-btn" style="flex:none; margin-left:8px;" onclick="event.stopPropagation(); confirmDeleteClient('${c.phone}')">${ic('trash')}</button>
-    </div>`;
-  }).join('');
+      <div class="cl-chips">
+        ${CLIENT_FILTERS.map(f=>`<button class="cl-chip ${curFilter===f.key?'active':''}" onclick="state.adminClientFilter='${f.key}'; render()">${f.label} <em>${entries.filter(e=>f.fn(e.c,e.s)).length}</em></button>`).join('')}
+      </div>
+      <div class="cl-meta">
+        <span id="admin-clientes-summary">${summary}</span>
+        <select id="admin-client-sort" aria-label="Ordenar clientes" onchange="state.adminClientSort=this.value; renderAdminClientesListInPlace()">
+          ${Object.entries(CLIENT_SORTS).map(([k,s])=>`<option value="${k}" ${curSort===k?'selected':''}>${s.label}</option>`).join('')}
+        </select>
+      </div>
+    </div>
+    ${dupeBanner}
+    <div id="admin-clientes-list">${rows}</div>`;
 }
 function openAdminClientDetail(phone){
   state.adminClientDetailPhone = phone;
