@@ -26,6 +26,8 @@ function Escribir($msg){
   }catch{}
 }
 function Terminar($codigo){
+  # Se suelta el candado antes de esperar el Enter: una ventana abierta no frena las pasadas siguientes.
+  if($script:mutex){ try{ $script:mutex.ReleaseMutex() }catch{} }
   if(-not $auto){ Write-Host ''; Read-Host 'Toca Enter para cerrar' | Out-Null }
   exit $codigo
 }
@@ -39,6 +41,8 @@ if($env:SR_SELF -ne $DEST){
   if(-not $auto){ Write-Host 'Instalando en C:\SaboresRoyal ...' }
   New-Item -ItemType Directory -Force -Path $DIR | Out-Null
   Copy-Item -Path $env:SR_SELF -Destination $DEST -Force
+  # Quita la marca "bajado de internet": si no, Windows pregunta antes de cada pasada automática.
+  try{ Unblock-File -Path $DEST }catch{}
   $vbs = Join-Path $DIR 'sincronizar-oculto.vbs'
   Set-Content -Path $vbs -Encoding ASCII -Value 'CreateObject("WScript.Shell").Run """C:\SaboresRoyal\sincronizar-starpos.bat"" auto", 0, False'
   & schtasks.exe /Create /F /SC MINUTE /MO 15 /TN 'SaboresRoyal Sincronizar StarPOS' /TR 'wscript.exe C:\SaboresRoyal\sincronizar-oculto.vbs' | Out-Null
@@ -119,8 +123,9 @@ WHERE p.active
   $cambios = New-Object System.Collections.ArrayList
   for($i = 0; $i -lt $filas.Count; $i += $LOTE){
     $fin  = [Math]::Min($i + $LOTE, $filas.Count) - 1
-    $lote = @($filas[$i..$fin])
-    $r = Rpc 'starpos_sync_lote' @{ p_token = $TOKEN; p_rows = $lote }
+    # (no se llama $lote: PowerShell no distingue mayúsculas y pisaría a $LOTE)
+    $paquete = @($filas[$i..$fin])
+    $r = Rpc 'starpos_sync_lote' @{ p_token = $TOKEN; p_rows = $paquete }
     foreach($k in @('recibidos','nuevos','precios','vinculados')){ $tot[$k] += [int]$r.$k }
     foreach($c in @($r.cambios)){ if($c -and $cambios.Count -lt 60){ [void]$cambios.Add($c) } }
     if(-not $auto){ Write-Host ('  ' + ($fin + 1) + ' de ' + $filas.Count) }
