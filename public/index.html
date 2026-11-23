@@ -475,12 +475,27 @@ img{display:block; max-width:100%;}
 .tier-oro{background:rgba(197,160,40,0.25); color:var(--gold2);}
 
 /* ---------- ADMIN ---------- */
-.admin-tabs{display:flex; flex-wrap:wrap; gap:8px; padding:14px 16px; background:rgba(255,255,255,0.03); border-bottom:1px solid var(--glass-bd);}
-.admin-tab{position:relative; flex:none; padding:9px 16px; border-radius:20px; font-size:12.5px; font-weight:600; color:rgba(255,255,255,0.6); background:var(--glass); border:1px solid var(--glass-bd); transition:background .15s ease, color .15s ease, border-color .15s ease;}
-.admin-tab-badge{position:absolute; top:-6px; right:-6px; min-width:18px; height:18px; padding:0 4px; border-radius:9px;
-  background:var(--danger); color:#fff; font-size:10px; font-weight:800; display:flex; align-items:center; justify-content:center; line-height:1; box-shadow:0 0 0 2px var(--navy2);}
-.admin-tab:hover{background:rgba(255,255,255,0.1); color:rgba(255,255,255,0.9); border-color:rgba(255,255,255,0.2);}
-.admin-tab.active{background:var(--gold); color:var(--navy); border-color:var(--gold);}
+/* Encabezado fijo: título + secciones (fila 1) + solapas de la sección (fila 2) */
+.admin-header{position:sticky; top:0; z-index:50; background:rgba(15,28,69,0.92); backdrop-filter:blur(10px); border-bottom:1px solid var(--glass-bd);}
+.admin-header .topbar{position:static; background:none; backdrop-filter:none;}
+.admin-groups{display:grid; gap:4px; padding:8px 10px;}
+.admin-group{position:relative; display:flex; flex-direction:column; align-items:center; gap:4px; padding:8px 2px 7px; border-radius:12px;
+  color:rgba(255,255,255,0.6); border:1px solid transparent; transition:background .15s ease, color .15s ease;}
+.admin-group svg{width:20px; height:20px;}
+.admin-group b{font-size:10.5px; font-weight:600;}
+.admin-group:hover{color:rgba(255,255,255,0.9); background:var(--glass);}
+.admin-group.active{color:var(--navy); background:var(--gold); border-color:var(--gold);}
+.admin-group.active b{font-weight:700;}
+.admin-group-badge{position:absolute; top:2px; right:6px; min-width:18px; height:18px; padding:0 4px; border-radius:9px;
+  background:var(--danger); color:#fff; font-size:10px; font-weight:800; display:flex; align-items:center; justify-content:center; line-height:1; box-shadow:0 0 0 2px var(--navy);}
+.admin-tabs{display:flex; gap:4px; overflow-x:auto; padding:0 12px; scrollbar-width:none; background:rgba(255,255,255,0.03); border-top:1px solid var(--glass-bd);}
+.admin-tabs::-webkit-scrollbar{display:none;}
+.admin-tab{flex:none; display:flex; align-items:center; gap:6px; padding:11px 10px 10px; font-size:12.5px; font-weight:600; white-space:nowrap;
+  color:rgba(255,255,255,0.6); border-bottom:2px solid transparent; transition:color .15s ease, border-color .15s ease;}
+.admin-tab:hover{color:rgba(255,255,255,0.9);}
+.admin-tab.active{color:var(--goldlight); border-bottom-color:var(--gold);}
+.admin-tab-badge{min-width:17px; height:17px; padding:0 4px; border-radius:9px; background:var(--danger); color:#fff;
+  font-size:10px; font-weight:800; display:inline-flex; align-items:center; justify-content:center; line-height:1;}
 .order-card{margin:12px 16px; padding:14px; border-radius:14px; background:var(--glass); border:1px solid var(--glass-bd);}
 .order-card .oc-head{display:flex; justify-content:space-between; align-items:center; margin-bottom:8px;}
 .order-card .oc-id{font-weight:700; color:var(--white); font-size:14px;}
@@ -621,7 +636,7 @@ img{display:block; max-width:100%;}
 .manual-item-row input{flex:1;}
 
 /* COMPARADOR DE PRECIOS */
-.cmp-tabs-bar{display:flex;gap:6px;padding:12px 16px 10px;overflow-x:auto;background:rgba(15,28,69,0.9);border-bottom:1px solid var(--glass-bd);position:sticky;top:57px;z-index:40;scrollbar-width:none;}
+.cmp-tabs-bar{display:flex;gap:6px;padding:12px 16px 10px;overflow-x:auto;background:rgba(15,28,69,0.9);border-bottom:1px solid var(--glass-bd);position:sticky;top:var(--admin-hdr,57px);z-index:40;scrollbar-width:none;}
 .cmp-tabs-bar::-webkit-scrollbar{display:none;}
 .cmp-tab-btn{flex:none;padding:7px 16px;border-radius:20px;border:1px solid var(--glass-bd);background:none;color:rgba(255,255,255,0.55);font-size:13px;cursor:pointer;white-space:nowrap;}
 .cmp-tab-btn.active{background:var(--gold);color:#000;border-color:var(--gold);font-weight:700;}
@@ -2836,6 +2851,24 @@ function render(){
   else html = renderHome();
   app.innerHTML = html + (["admin","voucher-view","price-list-view","mayorista"].includes(r.screen) ? "" : renderBottomNav());
   bindDynamic();
+  syncAdminHeaderHeight();
+}
+// El encabezado del admin (título + secciones + solapas) queda fijo arriba;
+// las barras fijas de cada solapa (buscadores, filtros) se pegan justo debajo
+// usando la altura medida en --admin-hdr.
+let _adminHdrRO = null;
+function syncAdminHeaderHeight(){
+  if(_adminHdrRO){ _adminHdrRO.disconnect(); _adminHdrRO = null; }
+  const h = document.querySelector('.admin-header');
+  if(!h) return;
+  // Que la solapa elegida quede a la vista en la fila deslizable
+  const row = h.querySelector('.admin-tabs'), act = row && row.querySelector('.admin-tab.active');
+  if(act && (act.offsetLeft < row.scrollLeft || act.offsetLeft + act.offsetWidth > row.scrollLeft + row.clientWidth)){
+    row.scrollLeft = act.offsetLeft - 12;
+  }
+  const set = () => document.documentElement.style.setProperty('--admin-hdr', h.offsetHeight + 'px');
+  set();
+  if(window.ResizeObserver){ _adminHdrRO = new ResizeObserver(set); _adminHdrRO.observe(h); }
 }
 
 function renderBottomNav(){
@@ -4542,37 +4575,45 @@ function renderAdmin(){
   const pendingOrdersCount = state.orders.filter(o=>o.status==="Pendiente"||o.status==="Revision").length;
   const newClientsCount = Object.values(state.clients).filter(c=>!c.seen).length;
   const ALL_TABS = [
-    {key:"pedidos",       label:"Pedidos", badge:pendingOrdersCount},
-    {key:"carritos",      label:"Carritos"},
-    {key:"productos",     label:"Productos", badge:lowStockCount},
-    {key:"catalogolocal", label:"Catálogo del local"},
-    {key:"preciospc",     label:"Precios PC vs App"},
-    {key:"starpos",       label:"StarPOS"},
-    {key:"conteo",        label:"Conteo de Stock"},
-    {key:"categorias",    label:"Categorías"},
-    {key:"clientes",      label:"Clientes", badge:newClientsCount},
-    {key:"estadisticas",  label:"Estadísticas"},
-    {key:"chats",         label:"Chats", badge:chatUnreadTotal},
-    {key:"comprobantes",  label:"Comprobantes"},
-    {key:"navidad",       label:"Cajas Navideñas"},
-    {key:"listaprecios",  label:"Listas de Precios"},
-    {key:"carteles",      label:"Carteles"},
-    {key:"banners",       label:"Novedades/Ofertas"},
-    {key:"premios",       label:"Premios", badge:pendingRedemptionsCount},
-    {key:"sugerencias",   label:"Sugerencias", badge:unreadCount},
-    {key:"config",        label:"Configuración"},
-    {key:"comparador",    label:"Comparador"},
-    {key:"alquiler",      label:"Alquiler"},
-    {key:"cajadiaria",    label:"Caja Diaria"},
+    {key:"pedidos",       group:"ventas",   label:"Pedidos", badge:pendingOrdersCount},
+    {key:"carritos",      group:"ventas",   label:"Carritos"},
+    {key:"clientes",      group:"ventas",   label:"Clientes", badge:newClientsCount},
+    {key:"chats",         group:"ventas",   label:"Chats", badge:chatUnreadTotal},
+    {key:"comprobantes",  group:"ventas",   label:"Comprobantes"},
+    {key:"cajadiaria",    group:"ventas",   label:"Caja Diaria"},
+    {key:"productos",     group:"catalogo", label:"Productos", badge:lowStockCount},
+    {key:"categorias",    group:"catalogo", label:"Categorías"},
+    {key:"catalogolocal", group:"catalogo", label:"Catálogo del local"},
+    {key:"conteo",        group:"catalogo", label:"Conteo de Stock"},
+    {key:"starpos",       group:"catalogo", label:"StarPOS"},
+    {key:"preciospc",     group:"catalogo", label:"Precios PC vs App"},
+    {key:"listaprecios",  group:"precios",  label:"Listas de Precios"},
+    {key:"carteles",      group:"precios",  label:"Carteles"},
+    {key:"banners",       group:"precios",  label:"Novedades/Ofertas"},
+    {key:"navidad",       group:"precios",  label:"Cajas Navideñas"},
+    {key:"comparador",    group:"precios",  label:"Comparador"},
+    {key:"premios",       group:"fidelidad",label:"Premios", badge:pendingRedemptionsCount},
+    {key:"sugerencias",   group:"fidelidad",label:"Sugerencias", badge:unreadCount},
+    {key:"estadisticas",  group:"gestion",  label:"Estadísticas"},
+    {key:"alquiler",      group:"gestion",  label:"Alquiler"},
+    {key:"config",        group:"gestion",  label:"Configuración"},
   ];
   const tabs = state.adminIsSuperAdmin
     ? ALL_TABS
     : ALL_TABS.filter(t => t.key !== 'config' && t.key !== 'comparador' && t.key !== 'alquiler' && t.key !== 'cajadiaria' && (state.adminLoggedPerms||[]).includes(t.key));
   const tab = tabs.find(t=>t.key===state.adminTab) ? state.adminTab : (tabs[0]?.key||"pedidos");
+  adminVisibleTabs = tabs;
+  const curGroup = (tabs.find(t=>t.key===tab)||{}).group || "ventas";
+  const groups = ADMIN_TAB_GROUPS
+    .map(g => ({...g, tabs: tabs.filter(t=>t.group===g.key)}))
+    .filter(g => g.tabs.length);
+  const curGroupTabs = (groups.find(g=>g.key===curGroup)||{tabs:[]}).tabs;
+  const badgeText = n => n>99 ? '99+' : String(n);
   if((tab==="productos" || tab==="carteles") && !barcodeCatalogLoaded){ barcodeCatalogLoaded = true; apiSyncBarcodeCatalog(); }
   if(tab==="carteles" && !stockCountLoaded){ stockCountLoaded = true; apiSyncStockCount(); }
   return `
   <div class="screen">
+    <div class="admin-header">
     <div class="topbar">
       <div style="width:36px;"></div>
       <div style="display:flex; flex-direction:column; align-items:center; line-height:1.2; flex:1;">
@@ -4581,8 +4622,18 @@ function renderAdmin(){
       </div>
       <button onclick="adminLogout()" style="color:var(--danger);">${ic('logout')}</button>
     </div>
-    <div class="admin-tabs">
-      ${tabs.map(t=>`<button class="admin-tab ${tab===t.key?'active':''}" data-tab="${t.key}" onclick="setAdminTab('${t.key}')">${t.label}${t.badge>0?`<span class="admin-tab-badge">${t.badge>99?'99+':t.badge}</span>`:''}</button>`).join('')}
+    <nav class="admin-nav">
+      ${groups.length>1 ? `<div class="admin-groups" style="grid-template-columns:repeat(${groups.length},1fr);">
+        ${groups.map(g=>{
+          const sum = g.tabs.reduce((s,t)=>s+(t.badge||0),0);
+          const base = g.tabs.reduce((s,t)=>s+(t.key==='chats'?0:(t.badge||0)),0);
+          return `<button class="admin-group ${g.key===curGroup?'active':''}" data-group="${g.key}" data-base-badge="${base}" onclick="setAdminGroup('${g.key}')">${ADMIN_GROUP_ICONS[g.key]}<b>${g.label}</b>${sum>0?`<span class="admin-group-badge">${badgeText(sum)}</span>`:''}</button>`;
+        }).join('')}
+      </div>` : ''}
+      ${curGroupTabs.length>1 ? `<div class="admin-tabs">
+        ${curGroupTabs.map(t=>`<button class="admin-tab ${tab===t.key?'active':''}" data-tab="${t.key}" onclick="setAdminTab('${t.key}')">${t.label}${t.badge>0?`<span class="admin-tab-badge">${badgeText(t.badge)}</span>`:''}</button>`).join('')}
+      </div>` : ''}
+    </nav>
     </div>
     <div style="flex:1; padding-bottom:30px;">
       ${Object.keys(adminSyncErrors).length ? `<div style="margin:12px 16px; padding:12px 14px; border-radius:12px; background:rgba(224,80,80,0.12); border:1px solid var(--danger); font-size:13px;">
@@ -4592,7 +4643,7 @@ function renderAdmin(){
       ${tab==="pedidos" ? renderAdminPedidos() : ""}
       ${tab==="carritos" ? renderAdminCarritos() : ""}
       ${tab==="productos" ? `
-        <div style="padding:10px 16px 4px; position:sticky; top:0; z-index:10; background:var(--navy2);">
+        <div style="padding:10px 16px 4px; position:sticky; top:var(--admin-hdr,0px); z-index:10; background:var(--navy2);">
           <div style="display:flex; align-items:center; gap:8px; background:var(--glass); border:1px solid var(--glass-bd); border-radius:12px; padding:0 12px;">
             <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" style="width:17px;height:17px;opacity:.5;flex-shrink:0;"><circle cx="11" cy="11" r="7"/><path d="M21 21l-4.3-4.3"/></svg>
             <input type="search" placeholder="Buscar producto…" value="${state.adminProductQ||''}"
@@ -5377,7 +5428,41 @@ function nvHtmlPedido(p){
   </div>`;
 }
 
-function setAdminTab(tab){ state.adminTab = tab; render(); }
+// Secciones del admin: cada solapa (ALL_TABS en renderAdmin) pertenece a una.
+const ADMIN_TAB_GROUPS = [
+  {key:"ventas",    label:"Ventas"},
+  {key:"catalogo",  label:"Catálogo"},
+  {key:"precios",   label:"Precios"},
+  {key:"fidelidad", label:"Fidelidad"},
+  {key:"gestion",   label:"Gestión"},
+];
+const ADMIN_GROUP_ICONS = {
+  ventas:'<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M6 6h15l-1.5 9h-12z"/><path d="M6 6 5 3H2"/><circle cx="9" cy="20" r="1.4"/><circle cx="18" cy="20" r="1.4"/></svg>',
+  catalogo:'<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M21 8 12 3 3 8l9 5 9-5z"/><path d="M3 8v8l9 5 9-5V8"/><path d="M12 13v8"/></svg>',
+  precios:'<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M20.6 13.4 13.4 20.6a2 2 0 0 1-2.8 0L3 13V3h10l7.6 7.6a2 2 0 0 1 0 2.8z"/><circle cx="7.5" cy="7.5" r="1.3"/></svg>',
+  fidelidad:'<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="8" width="18" height="13" rx="1.5"/><path d="M12 8v13M3 12h18"/><path d="M12 8C10 4 6.5 4.5 7 7c.3 1 2.5 1 5 1 2.5 0 4.7 0 5-1 .5-2.5-3-3-5 1z"/></svg>',
+  gestion:'<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M4 20V10M10 20V4M16 20v-7M22 20H2"/></svg>',
+};
+// Última solapa usada en cada sección, para volver a ella al tocar la sección.
+const adminGroupLastTab = {};
+// Solapas que el usuario logueado puede ver (se actualiza en cada render del admin).
+let adminVisibleTabs = [];
+function setAdminTab(tab){
+  state.adminTab = tab;
+  const t = adminVisibleTabs.find(x=>x.key===tab);
+  if(t) adminGroupLastTab[t.group] = tab;
+  render();
+}
+function setAdminGroup(group){
+  const inGroup = adminVisibleTabs.filter(t=>t.group===group).map(t=>t.key);
+  if(!inGroup.length) return;
+  const curGroup = (adminVisibleTabs.find(t=>t.key===state.adminTab)||{}).group;
+  if(curGroup === group) return;
+  if(curGroup) adminGroupLastTab[curGroup] = state.adminTab;
+  const last = adminGroupLastTab[group];
+  state.adminTab = inGroup.includes(last) ? last : inGroup[0];
+  render();
+}
 
 /* ---------- Carritos de los clientes (lo que están armando ahora) ---------- */
 let adminCarritos = null, adminCarritosLoading = false, adminCarritosVer = 'abierto';
@@ -8649,15 +8734,21 @@ async function syncAdminChats(){
   }catch(e){ console.warn('Admin chat sync:', e); }
 }
 function updateAdminChatTabBadge(count){
-  const btn = document.querySelector('.admin-tab[data-tab="chats"]');
+  // Globo de la solapa Chats (solo existe si la sección Ventas está abierta)
+  setBadgeOn(document.querySelector('.admin-tab[data-tab="chats"]'), 'admin-tab-badge', count);
+  // Globo de la sección Ventas: suma los demás avisos de la sección + chats
+  const group = document.querySelector('.admin-group[data-group="ventas"]');
+  if(group) setBadgeOn(group, 'admin-group-badge', (parseInt(group.dataset.baseBadge,10)||0) + count);
+}
+function setBadgeOn(btn, cls, count){
   if(!btn) return;
-  let badge = btn.querySelector('.admin-tab-badge');
+  let badge = btn.querySelector('.'+cls);
   if(count>0){
     const text = count>99?'99+':String(count);
     if(badge){ badge.textContent = text; }
     else{
       badge = document.createElement('span');
-      badge.className = 'admin-tab-badge';
+      badge.className = cls;
       badge.textContent = text;
       btn.appendChild(badge);
     }
@@ -9927,7 +10018,7 @@ function renderAdminStarpos(){
   else if(!sp.datos) cuerpo = `<div class="empty-state"><p>Cargando datos del local…</p></div>`;
   else cuerpo = ({ventas: spVentas, turnos: spTurnos, productos: spProductos, tickets: spTickets, anulaciones: spAnulaciones, retiros: spRetiros, stock: spStock})[sp.vista]();
   return `
-    <div style="padding:10px 16px 4px; position:sticky; top:0; z-index:10; background:var(--navy2);">
+    <div style="padding:10px 16px 4px; position:sticky; top:var(--admin-hdr,0px); z-index:10; background:var(--navy2);">
       <div style="display:flex; gap:6px; overflow-x:auto; padding-bottom:6px; -webkit-overflow-scrolling:touch;">
         ${SP_VISTAS.map(([k, l]) => chip('vista', k, l)).join('')}
       </div>
@@ -10155,7 +10246,7 @@ function renderAdminPreciosPC(){
   const f = state.pcPreciosFiltro || 'distintos';
   const chip = (k, label) => `<button class="chip ${f===k?'active':''}" onclick="state.pcPreciosFiltro='${k}'; render()">${label}</button>`;
   return `
-    <div style="padding:10px 16px 4px; position:sticky; top:0; z-index:10; background:var(--navy2);">
+    <div style="padding:10px 16px 4px; position:sticky; top:var(--admin-hdr,0px); z-index:10; background:var(--navy2);">
       <p style="font-size:12px; color:rgba(255,255,255,0.6); margin-bottom:8px;">Precio de cada producto en la PC del local (StarPOS) comparado con el de la App. Se actualiza solo cada 15 minutos con lo que cargás en la PC. Tocá <b>Usar precio PC</b> para pasarlo a la App.</p>
       ${renderSpSyncBox()}
       ${!filas.length ? `<p style="font-size:12.5px; color:var(--warn); margin-bottom:8px;">Todavía no llegaron precios: aparecen en la próxima sincronización de la PC (hasta 15 minutos). Después tocá ↻ Actualizar.</p>` : ''}
@@ -10240,7 +10331,7 @@ function renderAdminCatalogoLocal(){
   const chip = (k, label) => `<button class="chip ${f===k?'active':''}" onclick="state.catLocalFiltro='${k}'; render()">${label}</button>`;
   const fmtF = d => d ? d.slice(8,10)+'/'+d.slice(5,7)+'/'+d.slice(0,4) : '—';
   return `
-    <div style="padding:10px 16px 4px; position:sticky; top:0; z-index:10; background:var(--navy2);">
+    <div style="padding:10px 16px 4px; position:sticky; top:var(--admin-hdr,0px); z-index:10; background:var(--navy2);">
       <p style="font-size:12px; color:rgba(255,255,255,0.6); margin-bottom:8px;">Productos de StarPOS que no están en la tienda (${pend} pendientes). La Caja ya los cobra; tocá <b>Activar</b> para pasarlos a la tienda.</p>
       ${renderSpSyncBox()}
       <div style="display:flex; align-items:center; gap:8px; background:var(--glass); border:1px solid var(--glass-bd); border-radius:12px; padding:0 12px;">
