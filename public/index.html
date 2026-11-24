@@ -490,6 +490,8 @@ img{display:block; max-width:100%;}
   background:var(--danger); color:#fff; font-size:10px; font-weight:800; display:flex; align-items:center; justify-content:center; line-height:1; box-shadow:0 0 0 2px var(--navy);}
 .admin-tabs{display:flex; gap:4px; overflow-x:auto; padding:0 12px; scrollbar-width:none; background:rgba(255,255,255,0.03); border-top:1px solid var(--glass-bd);}
 .admin-tabs::-webkit-scrollbar{display:none;}
+/* Con mouse (notebook/PC) no se puede deslizar la fila: las solapas bajan a otra línea */
+@media (hover:hover) and (pointer:fine){ .admin-tabs{flex-wrap:wrap; overflow-x:visible; row-gap:0;} }
 .admin-tab{flex:none; display:flex; align-items:center; gap:6px; padding:11px 10px 10px; font-size:12.5px; font-weight:600; white-space:nowrap;
   color:rgba(255,255,255,0.6); border-bottom:2px solid transparent; transition:color .15s ease, border-color .15s ease;}
 .admin-tab:hover{color:rgba(255,255,255,0.9);}
@@ -10301,7 +10303,7 @@ function fmtFechaHora(iso){
 function renderSpSyncBox(){
   if(!spSync && !spSyncLoading) apiLoadSpSync();
   const box = inner => `<div style="margin-bottom:10px; padding:10px 12px; border-radius:12px; background:var(--glass); border:1px solid var(--glass-bd); font-size:12.5px; color:rgba(255,255,255,0.8);">${inner}</div>`;
-  const btnDesc = `<button class="btn-secondary" style="padding:7px 12px; font-size:12px;" onclick="descargarSincronizador()">Descargar sincronizador</button>`;
+  const btnDesc = `<button class="btn-secondary" style="padding:7px 12px; font-size:12px; width:auto;" onclick="descargarSincronizador()">Descargar sincronizador</button>`;
   if(!spSync) return box('Sincronización con StarPOS: cargando…');
   if(spSync.error === 'falta') return box('Para que los productos y precios de StarPOS pasen solos, falta correr <b>supabase-migration-sync-starpos.sql</b> en Supabase.');
   if(spSync.error) return box('Sincronización con StarPOS: ' + escapeHtml(spSync.error));
@@ -10321,8 +10323,8 @@ function renderSpSyncBox(){
       : `<p style="margin-top:6px; opacity:.7;">No hubo cambios de precio en los últimos 7 días.</p>`) : '';
   return box(`${estado}
     <div style="display:flex; gap:8px; flex-wrap:wrap; margin-top:8px;">
-      <button class="btn-secondary" style="padding:7px 12px; font-size:12px;" onclick="spSyncVerCambios=!spSyncVerCambios; render()">${spSyncVerCambios?'Ocultar':'Ver'} precios cambiados (7 días)</button>
-      <button class="btn-secondary" style="padding:7px 12px; font-size:12px;" onclick="spSync=null; catLocal=null; render()">Actualizar</button>
+      <button class="btn-secondary" style="padding:7px 12px; font-size:12px; width:auto;" onclick="spSyncVerCambios=!spSyncVerCambios; render()">${spSyncVerCambios?'Ocultar':'Ver'} precios cambiados (7 días)</button>
+      <button class="btn-secondary" style="padding:7px 12px; font-size:12px; width:auto;" onclick="spSync=null; catLocal=null; render()">Actualizar</button>
       ${btnDesc}
     </div>${lista}`);
 }
@@ -10695,10 +10697,13 @@ function renderAdminPreciosPC(){
   const f = state.pcPreciosFiltro || 'distintos';
   const chip = (k, label) => `<button class="chip ${f===k?'active':''}" onclick="state.pcPreciosFiltro='${k}'; render()">${label}</button>`;
   return `
-    <div style="padding:10px 16px 4px; position:sticky; top:var(--admin-hdr,0px); z-index:10; background:var(--navy2);">
+    <div style="padding:10px 16px 0;">
       <p style="font-size:12px; color:rgba(255,255,255,0.6); margin-bottom:8px;">Precio de cada producto en la PC del local (StarPOS) comparado con el de la App. Se actualiza solo cada 15 minutos con lo que cargás en la PC. Tocá <b>Usar precio PC</b> para pasarlo a la App.</p>
       ${renderSpSyncBox()}
       ${!filas.length ? `<p style="font-size:12.5px; color:var(--warn); margin-bottom:8px;">Todavía no llegaron precios: aparecen en la próxima sincronización de la PC (hasta 15 minutos). Después tocá ↻ Actualizar.</p>` : ''}
+    </div>
+    <!-- Solo el buscador y los filtros quedan fijos arriba: así la lista se puede recorrer en pantallas bajas -->
+    <div style="padding:8px 16px 6px; position:sticky; top:var(--admin-hdr,0px); z-index:10; background:var(--navy2);">
       <div style="display:flex; align-items:center; gap:8px; background:var(--glass); border:1px solid var(--glass-bd); border-radius:12px; padding:0 12px;">
         <input type="search" placeholder="Buscar por nombre o código…" value="${escapeHtml(state.pcPreciosQ||'')}"
           oninput="state.pcPreciosQ=this.value; renderAdminPreciosPCInPlace()"
@@ -10780,9 +10785,11 @@ function renderAdminCatalogoLocal(){
   const chip = (k, label) => `<button class="chip ${f===k?'active':''}" onclick="state.catLocalFiltro='${k}'; render()">${label}</button>`;
   const fmtF = d => d ? d.slice(8,10)+'/'+d.slice(5,7)+'/'+d.slice(0,4) : '—';
   return `
-    <div style="padding:10px 16px 4px; position:sticky; top:var(--admin-hdr,0px); z-index:10; background:var(--navy2);">
+    <div style="padding:10px 16px 0;">
       <p style="font-size:12px; color:rgba(255,255,255,0.6); margin-bottom:8px;">Productos de StarPOS que no están en la tienda (${pend} pendientes). La Caja ya los cobra; tocá <b>Activar</b> para pasarlos a la tienda.</p>
       ${renderSpSyncBox()}
+    </div>
+    <div style="padding:8px 16px 6px; position:sticky; top:var(--admin-hdr,0px); z-index:10; background:var(--navy2);">
       <div style="display:flex; align-items:center; gap:8px; background:var(--glass); border:1px solid var(--glass-bd); border-radius:12px; padding:0 12px;">
         <input type="search" placeholder="Buscar por nombre, marca o código…" value="${escapeHtml(state.catLocalQ||'')}"
           oninput="state.catLocalQ=this.value; renderAdminCatalogoLocalInPlace()"
