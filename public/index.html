@@ -4919,10 +4919,22 @@ function nvVentasPorModelo(pedidos){
 let nvPorModeloBy = 'cajas', nvPorModeloOpen = null;
 function nvHtmlPorModelo(pedidos){
   const vend = nvVentasPorModelo(pedidos);
-  const ids = [...new Set([...Object.keys(nvData.modelos), ...Object.keys(vend)])];
-  if(!ids.length) return '';
+  const esEsp = id=>!!(nvData.modelos[id] && nvData.modelos[id].especial);
+  const ids = [...new Set([...Object.keys(nvData.modelos), ...Object.keys(vend)])].filter(id=>!esEsp(id));
   const vacio = {cajas:0, total:0, pres:0, clientes:{}};
   const filas = ids.map(id=>({id, nombre:(nvData.modelos[id]&&nvData.modelos[id].nombre) || '(modelo borrado)', s:vend[id]||vacio}));
+  // Las cajas especiales van juntas en una sola fila; al abrirla se ve cada una con su cliente
+  const espIds = Object.keys(vend).filter(esEsp);
+  if(espIds.length){
+    const s = {cajas:0, total:0, pres:0, clientes:{}};
+    espIds.forEach(id=>{
+      const v = vend[id], m = nvData.modelos[id], ped = nvData.pedidos[m.pedido];
+      s.cajas += v.cajas; s.total += v.total; s.pres += v.pres;
+      if(v.cajas) s.clientes[`${m.nombre} · ${(ped&&ped.cliente)||'(sin nombre)'}`] = v.cajas;
+    });
+    filas.push({id:'__esp', nombre:'Cajas especiales', esp:true, s});
+  }
+  if(!filas.length) return '';
   const key = nvPorModeloBy==='total' ? 'total' : 'cajas';
   filas.sort((a,b)=>b.s[key]-a.s[key] || b.s.pres-a.s.pres || a.nombre.localeCompare(b.nombre));
   const max = Math.max(...filas.map(f=>f.s[key])) || 1;
@@ -4937,10 +4949,10 @@ function nvHtmlPorModelo(pedidos){
       const s = f.s, nCli = Object.keys(s.clientes).length, open = nvPorModeloOpen===f.id;
       return `<div class="nv-mod">
         <button class="nv-mod-head" aria-expanded="${open}" onclick="nvPorModeloOpen=${open?'null':`'${f.id}'`};nvRender()">
-          <span class="nv-mod-name"><span class="nv-mod-rk">${i+1}</span><span class="nv-mod-nm">${escapeHtml(f.nombre)}</span></span>
-          <span class="nv-mod-val">${key==='cajas' ? nvCant(s.cajas)+' cajas' : nvMoney(s.total)}</span>
-          <span class="nv-mod-bar"><i style="width:${s[key]/max*100}%;${s[key]?'':'min-width:0;'}"></i></span>
-          <span class="nv-mod-sub">${tot?nvPct(s[key]/tot):'0%'} del total · ${key==='cajas' ? nvMoney(s.total) : nvCant(s.cajas)+' cajas'} · ${nCli} cliente${nCli!==1?'s':''}${s.pres?` · +${nvCant(s.pres)} en presupuesto`:''}</span>
+          <span class="nv-mod-name"><span class="nv-mod-rk">${i+1}</span><span class="nv-mod-nm">${escapeHtml(f.nombre)}</span>${f.esp?`<span class="nv-tag-esp">${nCli}</span>`:''}</span>
+          <span class="nv-mod-val" ${f.esp?'style="color:#b69cff;"':''}>${key==='cajas' ? nvCant(s.cajas)+' cajas' : nvMoney(s.total)}</span>
+          <span class="nv-mod-bar"><i style="width:${s[key]/max*100}%;${s[key]?'':'min-width:0;'}${f.esp?'background:linear-gradient(90deg,#8a6fe0,#b69cff);':''}"></i></span>
+          <span class="nv-mod-sub">${tot?nvPct(s[key]/tot):'0%'} del total · ${key==='cajas' ? nvMoney(s.total) : nvCant(s.cajas)+' cajas'} · ${f.esp ? `${nCli} caja${nCli!==1?'s':''} distinta${nCli!==1?'s':''}` : `${nCli} cliente${nCli!==1?'s':''}`}${s.pres?` · +${nvCant(s.pres)} en presupuesto`:''}</span>
         </button>
         ${open ? `<div class="nv-mod-cli">${Object.entries(s.clientes).sort((a,b)=>b[1]-a[1]).map(([c,n])=>`<div><b>${escapeHtml(c)}</b><span>${nvCant(n)} cajas</span></div>`).join('') || '<div>Nadie lo pidió todavía.</div>'}</div>` : ''}
       </div>`;
@@ -4952,8 +4964,11 @@ function nvEstado(e){ return NV_ESTADOS.find(x=>x[0]===e) || NV_ESTADOS[0]; }
 function nvPill(e){ const [,txt,col] = nvEstado(e); return `<span class="nv-pill" style="border-color:${col};color:${col};">${txt}</span>`; }
 
 // ---- Catálogo: productos de la app (con costo) y catálogo del local ----
+// Un buscador por destino (modelo, ajustes del pedido o cada caja especial),
+// así puede haber varios en la misma pantalla.
+function nvBuscaInputId(destino){ return 'nvBuscaCat_' + destino.tipo + '_' + destino.id; }
 async function nvBuscarCatalogo(destino){
-  const inp = document.getElementById('nvBuscaCat');
+  const inp = document.getElementById(nvBuscaInputId(destino));
   const q = (inp ? inp.value : '').trim();
   nvCatQ = q; nvCatDestino = destino;
   const palabras = normText(q).split(/\s+/).filter(w=>w.length>1);
@@ -4995,6 +5010,7 @@ function nvAgregarArticulo(artId){
   if(d && d.tipo==='modelo' && nvData.modelos[d.id]){
     const m = nvData.modelos[d.id]; m.items = m.items||{};
     m.items[artId] = (m.items[artId]||0) + 1;
+    if(m.especial) return nvEspecialItemsCambiaron(m);
     return nvCambio(['modelo', d.id]);
   }
   if(d && d.tipo==='pedido' && nvData.pedidos[d.id]){
@@ -5006,7 +5022,7 @@ function nvAgregarArticulo(artId){
 }
 async function nvElegirResultado(i){ const r = nvCatRes[i]; if(r) nvAgregarArticulo(await nvArticuloDesde(r)); }
 async function nvArticuloManual(destino){
-  const inp = document.getElementById('nvBuscaCat');
+  const inp = document.getElementById(nvBuscaInputId(destino));
   const nombre = (inp ? inp.value : '').trim();
   if(!nombre){ toast('Escribí el nombre del artículo en el buscador', 'err'); return; }
   nvCatDestino = destino;
@@ -5026,7 +5042,7 @@ function nvBuscador(destino, ayuda){
   const res = mismo ? nvCatRes : [];
   return `<div style="margin-top:12px;">
     <div class="nv-row">
-      <input type="text" id="nvBuscaCat" placeholder="${ayuda}" value="${mismo?escapeHtml(nvCatQ):''}" style="flex:1;min-width:180px;" data-d="${dj}" onkeydown="if(event.key==='Enter') nvBuscarCatalogo(JSON.parse(this.dataset.d))">
+      <input type="text" id="${nvBuscaInputId(destino)}" placeholder="${ayuda}" value="${mismo?escapeHtml(nvCatQ):''}" style="flex:1;min-width:180px;" data-d="${dj}" onkeydown="if(event.key==='Enter') nvBuscarCatalogo(JSON.parse(this.dataset.d))">
       <button class="nv-btn" onclick="nvBuscarCatalogo(${dj})">Buscar en el catálogo</button>
       <button class="nv-btn" onclick="nvArticuloManual(${dj})">Agregar a mano</button>
     </div>
@@ -5038,7 +5054,7 @@ function nvBuscador(destino, ayuda){
 // ---- Pedidos ----
 function nvNuevoPedido(){
   const id = nvId('np');
-  const modelos = Object.values(nvData.modelos);
+  const modelos = nvModelosFijos();
   const cajas = {};
   if(modelos.length===1) cajas[nvId('nl')] = {modelo: modelos[0].id, cant: 1, precio: +modelos[0].precio||0};
   nvData.pedidos[id] = {id, cliente:'', tel:'', entrega:'', estado:'presupuesto', notas:'', creado: nvHoy(), cajas, ajustes:{}, pagos:{}};
@@ -5058,8 +5074,8 @@ function nvPedidoCampo(id, campo, valor){
 }
 function nvAgregarCajaLinea(id){
   const p = nvData.pedidos[id]; if(!p) return;
-  const m = Object.values(nvData.modelos)[0];
-  if(!m){ toast('Primero creá un modelo de caja en Modelos de caja', 'err'); return; }
+  const m = nvModelosFijos()[0];
+  if(!m){ toast('Primero creá un modelo de caja en Modelos de caja, o armá una caja especial', 'err'); return; }
   p.cajas = p.cajas||{}; p.cajas[nvId('nl')] = {modelo: m.id, cant: 1, precio: +m.precio||0};
   nvCambio(['pedido', id]);
 }
@@ -5078,9 +5094,102 @@ function nvAgregarPago(id){
   const monto = nvNum(document.getElementById('nvPagoMonto').value);
   if(!(monto>0)){ toast('Poné el monto del pago', 'err'); return; }
   p.pagos = p.pagos||{};
-  p.pagos[nvId('nz')] = {fecha: document.getElementById('nvPagoFecha').value || nvHoy(), monto: nvR2(monto), medio: document.getElementById('nvPagoMedio').value, nota: document.getElementById('nvPagoNota').value.trim()};
+  const tipoEl = document.getElementById('nvPagoTipo');
+  // Una sola seña por pedido: si ya había una, la nueva la reemplaza y la anterior pasa a pago
+  if(tipoEl && tipoEl.value==='sena') nvPagos(p).forEach(x=>{ p.pagos[x.id].tipo = nvPagoTipo(p, x)==='sena' ? 'pago' : nvPagoTipo(p, x); });
+  p.pagos[nvId('nz')] = {fecha: document.getElementById('nvPagoFecha').value || nvHoy(), monto: nvR2(monto), medio: document.getElementById('nvPagoMedio').value, nota: document.getElementById('nvPagoNota').value.trim(), tipo: tipoEl ? tipoEl.value : 'pago'};
   nvCambio(['pedido', id]);
 }
+// Seña: el pago marcado como seña. En pagos cargados antes de existir el tipo
+// (ninguno tiene tipo), se toma el primero por fecha.
+function nvPagoTipo(p, x){
+  const pagos = nvPagos(p);
+  if(x.tipo) return x.tipo;
+  if(pagos.every(y=>!y.tipo) && pagos[0] && pagos[0].id===x.id) return 'sena';
+  return 'pago';
+}
+function nvSena(p){ return nvPagos(p).find(x=>nvPagoTipo(p,x)==='sena') || null; }
+function nvCambiarTipoPago(id, pagoId){
+  const p = nvData.pedidos[id]; if(!p || !p.pagos[pagoId]) return;
+  // Fijamos el tipo de todos para que el cambio no dependa del orden
+  nvPagos(p).forEach(x=>{ p.pagos[x.id].tipo = nvPagoTipo(p, x); });
+  const x = p.pagos[pagoId];
+  x.tipo = x.tipo==='sena' ? 'pago' : 'sena';
+  // Una sola seña por pedido: la anterior pasa a pago
+  if(x.tipo==='sena') Object.keys(p.pagos).forEach(k=>{ if(k!==pagoId && p.pagos[k].tipo==='sena') p.pagos[k].tipo = 'pago'; });
+  nvCambio(['pedido', id]);
+}
+
+// ---- Cajas especiales: modelo propio de un pedido ----
+// Se guardan como un modelo más (así cuentan en "Lo que falta", costo y
+// ganancia) pero con especial:true y el pedido al que pertenecen; no
+// aparecen en Modelos de caja ni para elegir en otros pedidos.
+function nvModelosFijos(){ return Object.values(nvData.modelos).filter(m=>!m.especial).sort((a,b)=>a.nombre.localeCompare(b.nombre)); }
+function nvArmarEspecial(id){
+  const p = nvData.pedidos[id]; if(!p) return;
+  const mid = nvId('nm'), lid = nvId('nl');
+  const n = nvCajas(p).filter(c=>{ const m = nvModelo(c.modelo); return m && m.especial; }).length;
+  nvData.modelos[mid] = {id:mid, nombre:`Caja especial ${p.cliente||''}${n?' '+(n+1):''}`.trim(), precio:0, items:{}, especial:true, pedido:id};
+  p.cajas = p.cajas||{}; p.cajas[lid] = {modelo: mid, cant: 1, precio: 0};
+  nvCatRes = []; nvCatQ = '';
+  nvCambio(['modelo', mid], ['pedido', id]);
+}
+function nvEspecialLinea(m){
+  const p = nvData.pedidos[m.pedido]; if(!p) return null;
+  const c = nvCajas(p).find(x=>x.modelo===m.id);
+  return c ? {p, c} : null;
+}
+// Si el precio no se tocó a mano, sigue al precio de lista de sus artículos.
+function nvEspecialItemsCambiaron(m){
+  const r = nvEspecialLinea(m);
+  if(r && !r.c.precioManual){ r.p.cajas[r.c.id].precio = nvModeloLista(m); m.precio = nvModeloLista(m); }
+  return r ? nvCambio(['modelo', m.id], ['pedido', r.p.id]) : nvCambio(['modelo', m.id]);
+}
+function nvEspecialItem(mid, art, valor){
+  const m = nvData.modelos[mid]; if(!m) return;
+  const c = nvNum(valor);
+  if(c>0) m.items[art] = c; else delete m.items[art];
+  nvEspecialItemsCambiaron(m);
+}
+function nvEspecialAgregarExistente(mid, art){
+  const m = nvData.modelos[mid]; if(!m || !art || !nvData.articulos[art]) return;
+  m.items = m.items||{}; m.items[art] = (m.items[art]||0) + 1;
+  nvEspecialItemsCambiaron(m);
+}
+function nvEspecialNombre(mid, valor){
+  const m = nvData.modelos[mid]; if(!m) return;
+  m.nombre = valor.trim() || 'Caja especial';
+  nvCambio(['modelo', mid]);
+}
+function nvEspecialPrecio(id, linea, valor){
+  const p = nvData.pedidos[id]; if(!p || !p.cajas[linea]) return;
+  const l = p.cajas[linea], m = nvModelo(l.modelo);
+  l.precio = nvR2(nvNum(valor)); l.precioManual = true;
+  if(m){ m.precio = l.precio; nvCambio(['pedido', id], ['modelo', m.id]); } else nvCambio(['pedido', id]);
+}
+function nvEspecialPrecioLista(id, linea){
+  const p = nvData.pedidos[id]; if(!p || !p.cajas[linea]) return;
+  const l = p.cajas[linea], m = nvModelo(l.modelo);
+  delete l.precioManual;
+  if(m){ l.precio = nvModeloLista(m); m.precio = l.precio; nvCambio(['pedido', id], ['modelo', m.id]); }
+}
+function nvQuitarEspecial(id, linea){
+  const p = nvData.pedidos[id]; if(!p || !p.cajas[linea]) return;
+  const m = nvModelo(p.cajas[linea].modelo);
+  if(!confirm(`¿Quitar "${m?m.nombre:'la caja especial'}" de este pedido?`)) return;
+  delete p.cajas[linea];
+  nvSave('pedido', id);
+  if(m && m.especial) nvDelete('modelo', m.id); else nvRender();
+}
+function nvEspecialAFijo(mid){
+  const m = nvData.modelos[mid]; if(!m) return;
+  if(!confirm(`¿Pasar "${m.nombre}" a Modelos de caja? Va a quedar disponible para todos los pedidos.`)) return;
+  delete m.especial; delete m.pedido;
+  toast('Ahora es un modelo fijo', 'ok');
+  nvCambio(['modelo', mid]);
+}
+// Pedidos del mismo cliente (mismo criterio que la vista Cuenta corriente)
+function nvClaveCliente(p){ return p.tel || normText(p.cliente||'') || p.id; }
 function nvQuitarPago(id, pago){
   const p = nvData.pedidos[id]; if(!p || !p.pagos[pago]) return;
   if(!confirm(`¿Borrar el pago de ${nvMoney(p.pagos[pago].monto)}?`)) return;
@@ -5090,7 +5199,10 @@ function nvBorrarPedido(id){
   const p = nvData.pedidos[id]; if(!p) return;
   const msg = nvPagos(p).length ? 'Este pedido tiene pagos cargados. ¿Borrarlo igual? Se pierden también los pagos.' : `¿Borrar el pedido de ${p.cliente||'sin nombre'}?`;
   if(!confirm(msg)) return;
-  nvPedidoSel = null; nvDelete('pedido', id);
+  nvPedidoSel = null;
+  // Sus cajas especiales no las usa nadie más
+  Object.values(nvData.modelos).filter(m=>m.especial && m.pedido===id).forEach(m=>nvDelete('modelo', m.id));
+  nvDelete('pedido', id);
 }
 function nvTextoPedido(p){
   const t = nvTotales(p);
@@ -5211,13 +5323,13 @@ async function nvPedidoDesdeLectura(r){
   nuevos.forEach(id=>nvSave('articulo', id));
   const cant = r.cantidadCajas || 1;
   const precio = r.precioPorCaja || (r.total ? nvR2(r.total/cant) : nvR2(r.items.reduce((s,it)=>s+it.cantidad*it.precioUnitario,0)));
-  const mid = nvId('nm');
-  nvData.modelos[mid] = {id: mid, nombre: 'Caja ' + (r.cliente || 'del presupuesto'), precio, items};
+  const mid = nvId('nm'), pid = nvId('np');
+  // Es una caja a medida de este pedido: queda como caja especial
+  nvData.modelos[mid] = {id: mid, nombre: 'Caja ' + (r.cliente || 'del presupuesto'), precio, items, especial: true, pedido: pid};
   nvSave('modelo', mid);
-  const pid = nvId('np');
   nvData.pedidos[pid] = {id: pid, cliente: r.cliente||'', tel: nvTel(r.telefono), entrega: r.fechaEntrega||'', estado:'presupuesto',
     notas: 'Cargado desde una foto.' + (r.observaciones ? ' ' + r.observaciones : ''), creado: nvHoy(),
-    cajas: {[nvId('nl')]: {modelo: mid, cant, precio}}, ajustes: {}, pagos: {}};
+    cajas: {[nvId('nl')]: {modelo: mid, cant, precio, precioManual: true}}, ajustes: {}, pagos: {}};
   nvSave('pedido', pid);
   nvVista = 'pedidos'; nvPedidoSel = pid; nvCatRes = [];
 }
@@ -5285,6 +5397,25 @@ const NV_CSS = `<style>
 .nv-res{margin-top:8px; border:1px solid var(--glass-bd); border-radius:10px; max-height:260px; overflow:auto;}
 .nv-res-it{display:flex; justify-content:space-between; gap:12px; padding:8px 12px; cursor:pointer; border-bottom:1px solid rgba(255,255,255,0.06);}
 .nv-res-it:hover{background:rgba(255,255,255,0.05);} .nv-res-it b{color:var(--gold2); white-space:nowrap;}
+.nv-btn.violet{color:#b69cff; border-color:rgba(182,156,255,0.5); background:rgba(182,156,255,0.1);}
+.nv-tag-esp{font-size:9.5px; font-weight:800; letter-spacing:.05em; padding:2px 6px; border-radius:6px; background:rgba(182,156,255,0.18); color:#b69cff; white-space:nowrap;}
+.nv-esp{margin-top:12px; border:1px solid rgba(182,156,255,0.45); border-radius:12px; background:rgba(182,156,255,0.06); padding:12px;}
+.nv-esp-tot{display:grid; grid-template-columns:repeat(auto-fit,minmax(min(100%,140px),1fr)); gap:10px; margin-top:12px;}
+.nv-esp-tot span{display:block; font-size:11px; color:rgba(255,255,255,0.6); margin-bottom:2px;}
+.nv-esp-tot b{font-variant-numeric:tabular-nums;}
+.nv-link{margin-top:4px; font-size:11px; color:var(--gold2); text-decoration:underline;}
+.nv-strip{display:grid; grid-template-columns:repeat(3,1fr); gap:8px; margin-bottom:12px;}
+.nv-ms{border-radius:12px; padding:9px 10px; background:rgba(0,0,0,0.15); border:1px solid var(--glass-bd); min-width:0;}
+.nv-ms span{display:block; font-size:11px; color:rgba(255,255,255,0.6);}
+.nv-ms b{display:block; font-size:15px; margin-top:1px; font-variant-numeric:tabular-nums; overflow:hidden; text-overflow:ellipsis;}
+.nv-ms small{font-size:10.5px; color:rgba(255,255,255,0.45);}
+.nv-ms-sena{border-color:rgba(224,187,74,0.5); background:rgba(197,160,40,0.1);}
+.nv-cc{display:flex; align-items:center; gap:10px; padding:10px 12px; border-radius:12px; background:rgba(229,86,109,0.1); border:1px solid rgba(229,86,109,0.4); margin-bottom:4px;}
+.nv-cc.ok{background:rgba(62,207,142,0.08); border-color:rgba(62,207,142,0.35);}
+.nv-cc p{flex:1; font-size:12.5px; line-height:1.4;} .nv-cc p b{color:var(--danger);} .nv-cc.ok p b{color:var(--ok);}
+.nv-tipo{font-size:10px; font-weight:800; letter-spacing:.04em; padding:3px 7px; border-radius:6px; cursor:pointer;}
+.nv-tipo.sena{background:rgba(197,160,40,0.22); color:var(--goldlight);}
+.nv-tipo.pago{background:rgba(62,207,142,0.16); color:var(--ok);}
 .nv-seg{display:inline-flex; border:1px solid var(--glass-bd); border-radius:9px; overflow:hidden;}
 .nv-seg button{font-size:11.5px; font-weight:600; padding:5px 10px; color:rgba(255,255,255,0.6);}
 .nv-seg button.on{background:var(--gold); color:var(--navy);}
@@ -5358,11 +5489,12 @@ function nvHtml(){
           <input type="search" id="nvBuscaCli" placeholder="Buscar cliente o teléfono" value="${escapeHtml(nvBuscaCli)}" style="flex:1;min-width:160px;" oninput="nvBuscaCli=this.value;clearTimeout(window._nvT);window._nvT=setTimeout(nvRender,250)">
         </div>
         ${lista.length ? `<div class="nv-tw"><table>
-          <thead><tr><th>Cliente</th><th>Entrega</th><th class="r">Cajas</th><th class="r">Total</th><th class="r">Pagado</th><th class="r">Saldo</th><th>Estado</th></tr></thead>
-          <tbody>${lista.map(x=>{ const t = nvTotales(x); return `<tr class="click" onclick="nvPedidoSel='${x.id}';nvCatRes=[];nvRender()">
-            <td>${escapeHtml(x.cliente||'(sin nombre)')}${x.tel?`<div style="font-size:11px;opacity:.55;">${escapeHtml(x.tel)}</div>`:''}</td>
+          <thead><tr><th>Cliente</th><th>Entrega</th><th class="r">Cajas</th><th class="r">Total</th><th class="r">Seña</th><th class="r">Pagado</th><th class="r">Saldo</th><th>Estado</th></tr></thead>
+          <tbody>${lista.map(x=>{ const t = nvTotales(x), sn = nvSena(x), esp = nvCajas(x).some(c=>{ const m = nvModelo(c.modelo); return m && m.especial; }); return `<tr class="click" onclick="nvPedidoSel='${x.id}';nvCatRes=[];nvRender()">
+            <td>${escapeHtml(x.cliente||'(sin nombre)')}${esp?' <span class="nv-tag-esp">ESP</span>':''}${x.tel?`<div style="font-size:11px;opacity:.55;">${escapeHtml(x.tel)}</div>`:''}</td>
             <td style="white-space:nowrap;">${x.entrega?nvFecha(x.entrega):'-'}</td>
-            <td class="r">${nvCant(nvCantCajas(x))}</td><td class="r">${nvMoney(t.total)}</td><td class="r">${nvMoney(t.pagado)}</td>
+            <td class="r">${nvCant(nvCantCajas(x))}</td><td class="r">${nvMoney(t.total)}</td>
+            <td class="r">${sn?nvMoney(sn.monto):'<span style="color:var(--danger);">Sin seña</span>'}</td><td class="r">${nvMoney(t.pagado)}</td>
             <td class="r" style="color:${t.saldo>0.009?'var(--danger)':'var(--ok)'};">${nvMoney(t.saldo)}</td>
             <td>${nvPill(x.estado)}</td></tr>`; }).join('')}</tbody></table></div>`
           : `<p class="nv-hint" style="text-align:center;padding:24px;">${todos.length ? 'No hay pedidos con ese filtro.' : (Object.keys(nvData.modelos).length ? 'Todavía no hay pedidos. Tocá "+ Nuevo pedido".' : 'Empezá por Modelos de caja: armá cada caja con sus artículos. Después cargás los pedidos.')}</p>`}
@@ -5414,7 +5546,7 @@ function nvHtml(){
 
   if(nvVista==='modelos'){
     const m = nvModeloSel && nvData.modelos[nvModeloSel];
-    const modelos = Object.values(nvData.modelos).sort((a,b)=>a.nombre.localeCompare(b.nombre));
+    const modelos = nvModelosFijos();
     html += `<div class="nv-card">
       <div class="nv-row" style="justify-content:space-between;margin-bottom:10px;"><div class="nv-tit" style="margin:0;">Modelos de caja</div><button class="nv-btn gold" onclick="nvNuevoModelo()">+ Nuevo modelo</button></div>
       ${modelos.length ? `<div class="nv-tw"><table>
@@ -5464,10 +5596,51 @@ function nvHtml(){
   }
   return html;
 }
+// Caja especial dentro del pedido: sus artículos, cantidad de cajas y precio.
+function nvHtmlEspecial(p, c){
+  const m = nvModelo(c.modelo);
+  const items = Object.entries(m.items||{}).sort((a,b)=>nvArt(a[0]).nombre.localeCompare(nvArt(b[0]).nombre));
+  const libres = Object.values(nvData.articulos).filter(a=>!(m.items||{})[a.id]).sort((a,b)=>a.nombre.localeCompare(b.nombre));
+  const costo = nvModeloCosto(m), lista = nvModeloLista(m), precio = +c.precio||0, gan = nvR2(precio-costo);
+  return `<div class="nv-esp">
+    <div class="nv-row" style="margin-bottom:8px;">
+      <span class="nv-tag-esp">ESPECIAL</span>
+      <input type="text" id="nvEN_${m.id}" value="${escapeHtml(m.nombre)}" style="flex:1;min-width:150px;font-weight:700;" aria-label="Nombre de la caja especial" onchange="nvEspecialNombre('${m.id}',this.value)">
+    </div>
+    ${items.length ? `<div class="nv-tw"><table>
+      <thead><tr><th>Artículo</th><th class="r">Por caja</th><th class="r">Precio de lista</th><th></th></tr></thead>
+      <tbody>${items.map(([a,q])=>`<tr><td>${escapeHtml(nvArt(a).nombre)}</td>
+        <td class="r">${nvInput('nvEI_'+m.id+'_'+a, q, `nvEspecialItem('${m.id}','${a}',this.value)`, {ancho:'70px'})}</td>
+        <td class="r">${nvMoney(nvArt(a).precio)}</td>
+        <td class="r"><button class="nv-btn" onclick="nvEspecialItem('${m.id}','${a}',0)">Quitar</button></td></tr>`).join('')}</tbody></table></div>`
+      : '<p class="nv-hint">Agregá los artículos que lleva cada caja.</p>'}
+    ${libres.length ? `<select id="nvEA_${m.id}" style="margin-top:8px;" onchange="nvEspecialAgregarExistente('${m.id}',this.value)">
+      <option value="">+ Agregar un artículo de Navidad…</option>${libres.map(a=>`<option value="${a.id}">${escapeHtml(a.nombre)}${a.precio?' · '+nvMoney(a.precio):''}</option>`).join('')}</select>` : ''}
+    ${nvBuscador({tipo:'modelo', id:m.id}, 'O buscá otro en el catálogo')}
+    <div class="nv-esp-tot">
+      <div><span>Costo por caja</span><b>${nvMoney(costo)}</b></div>
+      <div><span>Precio de lista</span><b>${nvMoney(lista)}</b></div>
+      <div><label class="nv-lab" for="nvPCC_${c.id}">Cantidad de cajas</label>${nvInput('nvPCC_'+c.id, c.cant, `nvCajaCampo('${p.id}','${c.id}','cant',this.value)`, {ancho:'100%'})}</div>
+      <div><label class="nv-lab" for="nvEP_${c.id}">Precio por caja</label>${nvInput('nvEP_'+c.id, precio, `nvEspecialPrecio('${p.id}','${c.id}',this.value)`, {ancho:'100%'})}
+        ${c.precioManual && nvR2(precio)!==nvR2(lista) ? `<button class="nv-link" onclick="nvEspecialPrecioLista('${p.id}','${c.id}')">Usar precio de lista</button>` : ''}</div>
+      <div><span>Ganancia por caja</span><b style="color:${gan>=0?'var(--ok)':'var(--danger)'};">${nvMoney(gan)}${precio?` · ${nvPct(gan/precio)}`:''}</b></div>
+      <div><span>Subtotal</span><b style="color:var(--gold2);">${nvMoney((+c.cant||0)*precio)}</b></div>
+    </div>
+    <div class="nv-row" style="margin-top:10px;justify-content:flex-end;">
+      <button class="nv-btn" onclick="nvEspecialAFijo('${m.id}')">Hacer modelo fijo</button>
+      <button class="nv-btn red" onclick="nvQuitarEspecial('${p.id}','${c.id}')">Quitar caja especial</button>
+    </div>
+  </div>`;
+}
 function nvHtmlPedido(p){
   const t = nvTotales(p);
-  const modelos = Object.values(nvData.modelos).sort((a,b)=>a.nombre.localeCompare(b.nombre));
-  const cajas = nvCajas(p), ajustes = nvAjustes(p), pagos = nvPagos(p);
+  const modelos = nvModelosFijos();
+  const esEsp = c=>{ const m = nvModelo(c.modelo); return !!(m && m.especial); };
+  const todasCajas = nvCajas(p), ajustes = nvAjustes(p), pagos = nvPagos(p);
+  const cajas = todasCajas.filter(c=>!esEsp(c)), especiales = todasCajas.filter(esEsp);
+  const sena = nvSena(p);
+  const otros = nvPedidos().filter(x=>x.id!==p.id && x.estado!=='cancelado' && nvClaveCliente(x)===nvClaveCliente(p));
+  const deudaTotal = [p, ...otros].filter(x=>x.estado!=='cancelado').reduce((s,x)=>s+nvTotales(x).saldo, 0);
   const pc = (f,v)=>`nvPedidoCampo('${p.id}','${f}',${v})`;
   const clientes = Object.values(state.clients||{}).filter(c=>c.name).map(c=>c.name).sort();
   return `<div class="nv-card">
@@ -5486,7 +5659,16 @@ function nvHtmlPedido(p){
       <div><label class="nv-lab">Fecha de entrega</label>${nvInput('nvPEntrega', p.entrega, pc('entrega','this.value'), {tipo:'date', ancho:'100%'})}</div>
       <div><label class="nv-lab">Estado</label><select id="nvPEstado" onchange="${pc('estado','this.value')}">${NV_ESTADOS.map(e=>`<option value="${e[0]}" ${p.estado===e[0]?'selected':''}>${e[1]}</option>`).join('')}</select></div>
     </div>
-    <div class="nv-tit">Cajas</div>
+    <div class="nv-strip">
+      <div class="nv-ms nv-ms-sena"><span>Seña</span><b style="color:var(--goldlight);">${sena?nvMoney(sena.monto):'—'}</b><small>${sena?`${nvFecha(sena.fecha)}${sena.medio?' · '+escapeHtml(sena.medio):''}`:'Sin seña'}</small></div>
+      <div class="nv-ms"><span>Pagado</span><b>${nvMoney(t.pagado)}</b><small>de ${nvMoney(t.total)}</small></div>
+      <div class="nv-ms"><span>Saldo</span><b style="color:${t.saldo>0.009?'var(--danger)':'var(--ok)'};">${nvMoney(t.saldo)}</b><small>${t.saldo>0.009?'Falta cobrar':'Pagado'}</small></div>
+    </div>
+    ${otros.length ? `<div class="nv-cc ${deudaTotal>0.009?'':'ok'}">
+      <p>Este cliente tiene <b style="color:var(--white);">${otros.length+1} pedidos</b> · ${deudaTotal>0.009?`debe <b>${nvMoney(deudaTotal)}</b> en total`:'no debe nada'}.</p>
+      <button class="nv-btn" onclick="nvPedidoSel=null;nvVista='cuenta';nvCatRes=[];nvRender()">Ver cuenta</button>
+    </div>` : ''}
+    <div class="nv-tit" style="margin-top:16px;">Cajas</div>
     ${cajas.length ? `<div class="nv-tw"><table>
       <thead><tr><th>Modelo</th><th class="r">Cantidad</th><th class="r">Precio por caja</th><th class="r">Subtotal</th><th></th></tr></thead>
       <tbody>${cajas.map(c=>`<tr>
@@ -5494,8 +5676,12 @@ function nvHtmlPedido(p){
         <td class="r">${nvInput('nvPCC_'+c.id, c.cant, `nvCajaCampo('${p.id}','${c.id}','cant',this.value)`, {ancho:'80px'})}</td>
         <td class="r">${nvInput('nvPCP_'+c.id, c.precio, `nvCajaCampo('${p.id}','${c.id}','precio',this.value)`, {ancho:'130px'})}</td>
         <td class="r">${nvMoney(c.cant*c.precio)}</td>
-        <td class="r"><button class="nv-btn" onclick="nvQuitarCajaLinea('${p.id}','${c.id}')">Quitar</button></td></tr>`).join('')}</tbody></table></div>` : '<p class="nv-hint">Este pedido todavía no tiene cajas.</p>'}
-    <button class="nv-btn" style="margin-top:10px;" onclick="nvAgregarCajaLinea('${p.id}')">+ Agregar cajas</button>
+        <td class="r"><button class="nv-btn" onclick="nvQuitarCajaLinea('${p.id}','${c.id}')">Quitar</button></td></tr>`).join('')}</tbody></table></div>` : (especiales.length ? '' : '<p class="nv-hint">Este pedido todavía no tiene cajas.</p>')}
+    ${especiales.map(c=>nvHtmlEspecial(p, c)).join('')}
+    <div class="nv-row" style="margin-top:10px;">
+      <button class="nv-btn" onclick="nvAgregarCajaLinea('${p.id}')">+ Agregar cajas</button>
+      <button class="nv-btn violet" onclick="nvArmarEspecial('${p.id}')">+ Armar caja especial</button>
+    </div>
 
     <div class="nv-tit" style="margin-top:20px;">Cambios de este pedido</div>
     <p class="nv-hint" style="margin-bottom:8px;">Artículos que este cliente agrega o saca del total de sus cajas. Para sacar, poné la cantidad en negativo (por ejemplo -2) y se descuenta su precio.</p>
@@ -5517,10 +5703,13 @@ function nvHtmlPedido(p){
 
     <div class="nv-tit" style="margin-top:20px;">Señas y pagos</div>
     ${pagos.length ? `<div class="nv-tw"><table>
-      <thead><tr><th>Fecha</th><th>Medio</th><th>Nota</th><th class="r">Monto</th><th></th></tr></thead>
-      <tbody>${pagos.map(x=>`<tr><td style="white-space:nowrap;">${nvFecha(x.fecha)}</td><td>${escapeHtml(x.medio||'')}</td><td>${escapeHtml(x.nota||'')}</td>
-        <td class="r">${nvMoney(x.monto)}</td><td class="r"><button class="nv-btn" onclick="nvQuitarPago('${p.id}','${x.id}')">Borrar</button></td></tr>`).join('')}</tbody></table></div>` : ''}
+      <thead><tr><th>Fecha</th><th>Tipo</th><th>Medio</th><th>Nota</th><th class="r">Monto</th><th></th></tr></thead>
+      <tbody>${pagos.map(x=>{ const tp = nvPagoTipo(p, x); return `<tr><td style="white-space:nowrap;">${nvFecha(x.fecha)}</td>
+        <td><button class="nv-tipo ${tp}" title="Tocá para cambiar entre Seña y Pago" onclick="nvCambiarTipoPago('${p.id}','${x.id}')">${tp==='sena'?'SEÑA':'PAGO'}</button></td>
+        <td>${escapeHtml(x.medio||'')}</td><td>${escapeHtml(x.nota||'')}</td>
+        <td class="r">${nvMoney(x.monto)}</td><td class="r"><button class="nv-btn" onclick="nvQuitarPago('${p.id}','${x.id}')">Borrar</button></td></tr>`; }).join('')}</tbody></table></div>` : ''}
     <div class="nv-row" style="margin-top:10px;">
+      <select id="nvPagoTipo" style="width:auto;" aria-label="Tipo de pago"><option value="sena" ${sena?'':'selected'}>Seña</option><option value="pago" ${sena?'selected':''}>Pago</option></select>
       <input type="date" id="nvPagoFecha" value="${nvHoy()}" style="width:auto;">
       <input type="number" id="nvPagoMonto" class="num" placeholder="Monto $" step="0.01" inputmode="decimal" style="width:140px;">
       <select id="nvPagoMedio" style="width:auto;">${NV_MEDIOS.map(m=>`<option>${m}</option>`).join('')}</select>
