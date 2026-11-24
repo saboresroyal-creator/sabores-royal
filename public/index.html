@@ -4611,6 +4611,7 @@ function renderAdmin(){
   const newClientsCount = Object.values(state.clients).filter(c=>!c.seen).length;
   const ALL_TABS = [
     {key:"pedidos",       group:"ventas",   label:"Pedidos", badge:pendingOrdersCount},
+    {key:"navidad",       group:"ventas",   label:"Cajas Navideñas"},
     {key:"carritos",      group:"ventas",   label:"Carritos"},
     {key:"clientes",      group:"ventas",   label:"Clientes", badge:newClientsCount},
     {key:"chats",         group:"ventas",   label:"Chats", badge:chatUnreadTotal},
@@ -4625,7 +4626,6 @@ function renderAdmin(){
     {key:"listaprecios",  group:"precios",  label:"Listas de Precios"},
     {key:"carteles",      group:"precios",  label:"Carteles"},
     {key:"banners",       group:"precios",  label:"Novedades/Ofertas"},
-    {key:"navidad",       group:"precios",  label:"Cajas Navideñas"},
     {key:"comparador",    group:"precios",  label:"Comparador"},
     {key:"premios",       group:"fidelidad",label:"Premios", badge:pendingRedemptionsCount},
     {key:"sugerencias",   group:"fidelidad",label:"Sugerencias", badge:unreadCount},
