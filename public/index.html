@@ -4896,6 +4896,58 @@ function nvNecesidades(pedidos){
   return out;
 }
 function nvPedidos(){ return Object.values(nvData.pedidos); }
+// Cajas vendidas por modelo: suma las líneas de cajas de los pedidos firmes
+// (confirmado/armado/entregado). Los presupuestos van aparte en "pres".
+function nvVentasPorModelo(pedidos){
+  const r = {};
+  pedidos.forEach(p=>{
+    const firme = NV_FIRMES.includes(p.estado), pres = p.estado==='presupuesto';
+    if(!firme && !pres) return;
+    nvCajas(p).forEach(c=>{
+      if(!c.modelo) return;
+      const s = r[c.modelo] || (r[c.modelo] = {cajas:0, total:0, pres:0, clientes:{}});
+      const n = +c.cant||0;
+      if(pres){ s.pres += n; return; }
+      s.cajas += n;
+      s.total += n*(+c.precio||0);
+      const cli = (p.cliente||'').trim() || '(sin nombre)';
+      s.clientes[cli] = (s.clientes[cli]||0) + n;
+    });
+  });
+  return r;
+}
+let nvPorModeloBy = 'cajas', nvPorModeloOpen = null;
+function nvHtmlPorModelo(pedidos){
+  const vend = nvVentasPorModelo(pedidos);
+  const ids = [...new Set([...Object.keys(nvData.modelos), ...Object.keys(vend)])];
+  if(!ids.length) return '';
+  const vacio = {cajas:0, total:0, pres:0, clientes:{}};
+  const filas = ids.map(id=>({id, nombre:(nvData.modelos[id]&&nvData.modelos[id].nombre) || '(modelo borrado)', s:vend[id]||vacio}));
+  const key = nvPorModeloBy==='total' ? 'total' : 'cajas';
+  filas.sort((a,b)=>b.s[key]-a.s[key] || b.s.pres-a.s.pres || a.nombre.localeCompare(b.nombre));
+  const max = Math.max(...filas.map(f=>f.s[key])) || 1;
+  const tot = filas.reduce((s,f)=>s+f.s[key],0);
+  const seg = (k,l)=>`<button class="${nvPorModeloBy===k?'on':''}" onclick="nvPorModeloBy='${k}';nvRender()">${l}</button>`;
+  return `<div class="nv-card">
+    <div class="nv-row" style="justify-content:space-between;margin-bottom:6px;">
+      <div class="nv-tit" style="margin:0;">Cajas por modelo</div>
+      <span class="nv-seg" role="group" aria-label="Medir por">${seg('cajas','Cajas')}${seg('total','Facturado')}</span>
+    </div>
+    ${filas.map((f,i)=>{
+      const s = f.s, nCli = Object.keys(s.clientes).length, open = nvPorModeloOpen===f.id;
+      return `<div class="nv-mod">
+        <button class="nv-mod-head" aria-expanded="${open}" onclick="nvPorModeloOpen=${open?'null':`'${f.id}'`};nvRender()">
+          <span class="nv-mod-name"><span class="nv-mod-rk">${i+1}</span><span class="nv-mod-nm">${escapeHtml(f.nombre)}</span></span>
+          <span class="nv-mod-val">${key==='cajas' ? nvCant(s.cajas)+' cajas' : nvMoney(s.total)}</span>
+          <span class="nv-mod-bar"><i style="width:${s[key]/max*100}%;${s[key]?'':'min-width:0;'}"></i></span>
+          <span class="nv-mod-sub">${tot?nvPct(s[key]/tot):'0%'} del total · ${key==='cajas' ? nvMoney(s.total) : nvCant(s.cajas)+' cajas'} · ${nCli} cliente${nCli!==1?'s':''}${s.pres?` · +${nvCant(s.pres)} en presupuesto`:''}</span>
+        </button>
+        ${open ? `<div class="nv-mod-cli">${Object.entries(s.clientes).sort((a,b)=>b[1]-a[1]).map(([c,n])=>`<div><b>${escapeHtml(c)}</b><span>${nvCant(n)} cajas</span></div>`).join('') || '<div>Nadie lo pidió todavía.</div>'}</div>` : ''}
+      </div>`;
+    }).join('')}
+    <p class="nv-hint" style="margin-top:6px;">Cuenta los pedidos confirmados, armados y entregados. Los presupuestos se muestran aparte.</p>
+  </div>`;
+}
 function nvEstado(e){ return NV_ESTADOS.find(x=>x[0]===e) || NV_ESTADOS[0]; }
 function nvPill(e){ const [,txt,col] = nvEstado(e); return `<span class="nv-pill" style="border-color:${col};color:${col};">${txt}</span>`; }
 
@@ -5233,6 +5285,22 @@ const NV_CSS = `<style>
 .nv-res{margin-top:8px; border:1px solid var(--glass-bd); border-radius:10px; max-height:260px; overflow:auto;}
 .nv-res-it{display:flex; justify-content:space-between; gap:12px; padding:8px 12px; cursor:pointer; border-bottom:1px solid rgba(255,255,255,0.06);}
 .nv-res-it:hover{background:rgba(255,255,255,0.05);} .nv-res-it b{color:var(--gold2); white-space:nowrap;}
+.nv-seg{display:inline-flex; border:1px solid var(--glass-bd); border-radius:9px; overflow:hidden;}
+.nv-seg button{font-size:11.5px; font-weight:600; padding:5px 10px; color:rgba(255,255,255,0.6);}
+.nv-seg button.on{background:var(--gold); color:var(--navy);}
+.nv-mod{border-top:1px solid rgba(255,255,255,0.07);}
+.nv-mod:first-of-type{border-top:none;}
+.nv-mod-head{width:100%; display:grid; grid-template-columns:1fr auto; gap:4px 10px; padding:10px 0; text-align:left; color:inherit;}
+.nv-mod-name{display:flex; align-items:center; gap:6px; min-width:0; font-size:13px; font-weight:600;}
+.nv-mod-rk{flex:none; width:18px; height:18px; border-radius:50%; background:var(--navy3); color:var(--gold2); font-size:10px; font-weight:800; display:flex; align-items:center; justify-content:center;}
+.nv-mod-nm{white-space:nowrap; overflow:hidden; text-overflow:ellipsis;}
+.nv-mod-val{font-size:13px; font-weight:700; color:var(--gold2); text-align:right; white-space:nowrap; font-variant-numeric:tabular-nums;}
+.nv-mod-bar{grid-column:1 / -1; height:7px; border-radius:4px; background:rgba(255,255,255,0.06); overflow:hidden;}
+.nv-mod-bar i{display:block; height:100%; min-width:3px; border-radius:4px; background:linear-gradient(90deg, var(--gold), var(--gold2));}
+.nv-mod-sub{grid-column:1 / -1; font-size:11px; color:rgba(255,255,255,0.45); font-variant-numeric:tabular-nums;}
+.nv-mod-cli{padding:0 0 10px 24px; display:flex; flex-direction:column; gap:4px;}
+.nv-mod-cli div{display:flex; justify-content:space-between; gap:10px; font-size:12px; color:rgba(255,255,255,0.6); font-variant-numeric:tabular-nums;}
+.nv-mod-cli b{color:var(--white); font-weight:600;}
 </style>`;
 function renderAdminNavidad(){
   if(!nvData && !nvCargando) setTimeout(nvCargar, 0);
@@ -5281,6 +5349,7 @@ function nvHtml(){
       const lista = todos.filter(x=> nvFiltro==='todos' ? true : nvFiltro==='activos' ? !['entregado','cancelado'].includes(x.estado) : x.estado===nvFiltro)
         .filter(x=>!q || normText(x.cliente||'').includes(q) || (x.tel||'').includes(q))
         .sort((a,b)=>(a.entrega||'9999').localeCompare(b.entrega||'9999') || (a.cliente||'').localeCompare(b.cliente||''));
+      html += nvHtmlPorModelo(todos);
       html += `<div class="nv-card">
         <div class="nv-row" style="margin-bottom:10px;">
           <select id="nvFiltro" style="width:auto;" onchange="nvFiltro=this.value;nvRender()">
@@ -5349,11 +5418,11 @@ function nvHtml(){
     html += `<div class="nv-card">
       <div class="nv-row" style="justify-content:space-between;margin-bottom:10px;"><div class="nv-tit" style="margin:0;">Modelos de caja</div><button class="nv-btn gold" onclick="nvNuevoModelo()">+ Nuevo modelo</button></div>
       ${modelos.length ? `<div class="nv-tw"><table>
-        <thead><tr><th>Modelo</th><th class="r">Artículos</th><th class="r">Costo</th><th class="r">Precio de venta</th><th class="r">Ganancia</th><th class="r">Precio de lista</th></tr></thead>
-        <tbody>${modelos.map(x=>{ const c = nvModeloCosto(x), g = (+x.precio||0)-c; return `<tr class="click" style="${x.id===nvModeloSel?'background:rgba(255,255,255,0.05);':''}" onclick="nvModeloSel='${x.id}';nvCatRes=[];nvRender()">
-          <td>${escapeHtml(x.nombre)}</td><td class="r">${Object.keys(x.items||{}).length}</td><td class="r">${nvMoney(c)}</td><td class="r">${nvMoney(x.precio)}</td>
+        <thead><tr><th>Modelo</th><th class="r">Vendidas</th><th class="r">Artículos</th><th class="r">Costo</th><th class="r">Precio de venta</th><th class="r">Ganancia</th><th class="r">Precio de lista</th></tr></thead>
+        <tbody>${(()=>{ const vend = nvVentasPorModelo(nvPedidos()); return modelos.map(x=>{ const c = nvModeloCosto(x), g = (+x.precio||0)-c, v = vend[x.id]; return `<tr class="click" style="${x.id===nvModeloSel?'background:rgba(255,255,255,0.05);':''}" onclick="nvModeloSel='${x.id}';nvCatRes=[];nvRender()">
+          <td>${escapeHtml(x.nombre)}</td><td class="r" style="font-weight:700;color:var(--gold2);">${nvCant(v?v.cajas:0)}${v&&v.pres?`<div style="font-size:10.5px;font-weight:400;opacity:.6;">+${nvCant(v.pres)} presup.</div>`:''}</td><td class="r">${Object.keys(x.items||{}).length}</td><td class="r">${nvMoney(c)}</td><td class="r">${nvMoney(x.precio)}</td>
           <td class="r" style="color:${g>=0?'var(--ok)':'var(--danger)'};">${nvMoney(g)}${x.precio?` · ${nvPct(g/x.precio)}`:''}</td>
-          <td class="r" style="opacity:.6;">${nvMoney(nvModeloLista(x))}</td></tr>`; }).join('')}</tbody></table></div>`
+          <td class="r" style="opacity:.6;">${nvMoney(nvModeloLista(x))}</td></tr>`; }).join(''); })()}</tbody></table></div>`
         : '<p class="nv-hint">Creá tu primer modelo, por ejemplo "Clásica" o "Premium", y agregale los artículos.</p>'}
     </div>`;
     if(m){
