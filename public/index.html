@@ -5638,6 +5638,7 @@ function nvHtml(){
       const para = Math.max(0, n-u), dep = Math.max(0, ap-u), falta = Math.max(0, n-ap), conPres = Math.max(0, n+(sies[a]||0)-ap);
       costoFalta += falta*(+art.costo||0);
       return `<tr><td>${escapeHtml(art.nombre)}</td>
+        <td class="r" style="font-weight:700;">${nvCant(n)}</td>
         <td class="r" style="opacity:.7;">${nvCant(u)}</td>
         <td class="r">${nvCant(para)}</td>
         <td class="r">${nvData.articulos[a] ? nvInput('nvAp_'+a, art.apartado||0, `nvArticuloCampo('${a}','apartado',this.value)`, {ancho:'90px'}) : '-'}</td>
@@ -5645,11 +5646,28 @@ function nvHtml(){
         <td class="r" style="font-weight:700;color:${falta>0?'var(--danger)':'var(--ok)'};">${falta>0?nvCant(falta):'✓'}</td>
         <td class="r" style="opacity:.6;">${nvCant(conPres)}</td></tr>`;
     }).join('');
+    // Cajas a armar por modelo, sumando todos los pedidos confirmados
+    const porModelo = {};
+    firmes.forEach(p=>nvCajas(p).forEach(c=>{
+      const m = nvModelo(c.modelo), k = m && m.especial ? '__esp' : c.modelo;
+      const r = porModelo[k] || (porModelo[k] = {nombre: k==='__esp' ? 'Cajas especiales' : (m ? m.nombre : '(modelo borrado)'), cajas:0, armadas:0, pedidos:new Set()});
+      r.cajas += +c.cant||0; r.armadas += nvArmadoLinea(p, c.id); r.pedidos.add(p.id);
+    }));
+    const resumen = Object.values(porModelo).filter(r=>r.cajas>0).sort((a,b)=>b.cajas-a.cajas);
+    if(resumen.length) html += `<div class="nv-card">
+      <div class="nv-tit">Total a armar, todos los pedidos juntos</div>
+      <div class="nv-tw"><table>
+        <thead><tr><th>Caja</th><th class="r">Pedidos</th><th class="r">Cajas</th><th class="r">Armadas</th><th class="r">Faltan armar</th></tr></thead>
+        <tbody>${resumen.map(r=>`<tr><td>${escapeHtml(r.nombre)}</td><td class="r">${r.pedidos.size}</td><td class="r" style="font-weight:700;">${nvCant(r.cajas)}</td>
+          <td class="r">${nvCant(r.armadas)}</td><td class="r" style="color:${r.cajas-r.armadas>0?'var(--gold2)':'var(--ok)'};">${r.cajas-r.armadas>0?nvCant(r.cajas-r.armadas):'✓'}</td></tr>`).join('')}
+          <tr><td style="font-weight:700;">Total</td><td></td><td class="r" style="font-weight:700;">${nvCant(resumen.reduce((s,r)=>s+r.cajas,0))}</td><td class="r">${nvCant(resumen.reduce((s,r)=>s+r.armadas,0))}</td><td class="r" style="font-weight:700;">${nvCant(resumen.reduce((s,r)=>s+r.cajas-r.armadas,0))}</td></tr>
+        </tbody></table></div>
+    </div>`;
     html += `<div class="nv-card">
       <div class="nv-tit">Lo que falta comprar o apartar</div>
-      <p class="nv-hint" style="margin-bottom:10px;">Suma los pedidos confirmados, armados y entregados. "Ya usado" es la mercadería de las cajas que ya se armaron, y "Para armar" la de las que faltan. Para cargar tu stock usá una de las dos columnas: en <b>"En depósito hoy"</b> poné lo que contaste hoy en el depósito (la app le suma sola lo ya usado), o en "Comprado o apartado" el total que compraste o separaste para Navidad en toda la temporada.</p>
+      <p class="nv-hint" style="margin-bottom:10px;">"Necesito en total" junta todos los pedidos confirmados, armados y entregados de todos los clientes: las cajas de cada modelo por lo que lleva cada una, más los cambios de cada pedido. "Ya usado" es la mercadería de las cajas que ya se armaron, y "Para armar" la de las que faltan. Para cargar tu stock usá una de las dos columnas: en <b>"En depósito hoy"</b> poné lo que contaste hoy en el depósito (la app le suma sola lo ya usado), o en "Comprado o apartado" el total que compraste o separaste para Navidad en toda la temporada.</p>
       ${ids.length ? `<div class="nv-tw"><table>
-        <thead><tr><th>Artículo</th><th class="r">Ya usado</th><th class="r">Para armar</th><th class="r">Comprado o apartado</th><th class="r">En depósito hoy</th><th class="r">Falta comprar</th><th class="r">Falta si se confirman los presupuestos</th></tr></thead>
+        <thead><tr><th>Artículo</th><th class="r">Necesito en total</th><th class="r">Ya usado</th><th class="r">Para armar</th><th class="r">Comprado o apartado</th><th class="r">En depósito hoy</th><th class="r">Falta comprar</th><th class="r">Falta si se confirman los presupuestos</th></tr></thead>
         <tbody>${filas}</tbody></table></div>
         <p class="nv-hint" style="margin-top:10px;">Costo de lo que falta: <b style="color:var(--white);">${nvMoney(costoFalta)}</b></p>` : '<p class="nv-hint">Todavía no hay pedidos.</p>'}
     </div>`;
