@@ -606,6 +606,12 @@ img{display:block; max-width:100%;}
 .cl-tag-desc{background:rgba(197,160,40,0.2); color:var(--gold2);}
 .cl-sub{font-size:11.5px; color:rgba(255,255,255,0.45); white-space:nowrap; overflow:hidden; text-overflow:ellipsis;}
 .cl-pts{flex:none; display:flex; align-items:center; gap:4px; font-size:13px; font-weight:700; color:var(--gold2);}
+.cl-order{border-radius:14px; background:var(--glass); border:1px solid var(--glass-bd); overflow:hidden;}
+.cl-order.open{border-color:rgba(224,187,74,0.45);}
+.cl-order-head{width:100%; display:flex; align-items:center; gap:10px; padding:12px 14px; color:inherit;}
+.cl-order-chev{flex:none; font-size:18px; line-height:1; color:rgba(255,255,255,0.4); transition:transform .15s ease;}
+.cl-order.open .cl-order-chev{transform:rotate(90deg); color:var(--gold2);}
+.cl-order .order-card{border-radius:0; border-width:1px 0 0; background:rgba(0,0,0,0.12);}
 .client-pts{font-weight:700; color:var(--gold2); font-size:14px;}
 
 .settings-row{display:flex; justify-content:space-between; align-items:center; padding:14px 16px; border-bottom:1px solid var(--glass-bd);}
@@ -9110,17 +9116,23 @@ function renderAdminPedidos(){
   if(state.orders.length===0){
     return `<div class="empty-state">${ic('package')}<p>Todavía no hay pedidos.</p></div>`;
   }
+  return state.orders.map(o=>renderAdminOrderCard(o)).join('');
+}
+// Tarjeta editable de un pedido. Se usa en la solapa Pedidos y dentro del
+// detalle de cada cliente (ahí el encabezado muestra la fecha en vez del nombre).
+function renderAdminOrderCard(o, opts){
+  const inClient = !!(opts && opts.inClient);
   const order = ["Pendiente","Revision","Listo","Entregado"];
-  return state.orders.map(o=>{
+  {
     const existingVoucher = state.vouchers.find(v=>v.orderId===o.id);
     const readyForClient = o.status==="Listo" || o.status==="Entregado";
     const clientActionDisabled = readyForClient ? '' : 'disabled title="Marcá el pedido como Listo antes de esto — terminá de revisar stock/cantidades primero"';
     return `
-    <div class="order-card">
-      <div class="oc-head">
+    <div class="order-card"${inClient?' style="margin:0 0 4px;"':''}>
+      ${inClient ? '' : `<div class="oc-head">
         <span class="oc-id">#${o.id} — ${escapeHtml(o.customer.name)}</span>
         <span class="status-pill status-${o.status.toLowerCase()}">${orderStatusLabel(o.status)}</span>
-      </div>
+      </div>`}
       <div class="oc-items" style="display:flex; flex-direction:column; gap:4px; margin-bottom:8px;">
         ${o.items.map((it,idx)=>`
         <div style="display:flex; align-items:center; justify-content:space-between; gap:8px;">
@@ -9162,7 +9174,7 @@ function renderAdminPedidos(){
         <button style="flex:0 0 auto; width:40%; margin-left:auto; padding:4px; font-size:10px; background:rgba(231,76,60,0.12); border:1px solid rgba(231,76,60,0.4); border-radius:10px; color:#e74c3c; cursor:pointer;" onclick="deleteOrder('${o.id}')">${ic('trash')} Borrar pedido</button>
       </div>
     </div>
-  `;}).join('');
+  `;}
 }
 function advanceOrderStatus(orderId){
   const order = state.orders.find(o=>o.id===orderId);
@@ -12730,10 +12742,13 @@ function clientOrderStats(){
     if(o.status==='Cancelado') return;
     const phone = o.customer && o.customer.phone;
     if(!phone) return;
-    const m = map[phone] || (map[phone] = {last:0, spent:0});
-    const t = new Date(o.date).getTime();
-    if(t > m.last) m.last = t;
-    m.spent += (o.total||0);
+    // Mismo criterio que el historial del cliente: el teléfono tal cual o normalizado
+    new Set([phone, normalizePhone(phone)]).forEach(k=>{
+      const m = map[k] || (map[k] = {last:0, spent:0});
+      const t = new Date(o.date).getTime();
+      if(t > m.last) m.last = t;
+      m.spent += (o.total||0);
+    });
   });
   return phone => {
     const m = map[phone];
@@ -12841,6 +12856,7 @@ function openAdminClientDetail(phone){
 }
 function closeAdminClientDetail(){
   state.adminClientDetailPhone = null;
+  state.adminClientOrderOpen = null;
   state._paymentsSyncedFor = null;
   render();
 }
@@ -12849,8 +12865,8 @@ function renderAdminClientDetail(phone){
   if(!c){ state.adminClientDetailPhone = null; return renderAdminClientes(); }
   if(c.wholesale && state._paymentsSyncedFor !== phone){ state._paymentsSyncedFor = phone; apiSyncClientPayments(); }
   const tier = tierFor(c.points);
-  const clientOrders = state.orders.filter(o=>o.customer.phone===phone).sort((a,b)=>new Date(b.date)-new Date(a.date));
-  const totalGastado = clientOrders.reduce((s,o)=>s+(o.total||0), 0);
+  const clientOrders = state.orders.filter(o=>orderBelongsToClient(o, phone)).sort((a,b)=>new Date(b.date)-new Date(a.date));
+  const totalGastado = clientOrders.reduce((s,o)=>s+(o.status==='Cancelado'?0:(o.total||0)), 0);
   return `
     <div style="padding:4px 16px 10px; display:flex; align-items:center; gap:8px;">
       <button onclick="closeAdminClientDetail()" style="background:none; border:none; color:var(--white); cursor:pointer; padding:4px 8px; font-size:18px;">←</button>
@@ -12890,21 +12906,39 @@ function renderAdminClientDetail(phone){
       </div>
     </div>
     ${c.wholesale && !clientPaymentsLoaded ? `<p style="padding:20px; text-align:center; color:rgba(255,255,255,0.4);">Cargando cuenta corriente...</p>` : renderClientAccountSection(c)}
-    <h3 style="color:var(--gold2); font-size:14px; margin:14px 16px 4px;">Historial de pedidos</h3>
+    <h3 style="color:var(--gold2); font-size:14px; margin:14px 16px 2px;">Historial de pedidos</h3>
     ${clientOrders.length===0
       ? `<p style="font-size:13px; color:rgba(255,255,255,0.4); margin:0 16px 18px;">Todavía no hizo pedidos.</p>`
-      : clientOrders.map(o=>`
-        <div class="order-card">
-          <div class="oc-head">
-            <span class="oc-id">#${o.id} · ${new Date(o.date).toLocaleDateString('es-AR')}</span>
-            <span class="status-pill status-${o.status.toLowerCase()}">${orderStatusLabel(o.status)}</span>
-          </div>
-          <div class="oc-items">${o.items.map(it=>formatOrderItemLabel(it)).join(', ')}</div>
-          <div style="font-weight:700; color:var(--gold2);">${money(o.total)}</div>
-        </div>
-      `).join('')
+      : `<p style="font-size:11.5px; color:rgba(255,255,255,0.45); margin:0 16px 8px;">Tocá un pedido para verlo, editarlo o borrarlo.</p>
+        <div style="margin:0 16px 20px; display:flex; flex-direction:column; gap:8px;">
+        ${clientOrders.map(o=>{
+          const open = state.adminClientOrderOpen===o.id;
+          const nItems = o.items.length;
+          return `<div class="cl-order ${open?'open':''}">
+            <button class="cl-order-head" onclick="toggleClientOrder('${o.id}')" aria-expanded="${open}">
+              <div style="flex:1; min-width:0; text-align:left;">
+                <div style="font-size:13px; font-weight:600; color:var(--white);">#${o.id} · ${new Date(o.date).toLocaleDateString('es-AR')}</div>
+                <div style="font-size:11.5px; color:rgba(255,255,255,0.45); white-space:nowrap; overflow:hidden; text-overflow:ellipsis;">${nItems} producto${nItems!==1?'s':''} · ${escapeHtml(o.items.map(it=>it.name).join(', '))}</div>
+              </div>
+              <span class="status-pill status-${o.status.toLowerCase()}">${orderStatusLabel(o.status)}</span>
+              <span style="font-weight:700; color:var(--gold2); font-size:13px; white-space:nowrap;${o.status==='Cancelado'?' text-decoration:line-through; opacity:.5;':''}">${money(o.total)}</span>
+              <span class="cl-order-chev" aria-hidden="true">›</span>
+            </button>
+            ${open ? renderAdminOrderCard(o, {inClient:true}) : ''}
+          </div>`;
+        }).join('')}
+        </div>`
     }
   `;
+}
+function orderBelongsToClient(o, phone){
+  const p = o.customer && o.customer.phone;
+  if(!p) return false;
+  return p===phone || normalizePhone(p)===phone;
+}
+function toggleClientOrder(orderId){
+  state.adminClientOrderOpen = state.adminClientOrderOpen===orderId ? null : orderId;
+  render();
 }
 function goToClientChat(phone){
   state.adminClientDetailPhone = null;
