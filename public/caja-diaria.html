@@ -6165,11 +6165,14 @@ function flujoCalc(escId, op){
   const desde = fDia(hoy, -Math.round((+S.meses||5)*30.4));
   const acc = Array.from({length:7}, ()=>({n:0, ef:0, tj:0, g:0}));
   const tjReal = {}, ventaRealDia = {};
+  // Los "SUELDOS" de caja son el efectivo que se deposita para pagarlos por
+  // banco. Si están cargados como gasto fijo, no se cuentan también acá.
+  const sueldosFijos = (F.fijos||[]).some(x=>/^\s*sueldos/i.test(x.concepto||'') && +x.monto > 0);
   for(const [d, x] of Object.entries(state.dias||{})){
     let ef = 0, tj = 0, g = 0;
     (x.cajas||[]).forEach(c=>{
       ef += n(c.efectivo) + n(c.ajusteEfectivo); tj += n(c.tarjetas);
-      (c.gastos||[]).forEach(gg=>{ if(!/DEPOSITO/i.test(gg.concepto||'')) g += n(gg.monto); });
+      (c.gastos||[]).forEach(gg=>{ if(/DEPOSITO/i.test(gg.concepto||'') || (sueldosFijos && /^\s*sueldos?\s*$/i.test(gg.concepto||''))) return; g += n(gg.monto); });
     });
     if(ef + tj > 0){
       tjReal[d] = tj; ventaRealDia[d] = ef + tj;
@@ -6586,7 +6589,7 @@ function renderFlujo(){
 
   // ---------- Promedios
   const dn = ['Domingo','Lunes','Martes','Miércoles','Jueves','Viernes','Sábado'];
-  const promHtml = `<p class="hint" style="margin-bottom:10px;">Promedio de Carga Diaria de los últimos ${S.meses} meses, por día de la semana. Los gastos de caja no incluyen los depósitos al banco.</p>
+  const promHtml = `<p class="hint" style="margin-bottom:10px;">Promedio de Carga Diaria de los últimos ${S.meses} meses, por día de la semana. Los gastos de caja no incluyen los depósitos al banco ni, si están en Gastos fijos, los sueldos.</p>
     <div style="overflow-x:auto;"><table><thead><tr><th>Día</th><th class="num">Días con datos</th><th class="num">Efectivo</th><th class="num">Tarjetas</th><th class="num">Gastos de caja</th></tr></thead><tbody>
     ${[1,2,3,4,5,6,0].map(i=>{ const p = R.prom[i]; return `<tr><td style="font-family:var(--sans);">${dn[i]}</td><td class="num">${p.n}${p.cerrado && p.n ? ' (se toma como cerrado)' : ''}</td><td class="num">${pesos2(p.ef)}</td><td class="num">${pesos2(p.tj)}</td><td class="num">${pesos2(p.g)}</td></tr>`; }).join('')}
     </tbody></table></div>`;
@@ -6734,6 +6737,7 @@ function flujoAplicarDatos(d){
   ['tramos','extras'].forEach(k=>{ if(Array.isArray(d[k])) F[k] = d[k]; });
   if(d.atrasos) F.atrasos = d.atrasos;
   (d.pagosPagados || []).forEach(id=>{ const p = F.pagos.find(x=>x.id===id); if(p && !p.pagado){ p.pagado = true; p.pagadoEl = todayStr(); } });
+  (d.fijosNuevos || []).forEach(f=>{ const x = F.fijos.find(y=>y.id===f.id); if(x) Object.assign(x, f); else F.fijos.push(f); });
   Object.entries(d.fijosDesde || {}).forEach(([id, f])=>{ const x = F.fijos.find(y=>y.id===id); if(x) x.desde = f; });
 }
 function flujoImportar(){
@@ -6747,7 +6751,7 @@ function flujoImportar(){
       let d;
       try { d = JSON.parse(ev.target.result); } catch(err){ alert('El archivo no es un JSON válido.'); return; }
       if(!d || d.tipo!=='flujo-datos'){ alert('Este archivo no es de Flujo de Caja.'); return; }
-      if(!confirm(`¿Cargar ${d.titulo || 'los datos del archivo'}? Reemplaza el préstamo, los cobros y pagos con fecha y los supuestos que trae el archivo.`)) return;
+      if(!confirm(`¿Cargar ${d.titulo || 'los datos del archivo'}? Reemplaza solo lo que trae el archivo.`)) return;
       flujoAplicarDatos(d);
       save(); renderFlujo();
     };
