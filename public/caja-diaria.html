@@ -3813,7 +3813,7 @@ function toggleChequesHastaHoy() {
 
 function setChequeEstado(id, estado) {
   const c = state.cheques.find(x=>x.id===id);
-  if(c) { c.estado = estado; save(); renderCheques(); }
+  if(c) { c.estado = estado; if(estado==='cobrado') c.fechaCobrado = todayStr(); else delete c.fechaCobrado; save(); renderCheques(); }
 }
 
 function removeCheque(id) {
@@ -5996,53 +5996,52 @@ function exportarGastosPDF() {
 // ============================================================
 // FLUJO DE CAJA
 // ============================================================
-// Proyección día por día de la cuenta del banco y de la caja, desde hoy.
-// Toma en vivo los cheques, las facturas pendientes, las cuotas de los
-// préstamos (Bancos) y los promedios de venta de Carga Diaria. Los
-// supuestos y los pagos que no están en otra pestaña viven en state.flujo.
+// Proyección día por día de banco + efectivo. Toma en vivo los cheques (con
+// el atraso con que se debitan de verdad), las facturas pendientes, las
+// cuotas de los préstamos (Bancos) y los promedios de venta de Carga Diaria.
+// Los supuestos y lo que no está en otra pestaña viven en state.flujo.
 const FLUJO_SUP = [
   // [clave, etiqueta, tipo, valor por defecto, ayuda, alcance]
   // alcance 'g' = vale para todos los escenarios; 'e' = cada escenario tiene el suyo.
-  ['PUNTO DE PARTIDA'],
-  ['saldo0','Saldo de la cuenta del banco hoy','money',null,'Vacío = el descubierto cargado en Bancos, en negativo. Poné el saldo real del home banking: queda guardada la fecha en que lo cargaste.','g'],
-  ['caja0','Efectivo en caja hoy','money',null,'Vacío = el último Final cargado.','g'],
-  ['tope','Efectivo que queda en caja (el resto se deposita)','money',0,'','g'],
-  ['fin','Proyectar hasta','date','','Vacío = 7 meses y medio desde hoy.','g'],
-  ['PRÉSTAMO'],
-  ['con60','Contar el préstamo','bool',false,'Es el mismo interruptor de arriba ("Con préstamo / Sin préstamo").','g'],
-  ['rec60','Ya se acreditó','bool',false,'Tildalo cuando entre y cargá arriba el saldo real del banco, que ya lo incluye. Así no se suma dos veces.','g'],
-  ['f60','Fecha en que se acredita (o se acreditó)','date','','Fecha fija. Desde acá corre el interés. Las facturas vencidas se reparten en 6 semanas desde esta fecha.','g'],
-  ['m60','Monto','money',0,'','g'],
-  ['t60','Tasa anual','pct',0,'El interés se paga el último día de cada mes, sobre el capital que falta devolver.','g'],
-  ['devTipo','Devolución del capital','sel:ninguna=Sin cargar todavía|unica=Todo junto en una fecha|cuotas=En cuotas mensuales iguales','ninguna','Mientras diga "Sin cargar todavía", el capital no se devuelve nunca en la proyección: queda más optimista que la realidad.','g'],
-  ['devFecha','Fecha de devolución (o de la primera cuota)','date','','','g'],
-  ['devCuotas','Cantidad de cuotas mensuales','int',12,'Solo si es en cuotas: el capital se divide en partes iguales, una por mes.','g'],
+  ['GENERAL'],
+  ['saldo0','Saldo del banco','money',null,'','g'],
+  ['caja0','Efectivo','money',null,'','g'],
+  ['reserva','Reserva que no se toca','money',0,'','g'],
+  ['fin','Proyectar hasta','date','','Vacío = 12 meses desde hoy.','g'],
+  ['horizonte','Días que mira "Puedo gastar hoy"','int',90,'Busca el día más justo de ese período y le resta la reserva.','g'],
+  ['incFiscal','Pagar la deuda fiscal atrasada','bool',false,'Los pagos puntuales del grupo "Deuda fiscal atrasada" con su fecha.','g'],
+  ['simDesde','Desde cuándo rige "Qué pasa si"','date','','Vacío = el primer día del mes que viene.','g'],
   ['VENTAS Y COMPRAS (cada escenario tiene las suyas)'],
   ['meses','Meses de historia para los promedios de venta','int',5,'Promedio por día de la semana de Carga Diaria.','e'],
-  ['lag','Días hasta que se acreditan las tarjetas','int',1,'Payway con cobro anticipado: al día siguiente.','e'],
+  ['tjHoy','Parte de las tarjetas que se acredita en el momento','pct',0.30,'El resto entra el día hábil siguiente.','e'],
   ['desc','Descuento promedio de "Tarjetas"','pct',0.034,'Comisiones y retenciones. Incluye las transferencias por QR, que casi no tienen descuento.','e'],
-  ['margen','Mejora de margen por aumento de precios','pct',0,'Porcentaje de la venta que se suma como entrada.','e'],
-  ['otros','Otros ingresos al banco por mes','money',0,'Transferencias de clientes y otros.','e'],
-  ['comprasModo','Compras nuevas a proveedores','sel:fijo=Monto fijo por mes|pct=Porcentaje de la venta del mes','fijo','Las que se pagan con cheque o transferencia. A cada mes se le descuentan los cheques y facturas ya cargados con fecha en ese mes, para no contarlas dos veces.','e'],
+  ['margen','Mejora de margen por aumento de precios','pct',0,'Porcentaje de la venta que se suma como entrada, desde hoy. Para probar, usá "Qué pasa si".','e'],
+  ['otros','Otros ingresos al banco por mes','money',0,'Solo plata que NO se carga en Carga Diaria. Las transferencias de clientes ya están en Tarjetas: no van acá.','e'],
+  ['comprasModo','Compras nuevas a proveedores','sel:fijo=Monto fijo por mes|pct=Porcentaje de la venta del mes','fijo','Las que se pagan con cheque o transferencia. A cada día se le descuentan los cheques y facturas ya cargados con esa fecha, para no contarlos dos veces.','e'],
   ['compras','Compras nuevas por mes (monto fijo)','money',0,'Solo si arriba dice "Monto fijo".','e'],
-  ['comprasPct','Compras nuevas (% de la venta del mes)','pct',0.55,'Solo si arriba dice "Porcentaje". 55% sale del análisis del estudio (81,5% de recargo sobre el costo).','e'],
-  ['lagc','Días de plazo de las compras nuevas','int',30,'Las compras nuevas se empiezan a pagar a los N días de hoy; antes están los cheques ya emitidos.','e'],
+  ['comprasPct','Compras nuevas (% de la venta del mes)','pct',0.55,'Solo si arriba dice "Porcentaje".','e'],
+  ['lagc','Días hasta que vencen las primeras compras nuevas','int',15,'Antes de esa fecha están los cheques ya emitidos.','e'],
   ['pctef','Parte de las facturas pendientes que se paga en efectivo','pct',0.5,'El resto, por transferencia.','e'],
-  ['costoExtra','Mercadería para la venta de más (% de la venta extra)','pct',0.55,'Solo con compras de monto fijo: si en "Venta estimada por mes" ponés más que el promedio, se compra más mercadería y se paga por banco en el mismo mes.','e'],
-  ['BANCO Y CHEQUES'],
-  ['diasViejos','Cheques sin marcar: tomar como cobrados los de más de N días','int',3,'Se puede corregir uno por uno en "Cheques viejos sin marcar".','g'],
-  ['tdesc','Tasa anual del descubierto','pct',0,'','g'],
+  ['costoExtra','Mercadería para la venta de más (% de la venta extra)','pct',0.55,'Solo con compras de monto fijo: si en "Venta estimada por mes" ponés más que el promedio, se compra más mercadería y se paga con cheque unas 4 semanas después.','e'],
 ];
 const FLUJO_SUP_DEF = Object.fromEntries(FLUJO_SUP.filter(s=>s.length>1).map(s=>[s[0], s]));
+const FLUJO_SUP_ARRIBA = ['saldo0','caja0','reserva','incFiscal'];
 const FLUJO_ESC_BASE = [
   ['base', 'Base'],
   ['dicnormal', 'Diciembre normal'],
   ['compras55', 'Compras al 55 %'],
 ];
+// Qué porcentaje de los cheques sigue sin debitarse a los N días de su fecha.
+// Es un promedio general; el de cada proveedor se guarda en state.flujo.atrasos.
+const FLUJO_ATRASO_DEF = '97,85,77,69,61,55,52,50,47,44,43,37,37,35,32,31,29,28,27,26,24,23,21,19,18,15,15,13,10,7,4,3,2';
+const FLUJO_ATRASO_MAX = 45;
+// Días sin banco (además de sábados y domingos).
+const FLUJO_SIN_BANCO = new Set(['2026-12-07','2026-12-08','2026-12-25','2027-01-01','2027-02-08','2027-02-09','2027-03-24','2027-03-25','2027-03-26','2027-04-02','2027-05-25','2027-06-21','2027-07-09','2027-08-16','2027-10-11','2027-11-20','2027-12-08','2027-12-25','2028-01-01']);
+const FLUJO_LOCAL_CERRADO = ['12-25','01-01'];
 
 // Sin datos escritos en el código: este HTML es público (se lee con "ver
-// código fuente", sin PIN). La deuda, los planes, la Visa y los acuerdos
-// viven solo en state.flujo, detrás del PIN.
+// código fuente", sin PIN). La deuda, los planes, la Visa, los préstamos y
+// los cobros viven solo en state.flujo, detrás del PIN.
 function flujoDefault(){
   const sup = {}, esc = {};
   FLUJO_SUP.forEach(s=>{ if(s.length>1 && s[5]==='g') sup[s[0]] = s[3]; });
@@ -6052,43 +6051,32 @@ function flujoDefault(){
     if(id==='compras55') e.sup.comprasModo = 'pct';
     esc[id] = e;
   });
-  return {version:2, sup, escenarios:esc, escActivo:'base', fijos:[], pagos:[], acuerdos:[], factFecha:{}, chequesCuentan:{}};
+  return {version:3, sup, escenarios:esc, escActivo:'base', fijos:[], pagos:[], acuerdos:[], tramos:[], extras:[], atrasos:{}, factFecha:{}, chequesCuentan:{}};
 }
 
-// Versión 1 → 2. No se pierde nada de lo cargado:
-//  - Los supuestos que faltaban toman el valor que la versión 1 usaba por
-//    defecto (antes se completaban al vuelo; ahora los valores por defecto
-//    del código son neutros).
-//  - Los pagos sin fecha (antes "el día que entran los $60 M") pasan a
-//    tener esa fecha escrita.
-//  - Se arman los tres escenarios copiando los supuestos de ventas y compras.
-const FLUJO_V1_DEF = {tope:3200000, fin:'2027-06-30', rec60:false, f60:'2026-11-17', m60:60000000, t60:0.20, meses:5, lag:1, desc:0.034,
-  margen:0, otros:6800000, compras:40000000, lagc:30, pctef:0.5, costoExtra:0.55, diasViejos:3, tdesc:0.449};
+// Versión 1 → 2: los supuestos que faltaban toman el valor que la versión 1
+// usaba por defecto y se arman los tres escenarios.
+// Versión 2 → 3: el préstamo pasa a ser una lista de tramos y se saca el valor
+// inicial de "Otros ingresos", que duplicaba transferencias ya cargadas en Tarjetas.
+const FLUJO_V1_DEF = {otros:6800000, compras:40000000, f60:'2026-11-17', m60:60000000, t60:0.20, meses:5, desc:0.034, margen:0, pctef:0.5, costoExtra:0.55, comprasPct:0.55, lagc:30};
 function flujoMigrar(F){
   if(!F || !F.version) return flujoDefault();
-  ['fijos','pagos','acuerdos'].forEach(k=>{ if(!Array.isArray(F[k])) F[k] = []; });
-  ['factFecha','chequesCuentan','sup'].forEach(k=>{ if(!F[k] || Array.isArray(F[k])) F[k] = {}; });
+  ['fijos','pagos','acuerdos','tramos','extras'].forEach(k=>{ if(!Array.isArray(F[k])) F[k] = []; });
+  ['factFecha','chequesCuentan','sup','atrasos'].forEach(k=>{ if(!F[k] || Array.isArray(F[k])) F[k] = {}; });
   if(F.version < 2){
     const old = Object.assign({}, FLUJO_V1_DEF);
     Object.entries(F.sup).forEach(([k,v])=>{ if(v!==undefined && v!=='' && !(v===null && old[k]!==undefined)) old[k] = v; });
-    if(F.sup.saldo0!==undefined) old.saldo0 = F.sup.saldo0;
-    if(F.sup.caja0!==undefined) old.caja0 = F.sup.caja0;
-    const sup = {};
-    FLUJO_SUP.forEach(s=>{ if(s.length>1 && s[5]==='g') sup[s[0]] = old[s[0]]!==undefined ? old[s[0]] : s[3]; });
+    const sup = Object.assign({}, old);
     sup.con60 = (+old.m60||0) > 0;
-    sup.devTipo = 'ninguna';
-    if(sup.saldo0!==null && sup.saldo0!==undefined && sup.saldo0!=='') sup.saldoFecha = todayStr();
-    const base = {};
-    FLUJO_SUP.forEach(s=>{ if(s.length>1 && s[5]==='e') base[s[0]] = old[s[0]]!==undefined ? old[s[0]] : s[3]; });
-    base.comprasModo = 'fijo';
+    const base = {comprasModo:'fijo'};
+    ['meses','desc','margen','otros','compras','comprasPct','lagc','pctef','costoExtra'].forEach(k=>{ base[k] = old[k]; });
     const vm = Object.assign({}, F.ventasMes || {});
     F.escenarios = {
       base:      {nombre:'Base', orden:0, sup:Object.assign({}, base), ventasMes:Object.assign({}, vm)},
       dicnormal: {nombre:'Diciembre normal', orden:1, sup:Object.assign({}, base), ventasMes:{}},
       compras55: {nombre:'Compras al 55 %', orden:2, sup:Object.assign({}, base, {comprasModo:'pct', comprasPct:0.55}), ventasMes:Object.assign({}, vm)},
     };
-    const fechaSin = old.f60 || todayStr();
-    F.pagos.forEach(p=>{ if(!p.fecha) p.fecha = fechaSin; });
+    F.pagos.forEach(p=>{ if(!p.fecha) p.fecha = old.f60 || todayStr(); });
     F.sup = sup;
     F.escActivo = 'base';
     delete F.ventasMes;
@@ -6097,11 +6085,17 @@ function flujoMigrar(F){
   if(!F.escenarios || typeof F.escenarios!=='object' || Array.isArray(F.escenarios)) F.escenarios = flujoDefault().escenarios;
   Object.values(F.escenarios).forEach(e=>{ if(!e.sup) e.sup = {}; if(!e.ventasMes) e.ventasMes = {}; });
   if(!F.escenarios[F.escActivo]) F.escActivo = Object.keys(F.escenarios)[0];
+  if(F.version < 3){
+    Object.values(F.escenarios).forEach(e=>{ if(+e.sup.otros===FLUJO_V1_DEF.otros) e.sup.otros = 0; });
+    if(!F.tramos.length && F.sup.con60 && +F.sup.m60 > 0){
+      F.tramos.push({id:nuevoIdBancos('ft-'), nombre:'Préstamo', monto:+F.sup.m60, tasa:+F.sup.t60||0, primer:fSumarMeses(F.sup.f60 || todayStr(), 1), vence:F.sup.devTipo==='unica' ? (F.sup.devFecha||'') : ''});
+    }
+    F.version = 3;
+  }
   return F;
 }
 
 const FLUJO_GRUPOS = {deuda:'Deuda fiscal atrasada', afip:'Plan AFIP', visa:'Visa: cuotas', otro:'Otros pagos'};
-const FLUJO_GRUPOS_DEUDA = ['deuda','afip','visa'];
 let flujoAbiertos = {};
 let flujoUltimo = null;
 
@@ -6116,8 +6110,18 @@ function fSumarMeses(s, k){
   const dim = new Date(yy, mm + 1, 0).getDate();
   return `${yy}-${String(mm+1).padStart(2,'0')}-${String(Math.min(d, dim)).padStart(2,'0')}`;
 }
+function fDifDias(a, b){ return Math.round((new Date(a+'T12:00:00') - new Date(b+'T12:00:00')) / 864e5); }
+function fEsHabil(d){ const w = fDow(d); return w!==0 && w!==6 && !FLUJO_SIN_BANCO.has(d); }
+function fHabil(d){ while(!fEsHabil(d)) d = fDia(d, 1); return d; }
+function fCorto(d){ return ['Dom','Lun','Mar','Mié','Jue','Vie','Sáb'][fDow(d)]+' '+(+d.slice(8))+'/'+(+d.slice(5,7)); }
+// En millones con un decimal: son proyecciones, los centavos no dicen nada.
+function fM(v){ const x = r2(v/1e6); return (x <= -0.05 ? '−' : '') + '$' + Math.abs(x).toLocaleString('es-AR',{minimumFractionDigits:1,maximumFractionDigits:1}) + ' M'; }
 function flujoEscenarios(){
   return Object.entries(state.flujo.escenarios).map(([id, e])=>Object.assign({id}, e)).sort((a,b)=>(a.orden||0)-(b.orden||0));
+}
+function flujoCurva(txt){
+  const a = String(txt||FLUJO_ATRASO_DEF).split(',').map(x=>(+x||0)/100);
+  return k => k < 0 ? 1 : (k >= FLUJO_ATRASO_MAX ? 0 : (a[Math.min(k, a.length-1)] || 0));
 }
 
 function flujoSup(escId){
@@ -6130,28 +6134,34 @@ function flujoSup(escId){
     if(v===undefined || (v==='' && s[3]!=='') || (v===null && s[3]!==null)) v = s[3];
     S[s[0]] = v;
   });
-  S.rec60 = !!S.rec60; S.con60 = !!S.con60;
+  S._saldoFecha = F.sup.saldoFecha || null;
   if(S.saldo0===null || S.saldo0===undefined || S.saldo0==='') {
     S.saldo0 = -deudaDescubiertoActual(); S._saldoAuto = true;
     const fs = Object.values(state.descubiertos||{}).map(d=>d && d.actualizado).filter(Boolean).sort();
     S._saldoFecha = fs.length ? fs[fs.length-1] : null;
-  } else S._saldoFecha = F.sup.saldoFecha || null;
+  }
   if(S.caja0===null || S.caja0===undefined || S.caja0==='') {
     const f = Object.keys(state.finales||{}).sort().pop();
     S.caja0 = f ? (+state.finales[f].efectivo||0) : 0; S._cajaAuto = f || true;
   }
   S.ventasMes = E.ventasMes || {};
-  S.netearCompras = E.sup.netearCompras; // solo para pruebas: false = como la versión 1
   S._escNombre = E.nombre || '';
+  // Saldo cargado a la tarde = el día de hoy ya está adentro: se proyecta desde mañana.
+  const hoy = todayStr();
+  S._inicio = (!S._saldoAuto && S._saldoFecha===hoy && F.sup.saldoCierre) ? fDia(hoy, 1) : hoy;
   return S;
 }
 
-function flujoCalc(escId){
+// op = {margen, menos}: lo que se prueba en "Qué pasa si".
+function flujoCalc(escId, op){
+  op = op || {};
   const F = state.flujo, S = flujoSup(escId);
-  const hoy = todayStr(), fin = fMax(S.fin || fDia(hoy, 225), fDia(hoy, 30));
+  const hoy = todayStr(), ini = S._inicio, H = fDia(ini, -1), fin = fMax(S.fin || fSumarMeses(hoy, 12), fDia(hoy, 30));
+  const simDesde = S.simDesde || fSumarMeses(hoy.slice(0,7)+'-01', 1);
   const add = (m, k, v)=>{ m[k] = (m[k]||0) + v; };
   const sum = m=>Object.values(m).reduce((s,v)=>s+v,0);
-  // Promedios por día de la semana (Carga Diaria), tarjetas y venta real por día
+
+  // Promedios por día de la semana (Carga Diaria) y venta real por día
   const desde = fDia(hoy, -Math.round((+S.meses||5)*30.4));
   const acc = Array.from({length:7}, ()=>({n:0, ef:0, tj:0, g:0}));
   const tjReal = {}, ventaRealDia = {};
@@ -6168,70 +6178,16 @@ function flujoCalc(escId){
   }
   // Un día de la semana con muy pocos registros (ej: un domingo que se abrió
   // por excepción) se toma como cerrado.
+  const CERO = {ef:0, tj:0, g:0};
   const prom = acc.map(a=>a.n >= 4 ? {n:a.n, ef:a.ef/a.n, tj:a.tj/a.n, g:a.g/a.n} : {n:a.n, ef:0, tj:0, g:0, cerrado:true});
+  const pd = d=>FLUJO_LOCAL_CERRADO.includes(d.slice(5)) ? CERO : prom[fDow(d)];
 
-  // Préstamo: fecha fija. Si ya pasó y no se marcó como acreditado, no se
-  // cuenta (y se avisa arriba) en vez de moverlo a hoy.
-  const m60 = +S.m60||0, f60 = S.f60 || '';
-  const con60 = S.con60 && m60 > 0;
-  let loanIn = null, loanActivo = false, aviso60 = null;
-  if(con60){
-    if(S.rec60) loanActivo = true;
-    else if(f60 && f60 >= hoy) loanIn = f60;
-    else aviso60 = f60 ? 'pasada' : 'sinfecha';
-  }
-  const dev = {};
-  if(con60 && S.devFecha){
-    if(S.devTipo==='unica') dev[S.devFecha] = m60;
-    if(S.devTipo==='cuotas'){ const k = Math.max(1, +S.devCuotas||1); for(let i = 0; i < k; i++) add(dev, fSumarMeses(S.devFecha, i), m60 / k); }
-  }
-  let cap = 0;
-  if(loanActivo){ cap = m60; Object.entries(dev).forEach(([d, v])=>{ if(d < hoy) cap -= v; }); cap = Math.max(0, cap); }
-
-  // Cheques
-  const anclaFact = f60 || hoy;
-  const chq = {}, corte = fDia(hoy, -(+S.diasViejos||0)), viejos = [];
-  for(const c of state.cheques||[]){
-    if(c.estado==='cobrado' || c.estado==='vencido') continue;
-    let cuenta = true;
-    if(c.fechaPago < hoy){
-      cuenta = c.fechaPago >= corte;
-      const ov = F.chequesCuentan[c.id]; if(ov!==undefined) cuenta = !!ov;
-      viejos.push({c, cuenta});
-    }
-    if(cuenta) add(chq, fMax(c.fechaPago, hoy), +c.monto||0);
-  }
-  for(const c of state.chequesBorrador||[]) add(chq, fMax(c.fechaPago||hoy, hoy), +c.monto||0);
-  // Facturas pendientes: las vencidas en 6 pagos semanales desde la fecha del préstamo
-  const fac = {}, facturas = [];
-  let k6 = 0;
-  (state.facturas||[]).filter(f=>f.estado!=='pagada').sort((a,b)=>(a.fechaVence||'').localeCompare(b.fechaVence||'')).forEach(f=>{
-    const def = (f.fechaVence||hoy) < hoy ? fDia(anclaFact, 7*(k6++ % 6)) : f.fechaVence;
-    const fecha = fMax(F.factFecha[f.id] || def, hoy);
-    facturas.push({f, def, fecha, propia: !!F.factFecha[f.id]});
-    add(fac, fecha, +f.monto||0);
-  });
-  // Cuotas de préstamos (Bancos)
-  const cuo = {};
-  Object.values(state.prestamos||{}).forEach(p=>(p.cuotas||[]).forEach(c=>{ if(c.estado!=='pagado') add(cuo, fMax(c.vencimiento, hoy), +c.monto||0); }));
-  // Pagos puntuales (los pagados o destildados no se cuentan)
-  const pag = {}, pagDeuda = {};
-  let sinFecha = 0;
-  (F.pagos||[]).forEach(p=>{
-    if(p.incluir===false || p.pagado) return;
-    if(!p.fecha) sinFecha++;
-    const d = fMax(p.fecha || hoy, hoy);
-    (pag[d] = pag[d] || {}); add(pag[d], p.grupo||'otro', +p.monto||0);
-    if(FLUJO_GRUPOS_DEUDA.includes(p.grupo)) add(pagDeuda, d, +p.monto||0);
-  });
-
-  // Venta por mes. En el mes en curso se descuenta lo ya vendido en Carga
-  // Diaria; si se cargó una venta estimada, los días que faltan se escalan
-  // para llegar a ese total.
+  // Venta por mes. En el mes en curso se descuenta lo ya vendido; si se cargó
+  // una venta estimada, los días que faltan se escalan para llegar a ese total.
   const ventasMes = S.ventasMes || {}, factor = {}, ventaProm = {}, ventaReal = {}, promResto = {}, ventaEst = {};
-  for(let t = hoy.slice(0,7)+'-01'; t <= fin; t = fDia(t, 1)){
-    const m = t.slice(0,7), p = prom[fDow(t)];
-    if(t < hoy) add(ventaReal, m, ventaRealDia[t]||0); else add(promResto, m, p.ef + p.tj);
+  for(let t = ini.slice(0,7)+'-01'; t <= fin; t = fDia(t, 1)){
+    const m = t.slice(0,7), p = pd(t);
+    if(t < ini) add(ventaReal, m, ventaRealDia[t]||0); else add(promResto, m, p.ef + p.tj);
   }
   Object.keys(promResto).forEach(m=>{
     ventaProm[m] = (ventaReal[m]||0) + promResto[m];
@@ -6240,93 +6196,197 @@ function flujoCalc(escId){
     ventaEst[m] = (ventaReal[m]||0) + promResto[m] * factor[m];
   });
   const fx = d=>factor[d.slice(0,7)] ?? 1;
+  const tjDe = d=>d < ini ? (tjReal[d] ?? pd(d).tj) : pd(d).tj * fx(d);
 
-  // Compras nuevas: presupuesto del mes menos los cheques y facturas ya
-  // cargados con fecha en ese mes (desde hoy + plazo), repartido en los días.
-  const inicioCompras = fDia(hoy, +S.lagc||0);
-  const pctCompras = S.comprasModo==='pct';
-  const compraDia = {}, compraMes = {};
-  {
-    const dias = {}, cargado = {};
-    for(let t = fMax(inicioCompras, hoy); t <= fin; t = fDia(t, 1)){
-      const m = t.slice(0,7);
-      add(dias, m, 1);
-      add(cargado, m, (chq[t]||0) + (fac[t]||0));
+  // Reparte un cheque en el tiempo según cuánto se demora en debitarse. Si su
+  // fecha ya pasó y sigue pendiente, solo cuenta la demora que le queda.
+  const curvas = {}, curvaDe = prov=>{
+    const k = provKey(prov), txt = (F.atrasos.prov||{})[k] || F.atrasos.todos || '';
+    return curvas[txt] || (curvas[txt] = flujoCurva(txt));
+  };
+  const repartir = (mapa, fecha, monto, prov)=>{
+    const c = curvaDe(prov), a0 = fDifDias(H, fecha), s0 = a0 >= 0 ? c(a0) : 1;
+    if(a0 >= FLUJO_ATRASO_MAX - 1 || s0 < 1e-6){ for(let i = 1; i <= 10; i++) add(mapa, fHabil(fDia(H, i)), monto/10); return; }
+    for(let a = Math.max(0, a0 + 1); a <= FLUJO_ATRASO_MAX; a++){
+      const w = (c(a-1) - c(a)) / s0;
+      if(w > 0) add(mapa, fHabil(fDia(fecha, a)), monto * w);
     }
-    Object.keys(dias).forEach(m=>{
-      const dim = fDiasMes(m+'-01');
-      const presupMes = pctCompras ? (+S.comprasPct||0) * (ventaEst[m]||0) : (+S.compras||0);
-      const presup = presupMes * dias[m] / dim;
-      const netea = S.netearCompras !== false;
-      const nuevas = Math.max(0, presup - (netea ? cargado[m] : 0));
-      compraMes[m] = {presup, cargado: cargado[m], nuevas};
-      compraDia[m] = nuevas / dias[m];
+  };
+  const chq = {}, cargado = {}, viejos = [];
+  let pendChq = 0;
+  const unCheque = c=>{ const f = c.fechaPago || hoy, m = +c.monto||0; pendChq += m; repartir(chq, f, m, c.proveedor); if(f > H) add(cargado, f, m); };
+  for(const c of state.cheques||[]){
+    if(c.estado==='cobrado' || c.estado==='vencido') continue;
+    const cuenta = F.chequesCuentan[c.id]!==false;
+    if(fDifDias(hoy, c.fechaPago) > 30) viejos.push({c, cuenta});
+    if(cuenta) unCheque(c);
+  }
+  for(const c of state.chequesBorrador||[]) unCheque(c);
+
+  // Facturas pendientes. Las vencidas sin fecha elegida van en 6 pagos
+  // semanales. Las notas de crédito y pagos a cuenta se descuentan de las
+  // primeras facturas del mismo proveedor.
+  const fac = {}, facturas = [], credito = {};
+  let k6 = 0;
+  const pend = (state.facturas||[]).filter(f=>f.estado!=='pagada');
+  pend.filter(esNC).forEach(f=>add(credito, provKey(f.proveedor), +f.monto||0));
+  pend.filter(f=>!esNC(f)).sort((a,b)=>(a.fechaVence||'').localeCompare(b.fechaVence||'')).forEach(f=>{
+    const venc = (f.fechaVence||hoy) < ini;
+    const def = venc && !F.factFecha[f.id] ? fDia(ini, 7*(k6++ % 6)) : f.fechaVence;
+    facturas.push({f, def, fecha: fMax(F.factFecha[f.id] || def || ini, ini), propia: !!F.factFecha[f.id]});
+  });
+  facturas.sort((a,b)=>a.fecha.localeCompare(b.fecha)).forEach(x=>{
+    const k = provKey(x.f.proveedor), m = +x.f.monto||0;
+    x.desc = Math.min(m, credito[k]||0); credito[k] = (credito[k]||0) - x.desc;
+    x.neto = m - x.desc;
+    add(fac, fHabil(x.fecha), x.neto);
+    if((x.f.fechaVence||'') > H) add(cargado, x.f.fechaVence, m);
+  });
+  const deudaFac = sumaNeta(pend);
+
+  // Cuotas, gastos fijos, pagos puntuales e intereses: se debitan en día hábil
+  const cuo = {}, fijosDia = {}, pag = {}, inte = {}, capit = {};
+  let pendCuo = 0;
+  Object.values(state.prestamos||{}).forEach(p=>(p.cuotas||[]).forEach(c=>{ if(c.estado!=='pagado'){ const m = +c.monto||0; pendCuo += m; add(cuo, fHabil(fMax(c.vencimiento, ini)), m); } }));
+  for(let t = ini; t <= fin; t = fDia(t, 1)){
+    const dim = fDiasMes(t), dia = +t.slice(8);
+    (F.fijos||[]).forEach(fj=>{
+      if((fj.desde && t < fj.desde) || (fj.hasta && t > fj.hasta)) return;
+      const m = +fj.monto||0, fd = +fj.dia||0, v = fd === 0 ? m * 12 / 365 : (dia === Math.min(fd, dim) ? m : 0);
+      if(v){ const h = fHabil(t); add(fijosDia[h] = fijosDia[h] || {}, fj.id, v); }
     });
+  }
+  let sinFecha = 0, pendFiscal = 0;
+  (F.pagos||[]).forEach(p=>{
+    if(p.incluir===false || p.pagado) return;
+    if(p.grupo==='deuda'){ pendFiscal += +p.monto||0; if(!S.incFiscal) return; }
+    if(!p.fecha) sinFecha++;
+    const d = fHabil(fMax(p.fecha || ini, ini));
+    add(pag[d] = pag[d] || {}, p.grupo||'otro', +p.monto||0);
+  });
+  let capTot = 0, vence1 = '';
+  (F.tramos||[]).forEach(tr=>{
+    const m = +tr.monto||0; capTot += m;
+    if(tr.vence && (!vence1 || tr.vence < vence1)) vence1 = tr.vence;
+    if(tr.primer) for(let i = 0; i < 240; i++){
+      const d = fSumarMeses(tr.primer, i);
+      if(d > fin || (tr.vence && d > tr.vence)) break;
+      if(d >= ini) add(inte, fHabil(d), m * (+tr.tasa||0) / 12);
+    }
+    if(tr.vence && tr.vence >= ini) add(capit, fHabil(tr.vence), m);
+  });
+
+  // Cobros y pagos con fecha (cajas navideñas y otros): parejo en los días hábiles
+  const exE = {banco:{}, efectivo:{}}, exS = {banco:{}, efectivo:{}};
+  (F.extras||[]).forEach(x=>{
+    if(x.hecho || !(+x.monto > 0)) return;
+    const a = fMax(x.desde || ini, ini), b = fMax(x.hasta || a, a), ds = [];
+    for(let t = a; t <= b; t = fDia(t, 1)) if(fEsHabil(t)) ds.push(t);
+    if(!ds.length) ds.push(fHabil(a));
+    const dest = (x.sentido==='sale' ? exS : exE)[x.medio==='banco' ? 'banco' : 'efectivo'];
+    ds.forEach(t=>add(dest, t, +x.monto / ds.length));
+  });
+
+  // Compras nuevas: presupuesto diario menos los cheques y facturas ya cargados
+  // con esa fecha, pagadas con cheque (con su demora).
+  const comp = {}, compraMes = {}, pctCompras = S.comprasModo==='pct';
+  const corte = t=>t >= simDesde ? 1 - (+op.menos||0) : 1;
+  for(let t = fMax(fDia(ini, +S.lagc||0), ini); t <= fin; t = fDia(t, 1)){
+    const m = t.slice(0,7);
+    const presup = (pctCompras ? (+S.comprasPct||0) * (ventaEst[m]||0) / fDiasMes(t) : (+S.compras||0) * 12 / 365) * corte(t);
+    const c = compraMes[m] = compraMes[m] || {presup:0, cargado:0, nuevas:0};
+    const nuevas = Math.max(0, presup - (cargado[t]||0));
+    c.presup += presup; c.cargado += cargado[t]||0; c.nuevas += nuevas;
+    if(nuevas) repartir(comp, t, nuevas, '');
+  }
+  if(!pctCompras) for(let t = ini; t <= fin; t = fDia(t, 1)){
+    const p = pd(t), v = (p.ef + p.tj) * (fx(t) - 1) * (+S.costoExtra||0);
+    if(v > 0) repartir(comp, fDia(t, 27), v * corte(t), '');
   }
 
   // Día por día
-  const rows = [];
-  let bank = +S.saldo0||0, caja = +S.caja0||0, iacc = 0, pacc = 0;
-  let pendChq = sum(chq), pendFac = sum(fac), pendCuo = sum(cuo), pendPag = sum(pagDeuda);
-  const deuda0 = Math.max(0, -bank) + cap + pendChq + pendFac + pendCuo + pendPag;
-  const lag = +S.lag||0, desc = +S.desc||0;
-  for(let t = hoy, i = 0; t <= fin; t = fDia(t, 1), i++){
-    const P0 = prom[fDow(t)], kf = fx(t), P = {ef:P0.ef*kf, tj:P0.tj*kf, g:P0.g};
-    const dPrev = fDia(t, -lag);
-    const tjPrev = dPrev < hoy ? (tjReal[dPrev]||0) : prom[fDow(dPrev)].tj * fx(dPrev);
-    const r = {t, ef:P.ef, gastos:P.g};
-    r.acred = tjPrev * (1 - desc);
+  const rows = [], desc = 1 - (+S.desc||0), ya = Math.min(1, Math.max(0, +S.tjHoy||0));
+  let bank = +S.saldo0||0, caja = +S.caja0||0;
+  for(let t = ini; t <= fin; t = fDia(t, 1)){
+    const P0 = pd(t), k = fx(t), r = {t, ef:P0.ef*k, gastos:P0.g};
+    const tj = P0.tj * k;
+    r.acred = tj * ya * desc;
+    if(fEsHabil(t)){ let d = fDia(t, -1), z = tjDe(d); while(!fEsHabil(d)){ d = fDia(d, -1); z += tjDe(d); } r.acred += z * (1 - ya) * desc; }
     r.otros = (+S.otros||0) * 12 / 365;
-    r.margen = (P.ef + P.tj) * (+S.margen||0);
-    r.prest = 0;
-    if(t === loanIn){ r.prest = m60; cap = m60; loanActivo = true; }
-    r.provef = (fac[t]||0) * (+S.pctef||0);
-    const antes = caja + P.ef - P.g - r.provef;
-    r.dep = antes - (+S.tope||0); caja = antes - r.dep; r.caja = caja;
-    r.prov = (fac[t]||0) * (1 - (+S.pctef||0));
-    r.compras = t >= inicioCompras ? (compraDia[t.slice(0,7)]||0) : 0;
-    r.cextra = pctCompras ? 0 : (P0.ef + P0.tj) * (kf - 1) * (+S.costoExtra||0);
-    r.cheques = chq[t]||0;
-    r.cuotas = cuo[t]||0;
-    r.fijos = {};
-    const dim = fDiasMes(t), dia = +t.slice(8);
-    (F.fijos||[]).forEach(fj=>{
-      if(fj.desde && t < fj.desde) return;
-      if(fj.hasta && t > fj.hasta) return;
-      const m = +fj.monto||0, fd = +fj.dia||0;
-      const v = fd === 0 ? m * 12 / 365 : (dia === Math.min(fd, dim) ? m : 0);
-      if(v) r.fijos[fj.id] = v;
-    });
-    r.pagos = pag[t] || {};
-    iacc = (i === 0 || dia === 1 ? 0 : iacc) + Math.max(0, -bank) * (+S.tdesc||0) / 365;
-    pacc = (i === 0 || dia === 1 ? 0 : pacc) + (loanActivo && t >= f60 ? cap * (+S.t60||0) / 365 : 0);
-    r.cap60 = loanActivo ? Math.min(cap, dev[t]||0) : 0;
-    cap -= r.cap60;
-    r.idesc = dia === dim ? iacc : 0;
-    r.i60 = dia === dim ? pacc : 0;
-    const sf = Object.values(r.fijos).reduce((s,v)=>s+v,0), sp = Object.values(r.pagos).reduce((s,v)=>s+v,0);
-    r.salidasBanco = r.prov + r.compras + r.cextra + r.cheques + r.cuotas + sf + sp + r.idesc + r.i60 + r.cap60;
-    bank = bank + r.acred + r.otros + r.margen + r.prest + r.dep - r.salidasBanco;
-    r.bank = bank;
-    r.lim = (F.acuerdos||[]).reduce((s,a)=>s + ((a.alta||'') <= t && (a.renueva || (a.fin||'') >= t) ? (+a.monto||0) : 0), 0);
-    r.estado = bank < -r.lim ? 'EXCEDIDO' : (bank < 0 ? 'Descubierto' : 'OK');
-    r.entradas = r.ef + r.acred + r.otros + r.margen + r.prest;
-    r.salidas = r.gastos + r.provef + r.salidasBanco;
-    // Deuda total al cierre del día (sin compras futuras)
-    pendChq -= chq[t]||0; pendFac -= fac[t]||0; pendCuo -= cuo[t]||0; pendPag -= pagDeuda[t]||0;
-    r.cap = cap;
-    r.deuda = Math.max(0, -bank) + cap + pendChq + pendFac + pendCuo + pendPag;
+    r.margen = (r.ef + tj) * ((+S.margen||0) + (t >= simDesde ? (+op.margen||0) : 0));
+    r.exE = (exE.banco[t]||0) + (exE.efectivo[t]||0);
+    r.exS = (exS.banco[t]||0) + (exS.efectivo[t]||0);
+    r.provef = (fac[t]||0) * (+S.pctef||0); r.prov = (fac[t]||0) - r.provef;
+    r.compras = comp[t]||0; r.cheques = chq[t]||0; r.cuotas = cuo[t]||0;
+    r.fijos = fijosDia[t] || {}; r.pagos = pag[t] || {};
+    r.interes = inte[t]||0; r.capital = capit[t]||0;
+    const sf = sum(r.fijos), sp = sum(r.pagos);
+    r.sf = sf; r.sp = sp;
+    r.entraBanco = r.acred + r.otros + (exE.banco[t]||0);
+    r.saleBanco = r.prov + r.compras + r.cheques + r.cuotas + sf + sp + r.interes + r.capital + (exS.banco[t]||0);
+    bank += r.entraBanco - r.saleBanco;
+    caja += r.ef + r.margen + (exE.efectivo[t]||0) - r.gastos - r.provef - (exS.efectivo[t]||0);
+    r.bank = bank; r.caja = caja; r.total = bank + caja;
+    r.entradas = r.ef + r.acred + r.otros + r.margen + r.exE;
+    r.salidas = r.gastos + r.provef + r.saleBanco + (exS.efectivo[t]||0);
     rows.push(r);
   }
-  return {S, hoy, fin, rows, prom, viejos, facturas, ventaProm, ventaReal, ventaEst, ventasMes, compraMes, deuda0,
-    avisos:{aviso60, f60, sinFecha}, con60};
+  return {S, hoy, ini, fin, rows, prom, viejos, facturas, ventaProm, ventaReal, ventaEst, ventasMes, compraMes, simDesde, capTot, vence1,
+    deuda:{banco:Math.max(0, -(+S.saldo0||0)), prestamo:capTot, cheques:pendChq, facturas:deudaFac, cuotas:pendCuo, fiscal:pendFiscal}, avisos:{sinFecha}};
 }
 
-function flujoResumen(R){
-  const rows = R.rows;
-  const exc = rows.filter(r=>r.estado==='EXCEDIDO');
-  const margen = rows.reduce((m,r)=>(r.bank + r.lim) < (m.bank + m.lim) ? r : m, rows[0]);
-  return {exc, margen, ult: rows[rows.length-1]};
+function flujoMin(rows){ return rows.reduce((m,r)=>r.total < m.total ? r : m, rows[0]); }
+// Plata al día anterior a que venza el préstamo (o al final, si no tiene fecha).
+function flujoMeta(R){
+  const antes = R.vence1 ? R.rows.filter(r=>r.t < R.vence1) : R.rows;
+  return antes.length ? antes[antes.length-1] : R.rows[R.rows.length-1];
+}
+function flujoPorMes(rows){
+  const meses = [], porMes = {};
+  rows.forEach(r=>{
+    const m = r.t.slice(0,7);
+    if(!porMes[m]){ porMes[m] = {m, fijos:{}, pagos:{}, min:r.total}; meses.push(porMes[m]); }
+    const a = porMes[m];
+    ['ef','acred','otros','margen','exE','exS','gastos','provef','prov','compras','cheques','cuotas','interes','capital','entradas','salidas'].forEach(k=>a[k] = (a[k]||0) + r[k]);
+    Object.entries(r.fijos).forEach(([k,v])=>a.fijos[k] = (a.fijos[k]||0) + v);
+    Object.entries(r.pagos).forEach(([k,v])=>a.pagos[k] = (a.pagos[k]||0) + v);
+    a.bank = r.bank; a.fin = r.total; a.min = Math.min(a.min, r.total);
+  });
+  return meses;
+}
+
+function flujoInput(tipo, val, on, extra=''){
+  if(tipo.startsWith('sel:')) return `<select onchange="${on}" style="width:auto;" ${extra}>${tipo.slice(4).split('|').map(o=>{ const [v, l] = o.split('='); return `<option value="${v}" ${val===v?'selected':''}>${escHtml(l)}</option>`; }).join('')}</select>`;
+  if(tipo==='bool') return `<input type="checkbox" ${val?'checked':''} onchange="${on.replace('this.value','this.checked')}" style="width:auto;" ${extra}>`;
+  if(tipo==='date') return `<input type="date" value="${val||''}" onchange="${on}" style="width:auto;" ${extra}>`;
+  if(tipo==='text') return `<input type="text" value="${escHtml(val||'')}" onchange="${on}" ${extra}>`;
+  const vacio = val===null || val===undefined || val==='';
+  if(tipo==='pct') return `<input type="number" step="0.01" value="${vacio?'':r2(val*100)}" onchange="${on}" style="width:110px;" ${extra}>`;
+  if(tipo==='money') return `<input type="text" inputmode="text" autocomplete="off" value="${vacio?'':(+val).toLocaleString('es-AR',{maximumFractionDigits:2})}" onchange="${on}" style="width:160px;" ${extra}>`;
+  return `<input type="number" step="1" value="${vacio?'':val}" onchange="${on}" style="width:90px;" ${extra}>`;
+}
+
+// Resultado de "Qué pasa si" (se redibuja solo mientras se mueven las barras).
+function flujoSimHtml(){
+  const F = state.flujo, m = (+F.sup.simMargen||0), c = (+F.sup.simMenos||0);
+  const R = flujoCalc(F.escActivo, {margen:m, menos:c}), meta = flujoMeta(R), min = flujoMin(R.rows.filter(r=>r.t <= meta.t)), meses = flujoPorMes(R.rows);
+  const caja = (l, v, col)=>`<div class="stat"><div class="stat-label">${l}</div><div class="stat-value" style="color:var(--${col});">${v}</div></div>`;
+  const falta = R.capTot - meta.total;
+  return `<div class="grid3" style="margin-top:14px;">
+    ${caja(`Al ${fmtFecha(meta.t)}`, fM(meta.total), meta.total < 0 ? 'red' : 'text')}
+    ${R.capTot ? caja(`Para devolver ${fM(R.capTot)}`, falta > 0 ? 'Faltan '+fM(falta) : 'Alcanza', falta > 0 ? 'red' : 'green') : ''}
+    ${caja('¿Se acaba la plata?', min.total < 0 ? 'En '+fMes(R.rows.find(r=>r.total < 0).t) : 'No', min.total < 0 ? 'red' : 'green')}
+  </div>
+  <table style="margin-top:12px;"><thead><tr><th>Cierre de</th><th class="num">Entra</th><th class="num">Sale</th><th class="num">Banco + efectivo</th></tr></thead><tbody>
+    ${meses.map(a=>`<tr><td style="font-family:var(--sans);">${fMes(a.m+'-01')}</td><td class="num">${fM(a.entradas)}</td><td class="num">${fM(a.salidas)}</td><td class="num" style="font-weight:700;color:var(--${a.fin<0?'red':'text'});">${fM(a.fin)}</td></tr>`).join('')}
+  </tbody></table>`;
+}
+function flujoSim(k, v, guardar){
+  state.flujo.sup[k] = (+v||0) / 100;
+  const t = document.getElementById('flujoT_'+k); if(t) t.textContent = v + '%';
+  clearTimeout(flujoSim._t);
+  flujoSim._t = setTimeout(()=>{ const el = document.getElementById('flujoSimRes'); if(el) el.innerHTML = flujoSimHtml(); }, 60);
+  if(guardar) save();
 }
 
 function renderFlujo(){
@@ -6337,78 +6397,105 @@ function renderFlujo(){
   if(antes !== state.flujo.version) save();
   const F = state.flujo;
   destroyCharts();
-  const escs = flujoEscenarios();
-  const todos = {};
+  const escs = flujoEscenarios(), todos = {};
   escs.forEach(e=>{ todos[e.id] = flujoCalc(e.id); });
   const R = todos[F.escActivo]; flujoUltimo = R;
   const {S, hoy, fin, rows} = R;
-  const {exc, margen, ult} = flujoResumen(R);
+  const reserva = +S.reserva||0, saldo = +S.saldo0||0, efvo = +S.caja0||0, total = saldo + efvo;
   const titulo = s=>`<div class="card-title"><div class="dot"></div>${s}</div>`;
   const nota = s=>`<div style="font-size:11px;color:var(--muted);margin-top:4px;">${s}</div>`;
-  const stat = (label, valor, color, sub)=>`<div class="stat"><div class="stat-label">${label}</div><div class="stat-value" style="color:var(--${color});">${valor}</div>${nota(sub)}</div>`;
-  const col = v=>v < 0 ? 'red' : 'green';
+  const inpt = flujoInput;
+  const linea = (l, v, extra='')=>`<div style="display:flex;justify-content:space-between;gap:12px;padding:8px 0;border-top:1px solid var(--border);"><span>${l}</span><b style="font-family:var(--mono);font-weight:500;white-space:nowrap;${extra}">${v}</b></div>`;
 
   // ---------- Avisos
   const avisos = [];
-  if(R.avisos.aviso60==='pasada') avisos.push(`El préstamo figura para el <b>${fmtFecha(R.avisos.f60)}</b> y no está marcado como acreditado. Mientras tanto <b>no se cuenta</b>. Si ya entró, tildá "Ya se acreditó" y cargá el saldo real del banco; si no, poné la fecha nueva (en Detalle y supuestos → Supuestos).`);
-  if(R.avisos.aviso60==='sinfecha') avisos.push(`El préstamo está activado pero no tiene fecha de acreditación: no se cuenta hasta que la cargues.`);
-  if(R.con60 && S.devTipo==='ninguna') avisos.push(`La devolución del capital del préstamo no está cargada: la proyección supone que nunca se devuelve.`);
-  if(S._saldoFecha && fDia(S._saldoFecha, 1) < hoy) avisos.push(`El saldo del banco es del <b>${fmtFecha(S._saldoFecha)}</b>${S._saldoAuto ? ' (pestaña Bancos)' : ''}. Actualizalo para que la proyección arranque bien.`);
-  if(!S._saldoFecha && !S._saldoAuto) avisos.push(`No se sabe de qué día es el saldo del banco cargado. Volvé a cargarlo para que quede la fecha.`);
-  if(R.viejos.length){
-    const tv = R.viejos.reduce((s,x)=>s+(+x.c.monto||0),0), tc = R.viejos.filter(x=>x.cuenta).reduce((s,x)=>s+(+x.c.monto||0),0);
-    avisos.push(`Hay <b>${R.viejos.length} cheques</b> con fecha pasada sin marcar en Cheques (${pesos2(tv)}). El flujo cuenta ${pesos2(tc)} como pendientes y el resto como cobrados. Revisalos en Detalle y supuestos → Cheques viejos.`);
-  }
+  if(S._saldoAuto || S._cajaAuto) avisos.push(`Cargá el saldo del banco y el efectivo. Mientras tanto se usan ${S._saldoAuto ? 'el descubierto de Bancos' : ''}${S._saldoAuto && S._cajaAuto ? ' y ' : ''}${S._cajaAuto ? 'el último Final' : ''}.`);
+  else if(S._saldoFecha && S._saldoFecha < hoy) avisos.push(`El saldo y el efectivo son del <b>${fmtFecha(S._saldoFecha)}</b>. Cargá los de hoy para que la proyección arranque bien.`);
+  if(R.viejos.length) avisos.push(`Hay <b>${R.viejos.length} cheques</b> con más de 30 días de su fecha sin marcar (${pesos2(R.viejos.reduce((s,x)=>s+(+x.c.monto||0),0))}). Revisalos en Detalle y supuestos → Cheques viejos.`);
   if(R.avisos.sinFecha) avisos.push(`${R.avisos.sinFecha} pago${R.avisos.sinFecha===1?'':'s'} puntual${R.avisos.sinFecha===1?'':'es'} sin fecha: se cuentan hoy. Poneles fecha.`);
+  F.extras.filter(x=>!x.hecho && +x.monto > 0 && x.hasta && x.hasta < R.ini).forEach(x=>avisos.push(`<b>${escHtml(x.concepto)}</b> tenía fecha hasta el ${fmtFecha(x.hasta)} y sigue pendiente: se cuenta hoy. Cambiale la fecha, o marcalo como listo.`));
   const avisosHtml = avisos.length ? `<div class="card mb16" style="border-color:var(--yellow);background:var(--yellow-dim);">${avisos.map(a=>`<p style="margin:4px 0;font-size:13px;">⚠ ${a}</p>`).join('')}</div>` : '';
 
-  // ---------- Selector de escenario e interruptor del préstamo
+  // ---------- Carga de la mañana
   const chip = (activo, txt, on)=>`<button class="btn btn-sm ${activo ? 'btn-green' : 'btn-ghost'}" onclick="${on}">${txt}</button>`;
-  const controles = `<div class="flex mb16" style="flex-wrap:wrap;gap:8px;align-items:center;">
-    <span class="hint" style="margin-right:4px;">Escenario:</span>
-    ${escs.map(e=>chip(e.id===F.escActivo, escHtml(e.nombre), `flujoSetEsc('${e.id}')`)).join('')}
-    <span style="width:16px;"></span>
-    ${chip(S.con60, 'Con préstamo', `flujoSetPrestamo(true)`)}${chip(!S.con60, 'Sin préstamo', `flujoSetPrestamo(false)`)}
-  </div>`;
+  const campo = (k, lab, val, ph)=>`<div><label for="flujo_${k}">${lab}</label><input type="text" inputmode="text" autocomplete="off" id="flujo_${k}" value="${val===null||val===undefined||val===''?'':(+val).toLocaleString('es-AR',{maximumFractionDigits:2})}" placeholder="${ph}" onchange="flujoSetSup('${k}','money',this.value)"></div>`;
+  const cargaHtml = `<div class="card mb16">${titulo('CADA MAÑANA CARGÁS SOLO ESTO')}
+    <div class="grid3">${campo('saldo0','Saldo del banco', F.sup.saldo0, 'Ej: -11.000.000')}${campo('caja0','Efectivo', F.sup.caja0, 'Ej: 62.000.000')}${campo('reserva','Reserva que no toco', F.sup.reserva, '0')}</div>
+    ${!S._saldoAuto && S._saldoFecha ? nota(`Cargado el ${fmtFecha(S._saldoFecha)}${F.sup.saldoCierre ? ' a la tarde: se toma como el cierre de ese día' : ''}. Si el banco está en rojo, poné el signo menos.`) : nota('Si el banco está en rojo, poné el signo menos.')}
+    <div class="flex" style="flex-wrap:wrap;gap:8px;margin-top:14px;"><span class="hint" style="margin-right:4px;">Escenario:</span>${escs.map(e=>chip(e.id===F.escActivo, escHtml(e.nombre), `flujoSetEsc('${e.id}')`)).join('')}
+    <label style="display:flex;align-items:center;gap:8px;margin:0 0 0 8px;text-transform:none;letter-spacing:0;font-size:13px;color:var(--text);">${inpt('bool', S.incFiscal, `flujoSetSup('incFiscal','bool',this.value)`)} Pagar la deuda fiscal atrasada (${fM(R.deuda.fiscal)})</label></div></div>`;
 
-  // ---------- Tres respuestas
-  const r3 = exc.length
-    ? stat('Primer día excedido', fmtFecha(exc[0].t), 'red', `${exc.length} días por debajo del límite del descubierto hasta el ${fmtFecha(fin)}. Menor margen: ${pesos2(margen.bank + margen.lim)} el ${fmtFecha(margen.t)}.`)
-    : stat('Límite del descubierto', 'Siempre dentro', 'green', `Día de menor margen: ${fmtFecha(margen.t)}, con ${pesos2(margen.bank + margen.lim)} de margen (saldo ${pesos2(margen.bank)}, límite ${pesos2(margen.lim)}).`);
-  const stats = `<div class="grid3 mb16">
-    ${stat('Deuda total hoy', pesos2(R.deuda0), 'red', `Descubierto ${pesos2(Math.max(0, -S.saldo0))}${S._saldoAuto ? ' (de Bancos)' : ''} + préstamo + cheques + facturas + cuotas + deuda fiscal, planes y Visa.`)}
-    ${stat('Deuda total al '+fmtFecha(fin), pesos2(ult.deuda), ult.deuda > R.deuda0 ? 'red' : 'green', `${ult.deuda > R.deuda0 ? 'Sube' : 'Baja'} ${pesos2(Math.abs(ult.deuda - R.deuda0))}. Saldo del banco: ${pesos2(ult.bank)}.`)}
-    ${r3}
-  </div>`;
+  // ---------- Puedo gastar hoy
+  const cerca = rows.slice(0, Math.max(1, +S.horizonte||90)), min = flujoMin(cerca), libre = min.total - reserva, primero = cerca.find(r=>r.total < reserva);
+  const ok = libre > 0;
+  const resp = `<div class="card mb16" style="border:2px solid var(--${ok?'green':'red'});"><div class="stat-label">Puedo gastar hoy, además de lo ya comprometido</div>
+    <div style="font-family:var(--mono);font-size:34px;font-weight:500;line-height:1.2;color:var(--${ok?'green':'red'});">${fM(Math.max(0, libre))}</div>
+    <p style="margin:6px 0 0;font-size:14px;">${ok ? `El día más justo de los próximos ${cerca.length} es el <b>${fCorto(min.t)}</b>: quedan ${fM(min.total)}.` : `No alcanza sin tocar la reserva. El <b>${fCorto(primero.t)}</b> ya la usás, y el día más justo de los próximos ${cerca.length} es el <b>${fCorto(min.t)}</b>: quedan ${fM(min.total)}, te faltan <b>${fM(-libre)}</b>.`}</p></div>`;
+
+  // ---------- Dónde está la plata
+  const cubre = Math.max(0, -saldo), res = Math.max(0, Math.min(reserva, total)), diario = Math.max(0, total - res);
+  const partes = [['Reserva, no tocar', res, 'var(--gold)'], ['Para el día a día', diario, 'var(--green)'], ...(cubre ? [['Para cubrir el banco', cubre, '#7f8fc4']] : [])];
+  const suma = partes.reduce((s,p)=>s+p[1], 0) || 1;
+  const plata = `<div class="card">${titulo('DÓNDE ESTÁ LA PLATA')}
+    <div style="display:flex;height:26px;border-radius:8px;overflow:hidden;background:var(--surface2);margin-bottom:10px;">${partes.map(p=>`<div style="width:${p[1]/suma*100}%;background:${p[2]};"></div>`).join('')}</div>
+    ${partes.map(p=>linea(`<i style="display:inline-block;width:11px;height:11px;border-radius:3px;margin-right:8px;background:${p[2]};"></i>${p[0]}`, fM(p[1]))).join('')}</div>`;
+  let dep = 0, depHtml = '';
+  rows.slice(0, 14).forEach(r=>{ if(!fEsHabil(r.t)) return; const falta = -(r.bank + dep); if(falta > 300000){ depHtml += linea(fCorto(r.t), fM(falta)); dep += falta; } });
+  const deposito = `<div class="card">${titulo('CUÁNTO DEPOSITAR EN EL BANCO')}<p class="hint" style="margin-bottom:8px;">Para que no quede en rojo en dos semanas. Es plata que pasa del efectivo al banco: el total no cambia. Si te cobran por transferencia, hace falta menos.</p>
+    ${depHtml ? depHtml + linea('Total', fM(dep), 'color:var(--gold-light);') : '<p class="hint">No hace falta depositar.</p>'}</div>`;
+
+  // ---------- Día por día
+  const g4 = 'display:grid;grid-template-columns:78px 1fr 1fr 1fr;gap:8px;align-items:center;';
+  const dias = `<div class="card mb16">${titulo('DÍA POR DÍA')}<p class="hint" style="margin-bottom:6px;">Tocá un día para ver qué entra y qué sale.</p>
+    <div style="${g4}font-size:11px;color:var(--muted);padding:6px 0;"><span>Día</span><span class="text-right">Entra</span><span class="text-right">Sale</span><span class="text-right">Queda</span></div>
+    ${rows.slice(0, 21).map(r=>{
+      const L = [['Tarjetas', r.acred], ['Efectivo de ventas', r.ef], ['Cajas navideñas y otros cobros', r.exE], ['Mejora de margen', r.margen], ['Otros ingresos', r.otros], ['Gastos de caja', -r.gastos], ['Cheques', -r.cheques], ['Facturas', -(r.prov + r.provef)], ['Compras nuevas', -r.compras], ['Cajas navideñas y otros pagos', -r.exS], ['Cuotas del banco', -r.cuotas], ['Impuestos y gastos fijos', -r.sf], ['Pagos puntuales', -r.sp], ['Interés del préstamo', -r.interes], ['Devolución del préstamo', -r.capital]].filter(x=>Math.abs(x[1]) >= 50000);
+      const id = 'd_'+r.t;
+      return `<details style="border-top:1px solid var(--border);" ${flujoAbiertos[id]?'open':''} ontoggle="flujoAbiertos['${id}']=this.open"><summary style="${g4}list-style:none;cursor:pointer;padding:11px 0;font-size:13px;"><span>${fCorto(r.t)}</span><span class="text-right" style="color:var(--green);">${fM(r.entradas)}</span><span class="text-right">${fM(r.salidas)}</span><b class="text-right" style="color:var(--${r.total < reserva ? 'red' : 'text'});">${fM(r.total)}</b></summary>
+        <div style="padding:0 0 12px 12px;font-size:13px;color:var(--muted);">${L.map(x=>`<div style="display:flex;justify-content:space-between;padding:2px 0;"><span>${x[0]}</span><span>${fM(x[1])}</span></div>`).join('')}<div style="display:flex;justify-content:space-between;padding:2px 0;"><span>Banco si no depositás</span><span>${fM(r.bank)}</span></div></div></details>`;
+    }).join('')}</div>`;
+
+  // ---------- Préstamo
+  const tr = F.tramos, meta = flujoMeta(R);
+  const prestHtml = `<div class="card mb16">${titulo('PRÉSTAMO')}
+    ${R.capTot ? `<div style="height:22px;border-radius:8px;overflow:hidden;background:var(--surface2);margin-bottom:8px;"><div style="height:100%;width:${Math.max(0, Math.min(100, total/R.capTot*100))}%;background:var(--gold);"></div></div>
+    ${linea('Te queda hoy (banco + efectivo)', fM(total))}${linea('Hay que reponer para '+fM(R.capTot), fM(Math.max(0, R.capTot - total)))}${linea('Interés por mes', pesos2(tr.reduce((s,x)=>s+(+x.monto||0)*(+x.tasa||0)/12, 0)))}${linea('Proyectado al '+fmtFecha(meta.t), fM(meta.total), `color:var(--${meta.total < R.capTot ? 'red' : 'green'});`)}` : '<p class="hint">No hay préstamos cargados.</p>'}
+    <div style="overflow-x:auto;margin-top:12px;"><table><thead><tr><th>Tramo</th><th class="num">Monto</th><th class="num">Tasa anual (%)</th><th>Primer interés</th><th>Vence el capital</th><th></th></tr></thead><tbody>
+    ${tr.map(x=>`<tr><td style="min-width:150px;">${inpt('text', x.nombre, `flujoSetItem('tramos','${x.id}','nombre','text',this.value)`)}</td><td class="num">${inpt('money', x.monto, `flujoSetItem('tramos','${x.id}','monto','money',this.value)`)}</td><td class="num">${inpt('pct', x.tasa, `flujoSetItem('tramos','${x.id}','tasa','pct',this.value)`)}</td><td>${inpt('date', x.primer, `flujoSetItem('tramos','${x.id}','primer','date',this.value)`)}</td><td>${inpt('date', x.vence, `flujoSetItem('tramos','${x.id}','vence','date',this.value)`)}</td><td><button class="btn btn-ghost btn-sm" style="color:var(--red);" onclick="flujoDelItem('tramos','${x.id}')">✕</button></td></tr>`).join('')}
+    </tbody></table></div><p class="hint" style="margin-top:6px;">El interés se paga todos los meses el mismo día que el primero. Es el préstamo que ya entró: su plata está dentro del banco y el efectivo.</p>
+    <button class="btn btn-ghost btn-sm" style="margin-top:8px;" onclick="flujoAddItem('tramos')">+ Agregar tramo</button></div>`;
+
+  // ---------- Cobros y pagos con fecha
+  const exRow = x=>`<tr style="${x.hecho?'opacity:.45;':''}"><td>${inpt('sel:entra=Cobro|sale=Pago', x.sentido, `flujoSetItem('extras','${x.id}','sentido','text',this.value)`)}</td><td style="min-width:270px;">${inpt('text', x.concepto, `flujoSetItem('extras','${x.id}','concepto','text',this.value)`)}</td><td class="num">${inpt('money', x.monto, `flujoSetItem('extras','${x.id}','monto','money',this.value)`)}</td><td>${inpt('date', x.desde, `flujoSetItem('extras','${x.id}','desde','date',this.value)`)}</td><td>${inpt('date', x.hasta, `flujoSetItem('extras','${x.id}','hasta','date',this.value)`)}</td><td>${inpt('sel:efectivo=Efectivo|banco=Banco', x.medio, `flujoSetItem('extras','${x.id}','medio','text',this.value)`)}</td><td>${x.hecho ? `<button class="btn btn-ghost btn-sm" onclick="flujoSetItem('extras','${x.id}','hecho','bool',false)">Deshacer</button>` : `<button class="btn btn-green btn-sm" onclick="flujoSetItem('extras','${x.id}','hecho','bool',true)">Listo</button>`}</td><td><button class="btn btn-ghost btn-sm" style="color:var(--red);" onclick="flujoDelItem('extras','${x.id}')">✕</button></td></tr>`;
+  const extrasHtml = `<div class="card mb16">${titulo('CAJAS NAVIDEÑAS Y OTROS COBROS Y PAGOS')}
+    <p class="hint" style="margin-bottom:8px;">Poné lo que <b>falta</b> cobrar o pagar y entre qué fechas: se reparte parejo en los días hábiles. <b>Cada vez que cobrás o pagás una parte, bajá el monto</b>, porque esa plata ya está en el banco o el efectivo. Cuando no quede nada, tocá "Listo".</p>
+    <div style="overflow-x:auto;"><table><thead><tr><th></th><th>Concepto</th><th class="num">Falta</th><th>Desde</th><th>Hasta</th><th>Va a</th><th></th><th></th></tr></thead><tbody>${F.extras.map(exRow).join('')}</tbody></table></div>
+    <button class="btn btn-ghost btn-sm" style="margin-top:10px;" onclick="flujoAddItem('extras')">+ Agregar</button></div>`;
+
+  // ---------- Qué pasa si
+  const barra = (k, lab, max)=>{ const v = Math.round((+F.sup[k]||0)*100); return `<div style="margin-top:10px;"><div style="display:flex;justify-content:space-between;font-size:14px;"><span>${lab}</span><b id="flujoT_${k}">${v}%</b></div><input type="range" aria-label="${lab}" min="0" max="${max}" step="1" value="${v}" oninput="flujoSim('${k}',this.value)" onchange="flujoSim('${k}',this.value,true)" style="padding:0;accent-color:var(--gold);height:34px;"></div>`; };
+  const simHtml = `<div class="card mb16">${titulo('QUÉ PASA SI…')}<p class="hint">Desde el ${fmtFecha(R.simDesde)}. No cambia lo de arriba: es solo para probar.</p>${barra('simMargen','Mejora de margen',10)}${barra('simMenos','Comprar menos',20)}<div id="flujoSimRes">${flujoSimHtml()}</div></div>`;
+
+  // ---------- Deuda de hoy
+  const D = R.deuda, deudaHtml = `<div class="card mb16">${titulo('LO QUE DEBÉS HOY')}${linea('Descubierto del banco', pesos2(D.banco))}${linea('Préstamo', pesos2(D.prestamo))}${linea('Cheques sin debitar', pesos2(D.cheques))}${linea('Facturas (menos notas de crédito)', pesos2(D.facturas))}${linea('Cuotas del banco', pesos2(D.cuotas))}${linea('Deuda fiscal atrasada', pesos2(D.fiscal))}${linea('Total', pesos2(Object.values(D).reduce((s,v)=>s+v,0)), 'color:var(--red);')}</div>`;
 
   // ---------- Resumen mensual
-  const meses = [];
-  const porMes = {};
-  rows.forEach(r=>{
-    const m = r.t.slice(0,7);
-    if(!porMes[m]){ porMes[m] = {m, fijos:{}, pagos:{}, min:r.bank, exc:0}; meses.push(porMes[m]); }
-    const a = porMes[m];
-    ['ef','acred','otros','margen','prest','gastos','provef','prov','compras','cextra','cheques','cuotas','idesc','i60','cap60','dep','entradas','salidas'].forEach(k=>a[k] = (a[k]||0) + r[k]);
-    Object.entries(r.fijos).forEach(([k,v])=>a.fijos[k] = (a.fijos[k]||0) + v);
-    Object.entries(r.pagos).forEach(([k,v])=>a.pagos[k] = (a.pagos[k]||0) + v);
-    a.fin = r.bank; a.caja = r.caja; a.deuda = r.deuda; a.min = Math.min(a.min, r.bank); if(r.estado==='EXCEDIDO') a.exc++;
-  });
+  const meses = flujoPorMes(rows);
   const filas = [
     ['ENTRADAS'],
-    ['Ventas en efectivo', a=>a.ef], ['Tarjetas acreditadas', a=>a.acred], ['Otros ingresos al banco', a=>a.otros],
-    ...(S.margen ? [['Mejora de margen', a=>a.margen]] : []), ['Préstamo recibido', a=>a.prest],
+    ['Ventas en efectivo', a=>a.ef], ['Tarjetas acreditadas', a=>a.acred], ['Cajas navideñas y otros cobros', a=>a.exE],
+    ...(S.otros ? [['Otros ingresos al banco', a=>a.otros]] : []), ...(S.margen ? [['Mejora de margen', a=>a.margen]] : []),
     ['Total entradas', a=>a.entradas, 'b'],
     ['SALIDAS'],
     ['Gastos de caja', a=>a.gastos], ['Facturas pendientes (efectivo)', a=>a.provef], ['Facturas pendientes (transferencia)', a=>a.prov],
-    ['Compras nuevas', a=>a.compras], ...(Object.values(R.ventasMes).some(v=>+v>0) && S.comprasModo!=='pct' ? [['Mercadería por la venta de más', a=>a.cextra]] : []), ['Cheques', a=>a.cheques], ['Cuotas de préstamos (Bancos)', a=>a.cuotas],
+    ['Cheques ya emitidos', a=>a.cheques], ['Compras nuevas', a=>a.compras], ['Cajas navideñas y otros pagos', a=>a.exS], ['Cuotas de préstamos (Bancos)', a=>a.cuotas],
     ...F.fijos.map(fj=>[fj.concepto, a=>a.fijos[fj.id]||0]),
     ...Object.keys(FLUJO_GRUPOS).map(g=>[FLUJO_GRUPOS[g], a=>a.pagos[g]||0]),
-    ['Interés del descubierto', a=>a.idesc], ['Interés del préstamo', a=>a.i60], ['Devolución del capital del préstamo', a=>a.cap60],
+    ['Interés del préstamo', a=>a.interes], ['Devolución del préstamo', a=>a.capital],
     ['Total salidas', a=>a.salidas, 'b'],
     ['RESULTADO'],
     ['Entradas − salidas', a=>a.entradas - a.salidas, 'b'],
-    ['Saldo del banco a fin de mes', a=>a.fin, 'b'], ['Saldo más bajo del mes', a=>a.min], ['Días excedidos', a=>a.exc, 'n'],
-    ['Deuda total a fin de mes', a=>a.deuda, 'b'],
+    ['Saldo de banco + efectivo', a=>a.fin, 'b'], ['Saldo más bajo del mes', a=>a.min],
   ];
   const tablaMeses = `<div style="overflow-x:auto;"><table>
     <thead><tr><th>Concepto</th>${meses.map(a=>`<th class="num">${fMes(a.m+'-01')}</th>`).join('')}</tr></thead>
@@ -6416,52 +6503,23 @@ function renderFlujo(){
       if(f.length===1) return `<tr><td colspan="${meses.length+1}" style="font-family:var(--sans);font-size:11px;letter-spacing:2px;color:var(--gold);padding-top:16px;">${f[0]}</td></tr>`;
       const b = f[2]==='b' ? 'font-weight:700;' : '';
       return `<tr><td style="font-family:var(--sans);white-space:nowrap;${b}">${escHtml(f[0])}</td>${meses.map(a=>{
-        const v = f[1](a);
-        const c = (f[0].startsWith('Saldo') || f[0].startsWith('Entradas −')) && v < 0 ? 'color:var(--red);' : (f[2]==='n' && v>0 ? 'color:var(--red);' : '');
-        return `<td class="num" style="white-space:nowrap;${b}${c}">${f[2]==='n' ? v : (v ? pesos2(v) : '—')}</td>`;
+        const v = f[1](a), c = (f[0].startsWith('Saldo') || f[0].startsWith('Entradas −')) && v < 0 ? 'color:var(--red);' : '';
+        return `<td class="num" style="white-space:nowrap;${b}${c}">${v ? pesos2(v) : '—'}</td>`;
       }).join('')}</tr>`;
-    }).join('')}</tbody></table></div>
-    <p class="hint" style="margin-top:8px;">La deuda total no incluye las compras futuras: solo lo que ya se debe hoy (descubierto, préstamo, cheques, facturas, cuotas, deuda fiscal, planes y Visa).</p>`;
-
-  // ---------- Semana por semana (10 semanas)
-  const semanas = [];
-  rows.forEach(r=>{
-    const lunes = fDia(r.t, -((fDow(r.t)+6) % 7));
-    if(lunes > fDia(hoy, 70)) return;
-    let s = semanas[semanas.length-1];
-    if(!s || s.lunes !== lunes){ s = {lunes, entra:0, prest:0, cheques:0, fact:0, imp:0, cuotas:0, otros:0, min:r.bank}; semanas.push(s); }
-    s.entra += r.acred + r.otros + r.margen + r.dep; s.prest += r.prest; s.cheques += r.cheques;
-    s.fact += r.prov + r.compras + r.cextra; s.cuotas += r.cuotas + r.cap60;
-    s.imp += Object.values(r.fijos).reduce((x,v)=>x+v,0) + Object.values(r.pagos).reduce((x,v)=>x+v,0);
-    s.otros += r.idesc + r.i60;
-    s.fin = r.bank; s.min = Math.min(s.min, r.bank); s.deuda = r.deuda;
-  });
-  const tablaSem = `<div style="overflow-x:auto;"><table>
-    <thead><tr><th>Semana del</th><th class="num">Entra al banco</th><th class="num">Préstamo</th><th class="num">Cheques</th><th class="num">Facturas y compras (banco)</th><th class="num">Impuestos, fijos y pagos</th><th class="num">Cuotas y devolución de préstamos</th><th class="num">Intereses</th><th class="num">Saldo al final</th><th class="num">Saldo más bajo</th><th class="num">Deuda total</th></tr></thead>
-    <tbody>${semanas.map(s=>`<tr><td>${fmtFecha(s.lunes)}</td>${[s.entra, s.prest, s.cheques, s.fact, s.imp, s.cuotas, s.otros].map(v=>`<td class="num" style="white-space:nowrap;">${v ? pesos2(v) : '—'}</td>`).join('')}
-      <td class="num" style="white-space:nowrap;font-weight:700;color:var(--${col(s.fin)});">${pesos2(s.fin)}</td><td class="num" style="white-space:nowrap;color:var(--${col(s.min)});">${pesos2(s.min)}</td><td class="num" style="white-space:nowrap;">${pesos2(s.deuda)}</td></tr>`).join('')}</tbody></table></div>
-    <p class="hint" style="margin-top:8px;">"Entra al banco" = tarjetas acreditadas, otros ingresos y el efectivo que se deposita (ventas en efectivo menos gastos de caja y facturas pagadas en efectivo). Por eso las facturas pagadas en efectivo no aparecen en su columna.</p>`;
+    }).join('')}</tbody></table></div>`;
 
   const det = (id, tit, cuerpo)=>`<details class="card mb16" ${flujoAbiertos[id]?'open':''} ontoggle="flujoAbiertos['${id}']=this.open"><summary style="cursor:pointer;list-style:none;">${titulo(tit+' ▾')}</summary><div style="margin-top:12px;">${cuerpo}</div></details>`;
-  const inpt = (tipo, val, on, extra='')=>{
-    if(tipo.startsWith('sel:')) return `<select onchange="${on}" style="width:auto;" ${extra}>${tipo.slice(4).split('|').map(o=>{ const [v, l] = o.split('='); return `<option value="${v}" ${val===v?'selected':''}>${escHtml(l)}</option>`; }).join('')}</select>`;
-    if(tipo==='bool') return `<input type="checkbox" ${val?'checked':''} onchange="${on.replace('this.value','this.checked')}" style="width:auto;" ${extra}>`;
-    if(tipo==='date') return `<input type="date" value="${val||''}" onchange="${on}" style="width:auto;" ${extra}>`;
-    if(tipo==='text') return `<input type="text" value="${escHtml(val||'')}" onchange="${on}" ${extra}>`;
-    if(tipo==='pct') return `<input type="number" step="0.1" value="${val===null||val===undefined||val===''?'':r2(val*100)}" onchange="${on}" style="width:110px;" ${extra}>`;
-    return `<input type="number" step="${tipo==='int'?'1':'0.01'}" value="${val===null||val===undefined||val===''?'':val}" onchange="${on}" style="width:${tipo==='int'?'90px':'160px'};" ${extra}>`;
-  };
 
   // ---------- Venta estimada por mes (del escenario activo)
-  const ventasHtml = `<p class="hint" style="margin-bottom:10px;">Escenario <b>${escHtml(S._escNombre)}</b>. Venta total del mes (efectivo + tarjetas). Vacío = el promedio de Carga Diaria. Si cargás un número, los días que faltan de ese mes se escalan para llegar a ese total. En el mes en curso ya se descuenta lo vendido hasta ayer.</p>
+  const ventasHtml = `<p class="hint" style="margin-bottom:10px;">Escenario <b>${escHtml(S._escNombre)}</b>. Venta total del mes (efectivo + tarjetas). Vacío = el promedio de Carga Diaria. Si cargás un número, los días que faltan de ese mes se escalan para llegar a ese total. En el mes en curso ya se descuenta lo vendido.</p>
     <div style="overflow-x:auto;"><table><thead><tr><th>Mes</th><th class="num">Ya vendido</th><th class="num">Por promedio (mes entero)</th><th class="num">Venta estimada</th><th class="num">Diferencia</th></tr></thead><tbody>
     ${Object.keys(R.ventaProm).map(m=>{ const v = +R.ventasMes[m] || 0, pr = R.ventaProm[m], ya = R.ventaReal[m]||0; return `<tr><td style="font-family:var(--sans);">${fMes(m+'-01')}</td><td class="num" style="white-space:nowrap;">${ya ? pesos2(ya) : '—'}</td><td class="num" style="white-space:nowrap;">${pesos2(pr)}</td>
-      <td class="num"><input type="number" step="0.01" value="${v || ''}" placeholder="Promedio" onchange="flujoSetVenta('${m}', this.value)" style="width:150px;text-align:right;"></td>
-      <td class="num" style="white-space:nowrap;color:var(--${v ? col(v - pr) : 'muted'});">${v ? pesos2(v - pr) : '—'}</td></tr>`; }).join('')}
+      <td class="num">${inpt('money', v || '', `flujoSetVenta('${m}', this.value)`, 'placeholder="Promedio"')}</td>
+      <td class="num" style="white-space:nowrap;color:var(--${v ? (v < pr ? 'red' : 'green') : 'muted'});">${v ? pesos2(v - pr) : '—'}</td></tr>`; }).join('')}
     </tbody></table></div>`;
 
   // ---------- Compras nuevas por mes
-  const comprasHtml = `<p class="hint" style="margin-bottom:10px;">Escenario <b>${escHtml(S._escNombre)}</b>: ${S.comprasModo==='pct' ? `${r2((+S.comprasPct||0)*100)}% de la venta del mes` : `${pesos2(+S.compras||0)} por mes`}, desde el ${fmtFecha(fDia(hoy, +S.lagc||0))}. A cada mes se le restan los cheques y facturas ya cargados con fecha en ese mes, porque son compras que ya están contadas.</p>
+  const comprasHtml = `<p class="hint" style="margin-bottom:10px;">Escenario <b>${escHtml(S._escNombre)}</b>: ${S.comprasModo==='pct' ? `${r2((+S.comprasPct||0)*100)}% de la venta del mes` : `${pesos2(+S.compras||0)} por mes`}, con vencimientos desde el ${fmtFecha(fDia(R.ini, +S.lagc||0))}. A cada día se le restan los cheques y facturas ya cargados con esa fecha. Se pagan con la misma demora que los cheques.</p>
     <div style="overflow-x:auto;"><table><thead><tr><th>Mes</th><th class="num">Presupuesto</th><th class="num">Ya cargado (cheques y facturas)</th><th class="num">Compras nuevas</th></tr></thead><tbody>
     ${Object.entries(R.compraMes).map(([m, c])=>`<tr><td style="font-family:var(--sans);">${fMes(m+'-01')}</td><td class="num" style="white-space:nowrap;">${pesos2(c.presup)}</td><td class="num" style="white-space:nowrap;">${pesos2(c.cargado)}</td><td class="num" style="white-space:nowrap;font-weight:700;">${pesos2(c.nuevas)}</td></tr>`).join('')}
     </tbody></table></div>`;
@@ -6470,17 +6528,15 @@ function renderFlujo(){
   const supHtml = `<p class="hint" style="margin-bottom:10px;">Los de "Ventas y compras" son del escenario <b>${escHtml(S._escNombre)}</b>; los demás valen para los tres.</p><div class="grid2">${FLUJO_SUP.map(s=>{
     if(s.length===1) return `<div style="grid-column:1/-1;font-size:11px;letter-spacing:2px;color:var(--gold);margin-top:8px;">${s[0]}</div>`;
     const [k, lab, tipo, , ayuda, alc] = s;
+    if(FLUJO_SUP_ARRIBA.includes(k)) return '';
     const src = alc==='e' ? (F.escenarios[F.escActivo].sup) : F.sup;
-    let extra = '';
-    if(k==='saldo0' && S._saldoAuto) extra = `Ahora: ${pesos2(S.saldo0)} (Bancos${S._saldoFecha ? ', del '+fmtFecha(S._saldoFecha) : ''}).`;
-    if(k==='saldo0' && !S._saldoAuto && S._saldoFecha) extra = `Cargado el ${fmtFecha(S._saldoFecha)}.`;
-    if(k==='caja0' && S._cajaAuto) extra = `Ahora: ${pesos2(S.caja0)}${typeof S._cajaAuto==='string' ? ' (Final del '+fmtFecha(S._cajaAuto)+')' : ''}.`;
-    return `<div><label>${lab}${tipo==='pct'?' (%)':''}</label>${inpt(tipo, src[k]===undefined ? s[3] : src[k], `flujoSetSup('${k}','${tipo.startsWith('sel:') ? 'text' : tipo}',this.value)`, tipo==='money'&&s[3]===null?'placeholder="Automático"':'')}${nota(escHtml([ayuda, extra].filter(Boolean).join(' ')))}</div>`;
+    return `<div><label>${lab}${tipo==='pct'?' (%)':''}</label>${inpt(tipo, src[k]===undefined ? s[3] : src[k], `flujoSetSup('${k}','${tipo.startsWith('sel:') ? 'text' : tipo}',this.value)`)}${nota(escHtml(ayuda))}</div>`;
   }).join('')}</div>
-  ${F.escActivo!=='base' ? `<button class="btn btn-ghost btn-sm" style="margin-top:12px;" onclick="flujoCopiarBase()">Copiar ventas y compras de "Base" a este escenario</button>` : ''}`;
+  ${F.escActivo!=='base' ? `<button class="btn btn-ghost btn-sm" style="margin-top:12px;" onclick="flujoCopiarBase()">Copiar ventas y compras de "Base" a este escenario</button>` : ''}
+  <div style="margin-top:16px;"><button class="btn btn-ghost btn-sm" onclick="flujoImportar()">⬆ Importar datos del flujo (.json)</button>${nota('Para cargar de una vez préstamo, cobros, atrasos de cheques y supuestos desde un archivo.')}</div>`;
 
   // ---------- Gastos fijos
-  const fijosHtml = `<p class="hint" style="margin-bottom:10px;">Día 0 = repartido parejo en el mes. Día 31 = último día del mes. "Desde" y "hasta" son opcionales.</p>
+  const fijosHtml = `<p class="hint" style="margin-bottom:10px;">Día 0 = repartido parejo en el mes. Día 31 = último día del mes. Si cae en un día sin banco, sale el siguiente. "Desde" y "hasta" son opcionales.</p>
     <div style="overflow-x:auto;"><table><thead><tr><th>Concepto</th><th class="num">Monto por mes</th><th class="num">Día</th><th>Desde</th><th>Hasta</th><th></th></tr></thead><tbody>
     ${F.fijos.map(fj=>`<tr><td style="min-width:220px;">${inpt('text', fj.concepto, `flujoSetItem('fijos','${fj.id}','concepto','text',this.value)`)}</td>
       <td class="num">${inpt('money', fj.monto, `flujoSetItem('fijos','${fj.id}','monto','money',this.value)`)}</td>
@@ -6493,14 +6549,13 @@ function renderFlujo(){
 
   // ---------- Pagos puntuales
   const pagos = F.pagos.slice().sort((a,b)=>(!!a.pagado - !!b.pagado) || (a.fecha||'0').localeCompare(b.fecha||'0'));
-  const totDeuda = F.pagos.filter(p=>FLUJO_GRUPOS_DEUDA.includes(p.grupo) && p.incluir!==false && !p.pagado).reduce((s,p)=>s+(+p.monto||0),0);
-  const pagosHtml = `<p class="hint" style="margin-bottom:10px;">Cada pago tiene su fecha. Cuando lo pagues, tocá "Pagado" y deja de contarse. Si algo entra en un plan de pagos nuevo, destildá "Contar". Deuda fiscal, planes y Visa pendientes: <b>${pesos2(totDeuda)}</b>.</p>
+  const pagosHtml = `<p class="hint" style="margin-bottom:10px;">Cada pago tiene su fecha. Cuando lo pagues, tocá "Pagado" y deja de contarse. Los de "Deuda fiscal atrasada" solo se cuentan si está tildado arriba "Pagar la deuda fiscal atrasada". Si algo entra en un plan de pagos nuevo, destildá "Contar".</p>
     <div style="overflow-x:auto;"><table><thead><tr><th>Grupo</th><th>Concepto</th><th>Vencimiento original</th><th class="num">Monto</th><th>Fecha de pago</th><th>Contar</th><th></th><th></th></tr></thead><tbody>
     ${pagos.map(p=>`<tr style="${p.incluir===false||p.pagado?'opacity:.45;':''}"><td><select onchange="flujoSetItem('pagos','${p.id}','grupo','text',this.value)" style="width:auto;">${Object.entries(FLUJO_GRUPOS).map(([g,l])=>`<option value="${g}" ${p.grupo===g?'selected':''}>${l}</option>`).join('')}</select></td>
       <td style="min-width:200px;">${inpt('text', p.concepto, `flujoSetItem('pagos','${p.id}','concepto','text',this.value)`)}</td>
       <td>${p.vto ? fmtFecha(p.vto) : '—'}</td>
       <td class="num">${inpt('money', p.monto, `flujoSetItem('pagos','${p.id}','monto','money',this.value)`)}</td>
-      <td>${p.pagado ? `Pagado${p.pagadoEl ? ' el '+fmtFecha(p.pagadoEl) : ''}` : inpt('date', p.fecha, `flujoSetItem('pagos','${p.id}','fecha','date',this.value)`, p.fecha ? '' : 'style="width:auto;border-color:var(--red);"')}</td>
+      <td>${p.pagado ? `Pagado${p.pagadoEl ? ' el '+fmtFecha(p.pagadoEl) : ''}` : inpt('date', p.fecha, `flujoSetItem('pagos','${p.id}','fecha','date',this.value)`)}</td>
       <td style="text-align:center;"><input type="checkbox" ${p.incluir!==false?'checked':''} onchange="flujoSetItem('pagos','${p.id}','incluir','bool',this.checked)" style="width:auto;"></td>
       <td>${p.pagado ? `<button class="btn btn-ghost btn-sm" onclick="flujoSetPagado('${p.id}',false)">Deshacer</button>` : `<button class="btn btn-green btn-sm" onclick="flujoSetPagado('${p.id}',true)">Pagado</button>`}</td>
       <td><button class="btn btn-ghost btn-sm" style="color:var(--red);" onclick="flujoDelItem('pagos','${p.id}')">✕</button></td></tr>`).join('')}
@@ -6508,35 +6563,26 @@ function renderFlujo(){
     <button class="btn btn-ghost btn-sm" style="margin-top:10px;" onclick="flujoAddItem('pagos')">+ Agregar pago</button>`;
 
   // ---------- Facturas pendientes
-  const totFact = R.facturas.reduce((s,x)=>s+(+x.f.monto||0),0);
-  const factHtml = `<p class="hint" style="margin-bottom:10px;">Salen de Deuda Proveedores (${R.facturas.length} facturas, ${pesos2(totFact)}). Por defecto, las vencidas se reparten en 6 pagos semanales desde la fecha del préstamo (${fmtFecha(S.f60 || hoy)}) y las demás se pagan al vencimiento. Cambiá la fecha para dosificar; al marcarlas pagadas en Deuda Proveedores salen solas.</p>
-    <div style="overflow:auto;max-height:420px;"><table><thead><tr><th>Proveedor</th><th>Vence</th><th class="num">Monto</th><th>Fecha prevista de pago</th><th></th></tr></thead><tbody>
-    ${R.facturas.map(x=>`<tr><td style="font-family:var(--sans);">${escHtml(x.f.proveedor||'')}</td><td style="${(x.f.fechaVence||'')<hoy?'color:var(--red);':''}">${fmtFecha(x.f.fechaVence)}</td><td class="num" style="white-space:nowrap;">${pesos2(+x.f.monto||0)}</td>
-      <td>${inpt('date', x.fecha, `flujoSetFact('${x.f.id}',this.value)`, x.propia?'style="width:auto;border-color:var(--gold);"':'')}</td>
+  const factHtml = `<p class="hint" style="margin-bottom:10px;">Salen de Deuda Proveedores: ${R.facturas.length} facturas, <b>${pesos2(D.facturas)}</b> con las notas de crédito y pagos a cuenta ya descontados (cada uno de las primeras facturas de su proveedor). Las vencidas sin fecha elegida van en 6 pagos semanales; las demás, al vencimiento. Cambiá la fecha para dosificar.</p>
+    <div style="overflow:auto;max-height:420px;"><table><thead><tr><th>Proveedor</th><th>Vence</th><th class="num">Monto</th><th class="num">A pagar</th><th>Fecha prevista de pago</th><th></th></tr></thead><tbody>
+    ${R.facturas.map(x=>`<tr><td style="font-family:var(--sans);">${escHtml(x.f.proveedor||'')}</td><td style="${(x.f.fechaVence||'')<hoy?'color:var(--red);':''}">${fmtFecha(x.f.fechaVence)}</td><td class="num" style="white-space:nowrap;">${pesos2(+x.f.monto||0)}</td><td class="num" style="white-space:nowrap;${x.desc>0?'color:var(--green);':''}">${pesos2(x.neto)}</td>
+      <td>${inpt('date', x.fecha, `flujoSetFact('${x.f.id}',this.value)`, x.propia?'title="Fecha elegida a mano"':'')}</td>
       <td>${x.propia?`<button class="btn btn-ghost btn-sm" onclick="flujoSetFact('${x.f.id}','')" title="Volver a la fecha automática">↺</button>`:''}</td></tr>`).join('')}
     </tbody></table></div>`;
 
-  // ---------- Cheques viejos sin marcar
+  // ---------- Cheques viejos
   const viejos = R.viejos.slice().sort((a,b)=>a.c.fechaPago.localeCompare(b.c.fechaPago));
-  const totV = viejos.reduce((s,x)=>s+(+x.c.monto||0),0), totVc = viejos.filter(x=>x.cuenta).reduce((s,x)=>s+(+x.c.monto||0),0);
-  const chqHtml = viejos.length ? `<p class="hint" style="margin-bottom:10px;">${viejos.length} cheques con fecha anterior a hoy siguen como pendientes en Cheques (${pesos2(totV)}). En el flujo se cuentan ${pesos2(totVc)}. Si ya se cobraron, tocá "Cobrado" y se marcan también en la pestaña Cheques.</p>
-    <div style="overflow:auto;max-height:420px;"><table><thead><tr><th>Fecha</th><th>Proveedor</th><th>N.º</th><th class="num">Monto</th><th>Contar hoy</th><th></th></tr></thead><tbody>
+  const chqHtml = viejos.length ? `<p class="hint" style="margin-bottom:10px;">Cheques con más de 30 días de su fecha que siguen pendientes. Si ya se debitaron, tocá "Cobrado" y se marcan también en la pestaña Cheques. Si no se van a cobrar más, destildá "Contar".</p>
+    <div style="overflow:auto;max-height:420px;"><table><thead><tr><th>Fecha</th><th>Proveedor</th><th>N.º</th><th class="num">Monto</th><th>Contar</th><th></th></tr></thead><tbody>
     ${viejos.map(x=>`<tr style="${x.cuenta?'':'opacity:.5;'}"><td>${fmtFecha(x.c.fechaPago)}</td><td style="font-family:var(--sans);">${escHtml(x.c.proveedor||'')}</td><td>${escHtml(String(x.c.numero||''))}</td><td class="num" style="white-space:nowrap;">${pesos2(+x.c.monto||0)}</td>
       <td style="text-align:center;"><input type="checkbox" ${x.cuenta?'checked':''} onchange="flujoSetCheque('${x.c.id}',this.checked)" style="width:auto;"></td>
       <td><button class="btn btn-green btn-sm" onclick="setChequeEstado(${JSON.stringify(x.c.id).replace(/"/g,'&quot;')},'cobrado');renderFlujo();">Cobrado</button></td></tr>`).join('')}
     </tbody></table></div>` : `<p class="hint">No hay cheques viejos sin marcar.</p>`;
 
-  // ---------- Acuerdos del descubierto
-  const acuHtml = `<p class="hint" style="margin-bottom:10px;">Son el límite autorizado del descubierto. Si el saldo baja de ese límite, la cuenta queda excedida y el banco puede rechazar cheques. Tildá "Se renueva" en los que el banco vaya a renovar.</p>
-    <div style="overflow-x:auto;"><table><thead><tr><th>Alta</th><th>Vence</th><th class="num">Monto</th><th>Se renueva</th><th></th></tr></thead><tbody>
-    ${F.acuerdos.slice().sort((a,b)=>(a.fin||'').localeCompare(b.fin||'')).map(a=>`<tr><td>${inpt('date', a.alta, `flujoSetItem('acuerdos','${a.id}','alta','date',this.value)`)}</td>
-      <td>${inpt('date', a.fin, `flujoSetItem('acuerdos','${a.id}','fin','date',this.value)`)}</td>
-      <td class="num">${inpt('money', a.monto, `flujoSetItem('acuerdos','${a.id}','monto','money',this.value)`)}</td>
-      <td style="text-align:center;"><input type="checkbox" ${a.renueva?'checked':''} onchange="flujoSetItem('acuerdos','${a.id}','renueva','bool',this.checked)" style="width:auto;"></td>
-      <td><button class="btn btn-ghost btn-sm" style="color:var(--red);" onclick="flujoDelItem('acuerdos','${a.id}')">✕</button></td></tr>`).join('')}
-    </tbody></table></div>
-    <p class="hint" style="margin-top:8px;">Límite vigente hoy: <b>${pesos2(rows[0].lim)}</b>.</p>
-    <button class="btn btn-ghost btn-sm" style="margin-top:10px;" onclick="flujoAddItem('acuerdos')">+ Agregar acuerdo</button>`;
+  // ---------- Demora de los cheques
+  const demora = txt=>{ const c = flujoCurva(txt); let s = 0; for(let i = 0; i < FLUJO_ATRASO_MAX; i++) s += c(i); return s; };
+  const atrHtml = `<p class="hint" style="margin-bottom:10px;">Días promedio desde la fecha del cheque hasta que se debita. Los proveedores que no están en la lista usan el general.</p>
+    ${linea('General', demora(F.atrasos.todos).toLocaleString('es-AR',{maximumFractionDigits:1})+' días')}${Object.entries(F.atrasos.prov||{}).map(([p,c])=>[p, demora(c)]).sort((a,b)=>b[1]-a[1]).map(([p,d])=>linea(escHtml(p), Math.round(d)+' días')).join('')}`;
 
   // ---------- Promedios
   const dn = ['Domingo','Lunes','Martes','Miércoles','Jueves','Viernes','Sábado'];
@@ -6545,41 +6591,30 @@ function renderFlujo(){
     ${[1,2,3,4,5,6,0].map(i=>{ const p = R.prom[i]; return `<tr><td style="font-family:var(--sans);">${dn[i]}</td><td class="num">${p.n}${p.cerrado && p.n ? ' (se toma como cerrado)' : ''}</td><td class="num">${pesos2(p.ef)}</td><td class="num">${pesos2(p.tj)}</td><td class="num">${pesos2(p.g)}</td></tr>`; }).join('')}
     </tbody></table></div>`;
 
-  // ---------- Detalle diario
-  const diaHtml = `<div style="overflow:auto;max-height:520px;"><table><thead><tr><th>Fecha</th><th class="num">Entra al banco</th><th class="num">Sale del banco</th><th class="num">Saldo banco</th><th class="num">Límite</th><th>Estado</th><th class="num">Caja</th><th class="num">Deuda total</th></tr></thead><tbody>
-    ${rows.map(r=>`<tr style="${r.estado==='EXCEDIDO'?'background:color-mix(in srgb, var(--red) 12%, transparent);':''}"><td>${fmtFecha(r.t)} ${['Dom','Lun','Mar','Mié','Jue','Vie','Sáb'][fDow(r.t)]}</td>
-      <td class="num" style="white-space:nowrap;">${pesos2(r.acred + r.otros + r.margen + r.prest + Math.max(0, r.dep))}</td>
-      <td class="num" style="white-space:nowrap;">${pesos2(r.salidasBanco + Math.max(0, -r.dep))}</td>
-      <td class="num" style="white-space:nowrap;font-weight:700;color:var(--${col(r.bank)});">${pesos2(r.bank)}</td>
-      <td class="num" style="white-space:nowrap;">${pesos2(r.lim)}</td>
-      <td style="font-family:var(--sans);color:var(--${r.estado==='EXCEDIDO'?'red':r.estado==='OK'?'green':'yellow'});">${r.estado}</td>
-      <td class="num" style="white-space:nowrap;">${pesos2(r.caja)}</td>
-      <td class="num" style="white-space:nowrap;">${pesos2(r.deuda)}</td></tr>`).join('')}
-    </tbody></table></div>`;
-
   // ---------- Comparación de escenarios
-  const escHtml2 = `<div style="overflow-x:auto;"><table><thead><tr><th>Escenario</th><th class="num">Saldo al ${fmtFecha(fin)}</th><th class="num">Deuda al ${fmtFecha(fin)}</th><th>Excedido</th><th>Menor margen</th></tr></thead><tbody>
-    ${escs.map(e=>{ const X = todos[e.id], z = flujoResumen(X); return `<tr style="${e.id===F.escActivo?'font-weight:700;':''}"><td style="font-family:var(--sans);">${escHtml(e.nombre)}</td><td class="num" style="white-space:nowrap;color:var(--${col(z.ult.bank)});">${pesos2(z.ult.bank)}</td><td class="num" style="white-space:nowrap;">${pesos2(z.ult.deuda)}</td><td style="font-family:var(--sans);">${z.exc.length ? `${z.exc.length} días, desde el ${fmtFecha(z.exc[0].t)}` : 'Nunca'}</td><td style="white-space:nowrap;">${pesos2(z.margen.bank + z.margen.lim)} el ${fmtFecha(z.margen.t)}</td></tr>`; }).join('')}
-    </tbody></table></div>
-    <p class="hint" style="margin-top:8px;">Cada escenario tiene sus propias ventas y compras (Supuestos y Venta estimada por mes). Lo demás (saldo, préstamo, pagos, gastos fijos, acuerdos) es igual para los tres.</p>`;
+  const escTabla = `<div style="overflow-x:auto;"><table><thead><tr><th>Escenario</th><th class="num">Al ${fmtFecha(meta.t)}</th><th class="num">Día más justo hasta ahí</th></tr></thead><tbody>
+    ${escs.map(e=>{ const X = todos[e.id], z = flujoMeta(X), q = flujoMin(X.rows.filter(r=>r.t<=z.t)); return `<tr style="${e.id===F.escActivo?'font-weight:700;':''}"><td style="font-family:var(--sans);">${escHtml(e.nombre)}</td><td class="num" style="white-space:nowrap;color:var(--${z.total<0?'red':'text'});">${fM(z.total)}</td><td class="num" style="white-space:nowrap;">${fM(q.total)} el ${fmtFecha(q.t)}</td></tr>`; }).join('')}
+    </tbody></table></div><p class="hint" style="margin-top:8px;">Cada escenario tiene sus propias ventas y compras. Lo demás es igual para los tres.</p>`;
 
   root.innerHTML = `
-  <p class="hint mb16">Proyección desde hoy (${fmtFecha(hoy)}) hasta el ${fmtFecha(fin)}. Se recalcula sola con Cheques, Deuda Proveedores, Bancos y Carga Diaria.</p>
-  ${controles}
+  <p class="hint mb16">Banco + efectivo, desde el ${fmtFecha(R.ini)} hasta el ${fmtFecha(fin)}. Se recalcula solo con Cheques, Deuda Proveedores, Bancos y Carga Diaria.</p>
   ${avisosHtml}
-  ${stats}
-  <div class="card mb16" style="min-width:0;">${titulo('SALDO DEL BANCO CONTRA EL LÍMITE')}
-    <p class="hint" style="margin-bottom:12px;">La línea roja es el límite del descubierto: por debajo de ella, la cuenta queda excedida. La línea gruesa es el escenario elegido.</p>
+  ${cargaHtml}
+  ${resp}
+  <div class="grid2">${plata}${deposito}</div>
+  <div class="card mb16" style="min-width:0;">${titulo('BANCO + EFECTIVO, PRÓXIMOS '+cerca.length+' DÍAS')}
+    <p class="hint" style="margin-bottom:12px;">La línea punteada es la reserva. Si la curva pasa por debajo, estás usando plata que no querías tocar.</p>
     <div class="chart-wrap"><canvas id="chartFlujoSaldo"></canvas></div></div>
-  <div class="card mb16" style="min-width:0;">${titulo('DEUDA TOTAL')}
-    <p class="hint" style="margin-bottom:12px;">Descubierto + préstamo + cheques + facturas + cuotas + deuda fiscal, planes y Visa. Cada pago la baja; no incluye compras futuras.</p>
-    <div class="chart-wrap"><canvas id="chartFlujoDeuda"></canvas></div></div>
+  ${dias}
+  ${extrasHtml}
+  ${prestHtml}
+  ${simHtml}
+  ${deudaHtml}
   <details class="mb16" ${flujoAbiertos.detalle?'open':''} ontoggle="flujoAbiertos.detalle=this.open">
     <summary style="cursor:pointer;list-style:none;" class="card">${titulo('DETALLE Y SUPUESTOS ▾')}</summary>
     <div style="margin-top:16px;">
-      ${det('esc','COMPARACIÓN DE ESCENARIOS', escHtml2)}
-      ${det('sem','PRÓXIMAS 10 SEMANAS', tablaSem)}
       ${det('mes','RESUMEN POR MES', tablaMeses)}
+      ${det('esc','COMPARACIÓN DE ESCENARIOS', escTabla)}
       ${det('ventas','VENTA ESTIMADA POR MES', ventasHtml)}
       ${det('compras','COMPRAS NUEVAS POR MES', comprasHtml)}
       ${det('sup','SUPUESTOS', supHtml)}
@@ -6587,53 +6622,33 @@ function renderFlujo(){
       ${det('pagos','PAGOS PUNTUALES: DEUDA FISCAL, PLANES, VISA Y AGUINALDO', pagosHtml)}
       ${det('fact','FACTURAS PENDIENTES: FECHA DE PAGO', factHtml)}
       ${det('chq','CHEQUES VIEJOS SIN MARCAR', chqHtml)}
-      ${det('acu','ACUERDOS DEL DESCUBIERTO', acuHtml)}
+      ${det('atr','CUÁNTO TARDAN EN DEBITARSE LOS CHEQUES', atrHtml)}
       ${det('prom','PROMEDIOS DE VENTA Y GASTOS', promHtml)}
-      ${det('dia','DETALLE DÍA POR DÍA', diaHtml)}
       <div class="card mb16">${titulo('CÓMO SE CALCULA')}
-        <p class="hint">El efectivo de cada día entra a la caja, paga los gastos de caja y la parte en efectivo de las facturas, y lo que pasa del tope se deposita en el banco. Al banco entran las tarjetas del día anterior (con el descuento), los otros ingresos y el préstamo en su fecha. Del banco salen cheques, facturas por transferencia, compras nuevas, cuotas de préstamos, gastos fijos, pagos puntuales, intereses y la devolución del capital del préstamo. El interés del descubierto se calcula día por día sobre el saldo negativo y se debita a fin de mes. Los cheques, facturas y cuotas con fecha vencida que siguen sin pagar se cuentan hoy. La deuda total es lo que se debe cada día sin contar compras futuras.</p>
+        <p class="hint">Parte del saldo del banco y el efectivo que cargás. Si los cargás antes de las 16, ese día se proyecta entero; si los cargás después, se toma como el cierre y se arranca al día siguiente. Las ventas salen del promedio de Carga Diaria: el efectivo entra a la caja; de las tarjetas, una parte en el momento y el resto el día hábil siguiente, con el descuento. Los cheques se reparten según cuánto tarda cada proveedor en cobrarlos. Del banco salen cheques, la mitad de las facturas, compras nuevas, cuotas, gastos fijos, pagos puntuales e intereses, siempre en días hábiles. Del efectivo, los gastos de caja y el resto de las facturas. No se cuenta ningún interés por descubierto: se supone que depositás para cubrirlo.</p>
       </div>
     </div>
   </details>`;
 
   if(typeof Chart==='undefined') return;
-  const labels = rows.map(r=>fmtFecha(r.t).slice(0,5));
-  const coloresEsc = ['#c5a028', '#7fa7e8', '#3ecf8e'];
-  const ticks = {color:'#95a1c6', font:{size:10}};
-  const opciones = {
-    responsive:true, maintainAspectRatio:false,
-    interaction:{mode:'index',intersect:false},
-    plugins:{legend:{labels:{color:'#95a1c6',font:{size:11}}},tooltip:{callbacks:{
-      title:items=>fmtFecha(rows[items[0].dataIndex].t),
-      label:c=>`${c.dataset.label}: ${pesos2(c.parsed.y)}`
-    }}},
-    scales:{
-      x:{ticks:Object.assign({maxTicksLimit:10,autoSkip:true}, ticks),grid:{display:false}},
-      y:{ticks:Object.assign({callback:costoMill}, ticks),grid:{color:'rgba(255,255,255,0.08)'}}
-    }
-  };
   const ctx = document.getElementById('chartFlujoSaldo');
-  if(ctx){
-    const ds = escs.map((e, i)=>{
-      const act = e.id===F.escActivo;
-      return {label:e.nombre, data:todos[e.id].rows.map(r=>r2(r.bank)), borderColor:coloresEsc[i % coloresEsc.length], borderWidth:act ? 3 : 1.5,
-        borderDash:act ? [] : [4,3], pointRadius:0, fill:false, tension:0, order:act ? 0 : 1};
-    });
-    ds.push({label:'Límite del descubierto', data:rows.map(r=>-r.lim), borderColor:'#e5566d', borderWidth:1.5, borderDash:[5,4], pointRadius:0, fill:false, stepped:true});
-    charts.chartFlujoSaldo = new Chart(ctx, {type:'line', data:{labels, datasets:ds}, options:opciones});
-  }
-  const ctx2 = document.getElementById('chartFlujoDeuda');
-  if(ctx2){
-    charts.chartFlujoDeuda = new Chart(ctx2, {type:'line', data:{labels, datasets:[
-      {label:'Deuda total ('+S._escNombre+')', data:rows.map(r=>r2(r.deuda)), borderColor:'#e5566d', backgroundColor:'rgba(229,86,109,0.12)', borderWidth:2, pointRadius:0, fill:true, tension:0},
-    ]}, options:opciones});
-  }
+  if(!ctx) return;
+  const ticks = {color:'#95a1c6', font:{size:11}};
+  const ds = [{label:'Banco + efectivo', data:cerca.map(r=>r2(r.total)), borderColor:'#f8f5ec', borderWidth:2.5, fill:false, tension:0,
+    pointRadius:cerca.map(r=>r.total < reserva ? 3 : 0), pointBackgroundColor:'#e5566d', pointBorderColor:'#e5566d'}];
+  if(reserva) ds.push({label:'Reserva', data:cerca.map(()=>reserva), borderColor:'#e0bb4a', borderWidth:1.5, borderDash:[6,5], pointRadius:0, fill:false});
+  charts.chartFlujoSaldo = new Chart(ctx, {type:'line', data:{labels:cerca.map(r=>fmtFecha(r.t).slice(0,5)), datasets:ds}, options:{
+    responsive:true, maintainAspectRatio:false, interaction:{mode:'index',intersect:false},
+    plugins:{legend:{labels:{color:'#95a1c6',font:{size:11}}},tooltip:{callbacks:{title:it=>fCorto(cerca[it[0].dataIndex].t), label:c=>`${c.dataset.label}: ${fM(c.parsed.y)}`}}},
+    scales:{x:{ticks:Object.assign({maxTicksLimit:8,autoSkip:true}, ticks),grid:{display:false}}, y:{ticks:Object.assign({callback:costoMill}, ticks),grid:{color:'rgba(255,255,255,0.08)'}}}
+  }});
 }
 
 function flujoParse(tipo, v){
   if(tipo==='bool') return !!v;
   if(tipo==='text' || tipo==='date') return v || '';
   if(v===null || v===undefined || String(v).trim()==='') return null;
+  if(tipo==='money') return r2(leerMonto(String(v).replace('−','-')));
   const x = parseFloat(String(v).replace(',', '.'));
   if(isNaN(x)) return null;
   if(tipo==='pct') return x / 100;
@@ -6644,16 +6659,12 @@ function flujoSetSup(k, tipo, v){
   const F = state.flujo, def = FLUJO_SUP_DEF[k];
   const dest = def && def[5]==='e' ? F.escenarios[F.escActivo].sup : F.sup;
   dest[k] = flujoParse(tipo, v);
-  if(k==='saldo0') F.sup.saldoFecha = dest[k]===null ? null : todayStr();
+  if(k==='saldo0' || k==='caja0'){ F.sup.saldoFecha = todayStr(); F.sup.saldoCierre = new Date().getHours() >= 16; }
   save(); renderFlujo();
 }
 function flujoSetEsc(id){
   if(!state.flujo.escenarios[id]) return;
   state.flujo.escActivo = id;
-  save(); renderFlujo();
-}
-function flujoSetPrestamo(con){
-  state.flujo.sup.con60 = !!con;
   save(); renderFlujo();
 }
 function flujoCopiarBase(){
@@ -6669,7 +6680,7 @@ function flujoSetItem(lista, id, campo, tipo, v){
   if(!it) return;
   let val = flujoParse(tipo, v);
   if(campo==='fecha' && !val) val = null;
-  if((tipo==='money' || tipo==='int') && val===null) val = 0;
+  if((tipo==='money' || tipo==='int' || tipo==='pct') && val===null) val = 0;
   it[campo] = val;
   save(); renderFlujo();
 }
@@ -6681,14 +6692,16 @@ function flujoSetPagado(id, pagado){
   save(); renderFlujo();
 }
 function flujoAddItem(lista){
-  const id = nuevoIdBancos(lista==='fijos' ? 'fx-' : lista==='pagos' ? 'fp-' : 'fa-');
   const hoy = todayStr();
-  const nuevo = lista==='fijos' ? {id, concepto:'Nuevo gasto', monto:0, dia:10, desde:'', hasta:''}
-    : lista==='pagos' ? {id, grupo:'otro', concepto:'Nuevo pago', vto:'', monto:0, fecha:hoy, incluir:true}
-    : {id, alta:hoy, fin:fDia(hoy, 30), monto:0, renueva:true};
+  const id = nuevoIdBancos({fijos:'fx-', pagos:'fp-', tramos:'ft-', extras:'fe-'}[lista]);
+  const nuevo = {
+    fijos: {id, concepto:'Nuevo gasto', monto:0, dia:10, desde:'', hasta:''},
+    pagos: {id, grupo:'otro', concepto:'Nuevo pago', vto:'', monto:0, fecha:hoy, incluir:true},
+    tramos: {id, nombre:'Nuevo tramo', monto:0, tasa:0, primer:fSumarMeses(hoy, 1), vence:''},
+    extras: {id, sentido:'entra', concepto:'Nuevo cobro', monto:0, desde:hoy, hasta:fDia(hoy, 15), medio:'efectivo', hecho:false},
+  }[lista];
   state.flujo[lista].push(nuevo);
-  flujoAbiertos.detalle = true;
-  flujoAbiertos[lista==='acuerdos' ? 'acu' : lista] = true;
+  if(lista==='fijos' || lista==='pagos'){ flujoAbiertos.detalle = true; flujoAbiertos[lista] = true; }
   save(); renderFlujo();
 }
 function flujoDelItem(lista, id){
@@ -6708,8 +6721,39 @@ function flujoSetVenta(m, v){
   save(); renderFlujo();
 }
 function flujoSetCheque(id, cuenta){
-  state.flujo.chequesCuentan[id] = !!cuenta;
+  if(cuenta) delete state.flujo.chequesCuentan[id]; else state.flujo.chequesCuentan[id] = false;
   save(); renderFlujo();
+}
+// Aplica un archivo {tipo:'flujo-datos', sup, escSup, escVentas, tramos, extras,
+// atrasos, pagosPagados, fijosDesde}. Solo toca lo que el archivo trae.
+function flujoAplicarDatos(d){
+  const F = state.flujo = flujoMigrar(state.flujo);
+  Object.assign(F.sup, d.sup || {});
+  Object.values(F.escenarios).forEach(e=>Object.assign(e.sup, d.escSup || {}));
+  Object.entries(d.escVentas || {}).forEach(([id, v])=>{ if(F.escenarios[id]) Object.assign(F.escenarios[id].ventasMes, v); });
+  ['tramos','extras'].forEach(k=>{ if(Array.isArray(d[k])) F[k] = d[k]; });
+  if(d.atrasos) F.atrasos = d.atrasos;
+  (d.pagosPagados || []).forEach(id=>{ const p = F.pagos.find(x=>x.id===id); if(p && !p.pagado){ p.pagado = true; p.pagadoEl = todayStr(); } });
+  Object.entries(d.fijosDesde || {}).forEach(([id, f])=>{ const x = F.fijos.find(y=>y.id===id); if(x) x.desde = f; });
+}
+function flujoImportar(){
+  const input = document.createElement('input');
+  input.type = 'file'; input.accept = '.json';
+  input.onchange = e=>{
+    const file = e.target.files[0];
+    if(!file) return;
+    const reader = new FileReader();
+    reader.onload = ev=>{
+      let d;
+      try { d = JSON.parse(ev.target.result); } catch(err){ alert('El archivo no es un JSON válido.'); return; }
+      if(!d || d.tipo!=='flujo-datos'){ alert('Este archivo no es de Flujo de Caja.'); return; }
+      if(!confirm(`¿Cargar ${d.titulo || 'los datos del archivo'}? Reemplaza el préstamo, los cobros y pagos con fecha y los supuestos que trae el archivo.`)) return;
+      flujoAplicarDatos(d);
+      save(); renderFlujo();
+    };
+    reader.readAsText(file);
+  };
+  input.click();
 }
 
 // ============================================================
