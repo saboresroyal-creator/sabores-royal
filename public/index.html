@@ -5308,6 +5308,49 @@ function nvBorrarPedido(id){
   Object.values(nvData.modelos).filter(m=>m.especial && m.pedido===id).forEach(m=>nvDelete('modelo', m.id));
   nvDelete('pedido', id);
 }
+// Pedido empezado y sin terminar: sin nombre y sin pagos.
+function nvBorrador(p){ return !(p.cliente||'').trim() && !nvPagos(p).length ? 1 : 0; }
+// Lista de pedidos en el celular: una tarjeta por cliente (si tiene varios
+// pedidos, por ejemplo uno con cajas especiales, se juntan en la misma).
+function nvHtmlTarjetas(lista){
+  const grupos = [], porCli = {};
+  lista.filter(p=>!nvBorrador(p)).forEach(p=>{
+    const k = normText((p.cliente||'').trim());
+    if(porCli[k]) porCli[k].push(p); else grupos.push(porCli[k] = [p]);
+  });
+  const borr = lista.filter(nvBorrador);
+  const abrir = id=>`nvPedidoSel='${id}';nvCatRes=[];nvRender()`;
+  const tarjeta = ps=>{
+    const p0 = ps[0];
+    const t = ps.reduce((s,p)=>{ const x = nvTotales(p); s.total+=x.total; s.pagado+=x.pagado; return s; }, {total:0, pagado:0});
+    const saldo = nvR2(t.total - t.pagado);
+    let normales = 0, esp = 0; const mods = {};
+    ps.forEach(p=>nvCajas(p).forEach(c=>{ const m = nvModelo(c.modelo), q = +c.cant||0;
+      if(m && m.especial) esp += q; else { normales += q; const nom = m ? m.nombre : '(modelo borrado)'; mods[nom] = (mods[nom]||0) + q; } }));
+    const nm = Object.keys(mods);
+    let cajas = normales ? `${nvCant(normales)} ${normales===1?'caja':'cajas'}${nm.length===1?' · '+escapeHtml(nm[0]):nm.length>1?' · '+nm.length+' modelos':''}` : '';
+    if(esp) cajas += `${cajas?' + ':''}${nvCant(esp)} ${esp===1?'especial':'especiales'} <span class="nv-tag-esp">ESP</span>`;
+    const entrega = ps.map(p=>p.entrega).filter(Boolean).sort()[0];
+    const firmes = ps.filter(p=>NV_FIRMES.includes(p.estado));
+    const tot = firmes.reduce((s,p)=>s+nvCantCajas(p),0), arm = firmes.reduce((s,p)=>s+nvArmadoTotal(p),0);
+    const sinSena = ps.every(p=>!nvSena(p)) && t.total > 0 && t.pagado < 0.01;
+    const estados = [...new Set(ps.map(p=>p.estado))];
+    return `<div class="nv-pc" role="button" tabindex="0" onclick="${abrir(p0.id)}">
+      <div class="nv-pc-1"><div class="nv-pc-cli">${escapeHtml(p0.cliente)}</div><div class="nv-pc-est">${estados.map(e=>nvPill(e)).join('')}</div></div>
+      <div class="nv-pc-sub">${cajas || 'Sin cajas'} · ${entrega ? 'Entrega ' + nvFecha(entrega).slice(0,5) : 'Sin fecha de entrega'}${p0.tel?` · ${escapeHtml(p0.tel)}`:''}</div>
+      ${tot ? `<div class="nv-pc-bar"><span class="nv-mini-b"><i style="width:${arm/tot*100}%;${arm>=tot?'background:var(--ok);':''}"></i></span><span>${nvCant(arm)} de ${nvCant(tot)} armadas</span></div>` : ''}
+      <div class="nv-pc-n"><div><span>Total</span>${nvMoney(t.total)}</div><div><span>Pagado</span>${nvMoney(t.pagado)}</div>
+        <div><span>Saldo</span><b style="color:${saldo>0.009?'var(--danger)':'var(--ok)'};">${saldo>0.009?nvMoney(saldo):nvMoney(0)+' ✓'}</b></div></div>
+      ${sinSena ? '<div class="nv-pc-sena">Sin seña</div>' : ''}
+      ${ps.length>1 ? `<div class="nv-row" style="margin-top:8px;">${ps.map(p=>{ const e = nvCajas(p).some(c=>{ const m = nvModelo(c.modelo); return m && m.especial; }); return `<button class="nv-btn" onclick="event.stopPropagation();${abrir(p.id)}">Ver pedido de ${nvCant(nvCantCajas(p))}${e?' especiales':' cajas'}</button>`; }).join('')}</div>` : ''}
+    </div>`;
+  };
+  return `<div class="nv-mob">
+    ${grupos.map(tarjeta).join('')}
+    ${borr.length ? `<div class="nv-pc-sep">Sin terminar de cargar (${borr.length})</div>
+      ${borr.map(p=>{ const n = nvCantCajas(p); return `<div class="nv-pc-bor"><button class="nv-pc-bor-t" onclick="${abrir(p.id)}">(sin nombre) · ${n ? nvCant(n)+(n===1?' caja':' cajas') : 'vacío'}</button><button class="nv-btn red" onclick="nvBorrarPedido('${p.id}')">Borrar</button></div>`; }).join('')}` : ''}
+  </div>`;
+}
 function nvTextoPedido(p){
   const t = nvTotales(p);
   const lin = ['*Sabores Royal: presupuesto de cajas navideñas*', `Cliente: ${p.cliente||''}`];
@@ -5541,6 +5584,23 @@ const NV_CSS = `<style>
 .nv-arm-bar.done i{background:linear-gradient(90deg,#27a86f,var(--ok));}
 .nv-arm-log{margin-top:10px;}
 .nv-arm-it{display:flex; align-items:center; gap:10px; padding:7px 0; border-top:1px solid rgba(255,255,255,0.07); font-size:12.5px; font-variant-numeric:tabular-nums;}
+.nv-mob{display:none;}
+@media (max-width:700px){ .nv-mob{display:block;} .nv-desk{display:none;} }
+.nv-pc{border:1px solid var(--glass-bd); border-radius:12px; padding:11px 12px; margin-top:8px; background:rgba(255,255,255,0.03); cursor:pointer;}
+.nv-pc:active{background:rgba(255,255,255,0.06);}
+.nv-pc-1{display:flex; justify-content:space-between; align-items:flex-start; gap:8px;}
+.nv-pc-cli{font-weight:700; font-size:15.5px; line-height:1.25; min-width:0; overflow-wrap:anywhere;}
+.nv-pc-est{display:flex; flex-wrap:wrap; gap:4px; justify-content:flex-end; flex:none; max-width:55%;}
+.nv-pc-sub{font-size:12.5px; color:rgba(255,255,255,0.65); margin-top:3px;}
+.nv-pc-bar{display:flex; align-items:center; gap:8px; margin-top:8px; font-size:12px; color:rgba(255,255,255,0.75);}
+.nv-pc-bar > span:last-child{white-space:nowrap; font-variant-numeric:tabular-nums;}
+.nv-pc-n{display:grid; grid-template-columns:repeat(3,1fr); gap:6px; margin-top:9px; padding-top:9px; border-top:1px solid rgba(255,255,255,0.07);}
+.nv-pc-n > div{font-size:13px; font-variant-numeric:tabular-nums; min-width:0; overflow-wrap:anywhere;}
+.nv-pc-n span{display:block; font-size:10.5px; color:rgba(255,255,255,0.55);}
+.nv-pc-sena{font-size:12px; color:var(--danger); margin-top:6px;}
+.nv-pc-sep{font-size:11.5px; color:rgba(255,255,255,0.55); margin:16px 2px 4px; text-transform:uppercase; letter-spacing:.04em;}
+.nv-pc-bor{display:flex; justify-content:space-between; align-items:center; gap:8px; border:1px dashed var(--glass-bd); border-radius:12px; padding:7px 8px 7px 12px; margin-top:6px;}
+.nv-pc-bor-t{flex:1; text-align:left; font-size:13px; color:rgba(255,255,255,0.7);}
 .nv-mini{display:flex; align-items:center; gap:6px;}
 .nv-mini-b{flex:1; height:6px; min-width:40px; border-radius:3px; background:rgba(255,255,255,0.08); overflow:hidden;}
 .nv-mini-b i{display:block; height:100%; border-radius:3px; background:var(--gold2);}
@@ -5606,9 +5666,11 @@ function nvHtml(){
     if(p) html += nvHtmlPedido(p);
     else {
       const q = normText(nvBuscaCli.trim());
+      // Los borradores (sin nombre y sin pagos) van al final; el resto por
+      // fecha de entrega y después por cantidad de cajas.
       const lista = todos.filter(x=> nvFiltro==='todos' ? true : nvFiltro==='activos' ? !['entregado','cancelado'].includes(x.estado) : x.estado===nvFiltro)
         .filter(x=>!q || normText(x.cliente||'').includes(q) || (x.tel||'').includes(q))
-        .sort((a,b)=>(a.entrega||'9999').localeCompare(b.entrega||'9999') || (a.cliente||'').localeCompare(b.cliente||''));
+        .sort((a,b)=>(nvBorrador(a)-nvBorrador(b)) || (a.entrega||'9999').localeCompare(b.entrega||'9999') || (nvCantCajas(b)-nvCantCajas(a)) || (a.cliente||'').localeCompare(b.cliente||''));
       html += nvHtmlPorModelo(todos);
       html += `<div class="nv-card">
         <div class="nv-row" style="margin-bottom:10px;">
@@ -5617,7 +5679,8 @@ function nvHtml(){
           </select>
           <input type="search" id="nvBuscaCli" placeholder="Buscar cliente o teléfono" value="${escapeHtml(nvBuscaCli)}" style="flex:1;min-width:160px;" oninput="nvBuscaCli=this.value;clearTimeout(window._nvT);window._nvT=setTimeout(nvRender,250)">
         </div>
-        ${lista.length ? `<div class="nv-tw"><table>
+        ${lista.length ? nvHtmlTarjetas(lista) : ''}
+        ${lista.length ? `<div class="nv-tw nv-desk"><table>
           <thead><tr><th>Cliente</th><th>Entrega</th><th class="r">Cajas</th><th style="min-width:110px;">Armadas</th><th class="r">Total</th><th class="r">Seña</th><th class="r">Pagado</th><th class="r">Saldo</th><th>Estado</th></tr></thead>
           <tbody>${lista.map(x=>{ const t = nvTotales(x), sn = nvSena(x), esp = nvCajas(x).some(c=>{ const m = nvModelo(c.modelo); return m && m.especial; }); return `<tr class="click" onclick="nvPedidoSel='${x.id}';nvCatRes=[];nvRender()">
             <td>${escapeHtml(x.cliente||'(sin nombre)')}${esp?' <span class="nv-tag-esp">ESP</span>':''}${x.tel?`<div style="font-size:11px;opacity:.55;">${escapeHtml(x.tel)}</div>`:''}</td>
