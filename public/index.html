@@ -501,6 +501,14 @@ img{display:block; max-width:100%;}
 .order-card{margin:12px 16px; padding:14px; border-radius:14px; background:var(--glass); border:1px solid var(--glass-bd);}
 .order-card .oc-head{display:flex; justify-content:space-between; align-items:center; margin-bottom:8px;}
 .order-card .oc-id{font-weight:700; color:var(--white); font-size:14px;}
+.order-card.oc-mini{display:flex; justify-content:space-between; align-items:center; gap:10px; cursor:pointer;}
+.oc-mini-s{font-size:12px; color:rgba(255,255,255,0.65); margin-top:3px;}
+.oc-mini-v{font-size:12px; color:var(--gold2); margin-top:6px; white-space:nowrap; background:none; border:none; cursor:pointer;}
+.oc-cobro{border:1px solid rgba(46,204,113,0.35); background:rgba(46,204,113,0.07); border-radius:12px; padding:10px; margin-bottom:10px;}
+.oc-cobro-l{font-size:12px; color:rgba(255,255,255,0.75); margin-bottom:6px;}
+.oc-chip{border:1px solid var(--glass-bd); border-radius:20px; padding:6px 11px; font-size:12.5px; color:var(--white); background:none; cursor:pointer;}
+.oc-chip.on{background:var(--gold); color:var(--navy); border-color:var(--gold); font-weight:700;}
+.oc-pagar{display:block; width:100%; margin-top:10px; padding:10px; border-radius:10px; border:none; background:#2ecc71; color:#06281a; font-weight:800; font-size:14px; cursor:pointer;}
 .status-pill{font-size:10.5px; font-weight:700; padding:3px 10px; border-radius:20px; text-transform:uppercase;}
 .status-pendiente{background:rgba(224,168,60,0.25); color:var(--warn);}
 .status-revision{background:rgba(155,89,182,0.25); color:#9b59b6;}
@@ -1764,6 +1772,8 @@ function mapOrderRow(row){
     clientDiscountAmount: row.discount_amount || undefined,
     total: Number(row.total),
     status: row.status,
+    paymentMethod: row.payment_method || null,
+    paidAt: row.paid_at || null,
   };
 }
 
@@ -9600,6 +9610,18 @@ function renderAdminOrderCard(o, opts){
     const existingVoucher = state.vouchers.find(v=>v.orderId===o.id);
     const readyForClient = o.status==="Listo" || o.status==="Entregado";
     const clientActionDisabled = readyForClient ? '' : 'disabled title="Marcá el pedido como Listo antes de esto — terminá de revisar stock/cantidades primero"';
+    // Pagado: se muestra en una línea hasta que lo tocan
+    if(o.paidAt && !_ocAbiertos.has(o.id)) return `
+    <div class="order-card oc-mini"${inClient?' style="margin:0 0 4px;"':''} role="button" tabindex="0" onclick="ocAbrir('${o.id}', true)">
+      <div style="min-width:0;">
+        <div class="oc-id">${inClient ? 'Pedido del ' + ocFechaCorta(o.date) : `#${o.id} — ${escapeHtml(o.customer.name)}`}</div>
+        <div class="oc-mini-s"><b style="color:var(--ok);">✓ Pagado</b> · ${escapeHtml(orderPayLabel(o.paymentMethod))} · ${ocFechaCorta(o.paidAt)} · ${money(o.total)}</div>
+      </div>
+      <div style="text-align:right; flex:none;">
+        <span class="status-pill status-${o.status.toLowerCase()}">${orderStatusLabel(o.status)}</span>
+        <div class="oc-mini-v">Ver detalle ▾</div>
+      </div>
+    </div>`;
     return `
     <div class="order-card"${inClient?' style="margin:0 0 4px;"':''}>
       ${inClient ? '' : `<div class="oc-head">
@@ -9620,6 +9642,7 @@ function renderAdminOrderCard(o, opts){
       ${o.status!=="Cancelado" ? `<button style="margin-bottom:10px; padding:6px 10px; font-size:11px; border-radius:8px; cursor:pointer; background:rgba(46,204,113,0.12); border:1px solid rgba(46,204,113,0.4); color:#2ecc71;" onclick="openAddOrderItemModal('${o.id}')">➕ Agregar producto</button>
         <button style="margin-bottom:10px; margin-left:6px; padding:6px 10px; font-size:11px; border-radius:8px; cursor:pointer; background:rgba(109,184,232,0.12); border:1px solid rgba(109,184,232,0.4); color:#6db8e8;" onclick="repriceOrder('${o.id}')">↻ Recalcular precios${orderClientIsWholesale(o)?' (mayorista)':''}</button>` : ''}
       <div style="font-weight:700; color:var(--gold2); margin-bottom:10px;">${o.items.some(it=>it.sinStock) ? `<span style="text-decoration:line-through; opacity:0.5; font-weight:400; margin-right:6px;">${money(orderOriginalTotal(o))}</span>` : ''}${money(o.total)}</div>
+      ${o.status!=="Cancelado" ? renderOrderCobro(o) : ''}
       <div class="oc-actions">
         ${o.status==="Cancelado" ? `<button class="btn-secondary" style="flex:1; padding:9px;" disabled>Anulado</button>`
           : `<div style="display:flex; gap:6px; flex:1;">
@@ -9646,8 +9669,48 @@ function renderAdminOrderCard(o, opts){
         ${o.status!=="Cancelado" ? `<button style="flex:0 0 auto; width:40%; padding:4px; font-size:10px; background:rgba(224,168,60,0.12); border:1px solid rgba(224,168,60,0.4); border-radius:10px; color:var(--warn); cursor:pointer;" onclick="confirmCancelOrder('${o.id}')">↩️ Anular pedido</button>` : ''}
         <button style="flex:0 0 auto; width:40%; margin-left:auto; padding:4px; font-size:10px; background:rgba(231,76,60,0.12); border:1px solid rgba(231,76,60,0.4); border-radius:10px; color:#e74c3c; cursor:pointer;" onclick="deleteOrder('${o.id}')">${ic('trash')} Borrar pedido</button>
       </div>
+      ${o.paidAt ? `<button class="oc-mini-v" style="display:block; margin:12px auto 0;" onclick="ocAbrir('${o.id}', false)">Minimizar ▴</button>` : ''}
     </div>
   `;}
+}
+// ---- Cobro del pedido: forma de pago y "pagado" (columnas payment_method
+// y paid_at de orders; ver supabase-migration-orders-pagado.sql).
+const ORDER_PAY = [['efectivo','Efectivo'],['transferencia','Transferencia'],['qr','QR / Mercado Pago'],['debito','Débito'],['credito','Crédito']];
+const _ocAbiertos = new Set(), _ocPagoSel = {};
+function orderPayLabel(m){ const x = ORDER_PAY.find(p=>p[0]===m); return x ? x[1] : (m || 'Sin forma de pago'); }
+function ocFechaCorta(iso){ const d = new Date(iso); return isNaN(d) ? '' : String(d.getDate()).padStart(2,'0') + '/' + String(d.getMonth()+1).padStart(2,'0'); }
+function ocAbrir(id, abrir){ if(abrir) _ocAbiertos.add(id); else _ocAbiertos.delete(id); render(); }
+function renderOrderCobro(o){
+  if(o.paidAt){
+    const d = new Date(o.paidAt);
+    return `<div class="oc-cobro"><div class="oc-cobro-l"><b style="color:var(--ok);">✓ Pagado</b> · ${escapeHtml(orderPayLabel(o.paymentMethod))} · ${ocFechaCorta(o.paidAt)} ${isNaN(d)?'':String(d.getHours()).padStart(2,'0')+':'+String(d.getMinutes()).padStart(2,'0')}</div>
+      <button class="oc-chip" onclick="orderDeshacerPago('${o.id}')">Deshacer pago</button></div>`;
+  }
+  const sel = _ocPagoSel[o.id] || (ORDER_PAY.some(p=>p[0]===o.paymentMethod) ? o.paymentMethod : 'efectivo');
+  return `<div class="oc-cobro"><div class="oc-cobro-l">Cobro</div>
+    <div style="display:flex; flex-wrap:wrap; gap:6px;">${ORDER_PAY.map(([k,l])=>`<button class="oc-chip${k===sel?' on':''}" onclick="_ocPagoSel['${o.id}']='${k}';render()">${l}</button>`).join('')}</div>
+    <button class="oc-pagar" onclick="orderMarcarPagado('${o.id}')">✓ Marcar pagado</button></div>`;
+}
+async function orderGuardarPago(o, cambios, antes){
+  Object.assign(o, cambios); saveState(); render();
+  try{
+    await adminFetch('/orders?id=eq.'+encodeURIComponent(o.id), 'PATCH', {paid_at: o.paidAt, payment_method: o.paymentMethod});
+  }catch(e){
+    Object.assign(o, antes); saveState(); render();
+    toast(/paid_at/.test(e.message||'') ? 'Falta crear la columna del pago en Supabase (supabase-migration-orders-pagado.sql).' : 'No se guardó el pago: ' + (e.message||e), 'err');
+  }
+}
+function orderMarcarPagado(id){
+  const o = state.orders.find(x=>x.id===id); if(!o) return;
+  const m = _ocPagoSel[id] || (ORDER_PAY.some(p=>p[0]===o.paymentMethod) ? o.paymentMethod : 'efectivo');
+  _ocAbiertos.delete(id); delete _ocPagoSel[id];
+  orderGuardarPago(o, {paidAt: new Date().toISOString(), paymentMethod: m}, {paidAt: o.paidAt, paymentMethod: o.paymentMethod});
+  toast('Pedido de ' + (o.customer.name||'') + ' marcado pagado (' + orderPayLabel(m) + ')', 'ok');
+}
+function orderDeshacerPago(id){
+  const o = state.orders.find(x=>x.id===id); if(!o) return;
+  if(!confirm('¿Deshacer el pago de este pedido?')) return;
+  orderGuardarPago(o, {paidAt: null}, {paidAt: o.paidAt});
 }
 function advanceOrderStatus(orderId){
   const order = state.orders.find(o=>o.id===orderId);
