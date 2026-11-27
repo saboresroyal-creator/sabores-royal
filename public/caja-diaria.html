@@ -6026,8 +6026,9 @@ const FLUJO_SUP = [
   ['otros','Otros ingresos al banco por mes','money',0,'Solo plata que NO se carga en Carga Diaria. Las transferencias de clientes ya están en Tarjetas: no van acá.','e'],
   ['comprasModo','Compras nuevas a proveedores','sel:fijo=Monto fijo por mes|pct=Porcentaje de la venta del mes','fijo','Las que se pagan con cheque o transferencia. A cada día se le descuentan los cheques y facturas ya cargados con esa fecha, para no contarlos dos veces.','e'],
   ['compras','Compras nuevas por mes (monto fijo)','money',0,'Solo si arriba dice "Monto fijo".','e'],
-  ['comprasPct','Compras nuevas (% de la venta del mes)','pct',0.55,'Solo si arriba dice "Porcentaje".','e'],
-  ['lagc','Días hasta que vencen las primeras compras nuevas','int',15,'Antes de esa fecha están los cheques ya emitidos.','e'],
+  ['comprasPct','Compras nuevas (% de la venta del mes)','pct',0.55,'Solo si arriba dice "Porcentaje". Es toda la mercadería, incluida la que se paga en efectivo desde la caja.','e'],
+  ['compEf','De esas compras, las que se pagan en efectivo desde la caja (por mes)','money',0,'Proveedores que se pagan desde la caja (La Serenísima, panadero, Bimbo…): ya están en los gastos de caja, así que se restan de las compras nuevas para no contarlos dos veces. Solo con compras como porcentaje de la venta.','e'],
+  ['lagc','Días hasta que vencen las primeras compras nuevas','int',15,'Con monto fijo: antes de esa fecha están los cheques ya emitidos. Con porcentaje: días entre que se vende la mercadería y se paga (lo de diciembre se paga en enero).','e'],
   ['pctef','Parte de las facturas pendientes que se paga en efectivo','pct',0.5,'El resto, por transferencia.','e'],
   ['costoExtra','Mercadería para la venta de más (% de la venta extra)','pct',0.55,'Solo con compras de monto fijo: si en "Venta estimada por mes" ponés más que el promedio, se compra más mercadería y se paga con cheque unas 4 semanas después.','e'],
 ];
@@ -6248,7 +6249,7 @@ function flujoCalc(escId, op){
   // Promedios por día de la semana (Carga Diaria) y venta real por día
   const desde = fDia(hoy, -Math.round((+S.meses||5)*30.4));
   const acc = Array.from({length:7}, ()=>({n:0, ef:0, tj:0, g:0}));
-  const tjReal = {}, ventaRealDia = {}, especiales = [];
+  const tjReal = {}, ventaRealDia = {}, ventaNormalDia = {}, especiales = [];
   // Ventas especiales (cajas navideñas y otras ventas grandes cobradas casi sin
   // tickets ni efectivo): cuentan como plata que entró ese día, pero no van al
   // promedio, porque no se repiten todas las semanas.
@@ -6272,7 +6273,7 @@ function flujoCalc(escId, op){
       // Lo cobrado en una venta especial no se proyecta como tarjeta a acreditar:
       // su cobro va en "Cajas navideñas y otros cobros" (puede facturarse antes
       // de que entre la plata).
-      tjReal[d] = tj; ventaRealDia[d] = ef + tj + efE + tjE;
+      tjReal[d] = tj; ventaRealDia[d] = ef + tj + efE + tjE; ventaNormalDia[d] = ef + tj;
       if(ef + tj > 0 && d >= desde && d < hoy){ const a = acc[fDow(d)]; a.n++; a.ef += ef; a.tj += tj; a.g += g; }
     }
   }
@@ -6391,9 +6392,35 @@ function flujoCalc(escId, op){
   // con esa fecha, pagadas con cheque (con su demora).
   const comp = {}, compraMes = {}, pctCompras = S.comprasModo==='pct';
   const corte = t=>t >= simDesde ? 1 - (+op.menos||0) : 1;
-  for(let t = fMax(fDia(ini, +S.lagc||0), ini); t <= fin; t = fDia(t, 1)){
+  if(pctCompras){
+    // Como % de la venta: la mercadería se paga unos "lagc" días después de
+    // venderse, así que el pago de cada día usa la venta de esos días antes (lo
+    // de diciembre se paga en enero). Sin las ventas especiales (cajas
+    // navideñas): su mercadería va aparte, en Cobros y pagos. Lo ya cargado
+    // (cheques y facturas) se descuenta acumulado, porque viene en montos
+    // grandes algunos días.
+    const lag = Math.max(0, +S.lagc||0), iniM = ini.slice(0,7), espMes = {}, normalMes = {};
+    Object.keys(ventaRealDia).forEach(d=>{ if(d < ini) add(espMes, d.slice(0,7), ventaRealDia[d] - (ventaNormalDia[d]||0)); });
+    const ventaNorm = m=>{
+      if(m in normalMes) return normalMes[m];
+      let v = 0;
+      if(m >= iniM) v = Math.max(0, (ventaEst[m]||0) - (espMes[m]||0));
+      else { Object.keys(ventaNormalDia).forEach(d=>{ if(d.slice(0,7)===m) v += ventaNormalDia[d]; }); if(!v) v = flujoVentaMesReal(m); }
+      return normalMes[m] = v;
+    };
+    let cumB = 0, cumL = 0, cumN = 0;
+    for(let t = ini; t <= fin; t = fDia(t, 1)){
+      const ref = fDia(t, -lag), m = t.slice(0,7);
+      const presup = Math.max(0, (+S.comprasPct||0) * ventaNorm(ref.slice(0,7)) / fDiasMes(ref) - (+S.compEf||0) * 12 / 365) * corte(t);
+      cumB += presup; cumL += cargado[t]||0;
+      const nuevas = Math.max(0, cumB - cumL - cumN); cumN += nuevas;
+      const c = compraMes[m] = compraMes[m] || {presup:0, cargado:0, nuevas:0};
+      c.presup += presup; c.cargado += cargado[t]||0; c.nuevas += nuevas;
+      if(nuevas) repartir(comp, t, nuevas, '');
+    }
+  } else for(let t = fMax(fDia(ini, +S.lagc||0), ini); t <= fin; t = fDia(t, 1)){
     const m = t.slice(0,7);
-    const presup = (pctCompras ? (+S.comprasPct||0) * (ventaEst[m]||0) / fDiasMes(t) : (+S.compras||0) * 12 / 365) * corte(t);
+    const presup = (+S.compras||0) * 12 / 365 * corte(t);
     const c = compraMes[m] = compraMes[m] || {presup:0, cargado:0, nuevas:0};
     const nuevas = Math.max(0, presup - (cargado[t]||0));
     c.presup += presup; c.cargado += cargado[t]||0; c.nuevas += nuevas;
@@ -6640,7 +6667,7 @@ function renderFlujo(){
     </tbody></table></div>`;
 
   // ---------- Compras nuevas por mes
-  const comprasHtml = `<p class="hint" style="margin-bottom:10px;">Escenario <b>${escHtml(S._escNombre)}</b>: ${S.comprasModo==='pct' ? `${r2((+S.comprasPct||0)*100)}% de la venta del mes` : `${pesos2(+S.compras||0)} por mes`}, con vencimientos desde el ${fmtFecha(fDia(R.ini, +S.lagc||0))}. A cada día se le restan los cheques y facturas ya cargados con esa fecha. Se pagan con la misma demora que los cheques.</p>
+  const comprasHtml = `<p class="hint" style="margin-bottom:10px;">Escenario <b>${escHtml(S._escNombre)}</b>: ${S.comprasModo==='pct' ? `${r2((+S.comprasPct||0)*100)}% de la venta del mes${+S.compEf ? `, menos ${pesos2(+S.compEf)} por mes que se pagan en efectivo desde la caja (ya están en los gastos de caja)` : ''}` : `${pesos2(+S.compras||0)} por mes`}, ${S.comprasModo==='pct' ? `que se paga ${+S.lagc||0} días después de vender (cada pago usa la venta de ${+S.lagc||0} días antes; sin las cajas navideñas, que van aparte). Se descuentan los cheques y facturas ya cargados.` : `con vencimientos desde el ${fmtFecha(fDia(R.ini, +S.lagc||0))}. A cada día se le restan los cheques y facturas ya cargados con esa fecha.`} Se pagan con la misma demora que los cheques.</p>
     <div style="overflow-x:auto;"><table><thead><tr><th>Mes</th><th class="num">Presupuesto</th><th class="num">Ya cargado (cheques y facturas)</th><th class="num">Compras nuevas</th></tr></thead><tbody>
     ${Object.entries(R.compraMes).map(([m, c])=>`<tr><td style="font-family:var(--sans);">${fMes(m+'-01')}</td><td class="num" style="white-space:nowrap;">${pesos2(c.presup)}</td><td class="num" style="white-space:nowrap;">${pesos2(c.cargado)}</td><td class="num" style="white-space:nowrap;font-weight:700;">${pesos2(c.nuevas)}</td></tr>`).join('')}
     </tbody></table></div>`;
