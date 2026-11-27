@@ -6030,7 +6030,15 @@ const FLUJO_ESC_BASE = [
   ['base', 'Base'],
   ['dicnormal', 'Diciembre normal'],
   ['compras55', 'Compras al 55 %'],
+  ['contador', 'Según el contador'],
 ];
+// Escenario "Según el contador": la venta de cada mes que viene = la del mismo
+// mes del año pasado × lo que creció la venta en los últimos meses completos.
+// La venta de cada mes sale de state.flujo.historia (los cierres del contador,
+// se cargan con "Importar") o, si no está, de Carga Diaria.
+const FLUJO_CRECE_MESES = 5;
+// Marcando 85 % sobre el costo, la mercadería es 1 / 1,85 = 54,05 % de la venta.
+const FLUJO_PCT_COSTO_85 = 0.5405;
 // Qué porcentaje de los cheques sigue sin debitarse a los N días de su fecha.
 // Es un promedio general; el de cada proveedor se guarda en state.flujo.atrasos.
 const FLUJO_ATRASO_DEF = '97,85,77,69,61,55,52,50,47,44,43,37,37,35,32,31,29,28,27,26,24,23,21,19,18,15,15,13,10,7,4,3,2';
@@ -6048,10 +6056,11 @@ function flujoDefault(){
   FLUJO_ESC_BASE.forEach(([id, nombre], i)=>{
     const e = {nombre, orden:i, sup:{}, ventasMes:{}};
     FLUJO_SUP.forEach(s=>{ if(s.length>1 && s[5]==='e') e.sup[s[0]] = s[3]; });
-    if(id==='compras55') e.sup.comprasModo = 'pct';
+    if(id==='compras55' || id==='contador') e.sup.comprasModo = 'pct';
+    if(id==='contador'){ e.auto = 'contador'; e.sup.comprasPct = FLUJO_PCT_COSTO_85; }
     esc[id] = e;
   });
-  return {version:3, sup, escenarios:esc, escActivo:'base', fijos:[], pagos:[], acuerdos:[], tramos:[], extras:[], atrasos:{}, factFecha:{}, chequesCuentan:{}};
+  return {version:4, sup, escenarios:esc, escActivo:'base', fijos:[], pagos:[], acuerdos:[], tramos:[], extras:[], atrasos:{}, factFecha:{}, chequesCuentan:{}, historia:{}};
 }
 
 // Versión 1 → 2: los supuestos que faltaban toman el valor que la versión 1
@@ -6062,7 +6071,7 @@ const FLUJO_V1_DEF = {otros:6800000, compras:40000000, f60:'2026-11-17', m60:600
 function flujoMigrar(F){
   if(!F || !F.version) return flujoDefault();
   ['fijos','pagos','acuerdos','tramos','extras'].forEach(k=>{ if(!Array.isArray(F[k])) F[k] = []; });
-  ['factFecha','chequesCuentan','sup','atrasos'].forEach(k=>{ if(!F[k] || Array.isArray(F[k])) F[k] = {}; });
+  ['factFecha','chequesCuentan','sup','atrasos','historia'].forEach(k=>{ if(!F[k] || Array.isArray(F[k])) F[k] = {}; });
   if(F.version < 2){
     const old = Object.assign({}, FLUJO_V1_DEF);
     Object.entries(F.sup).forEach(([k,v])=>{ if(v!==undefined && v!=='' && !(v===null && old[k]!==undefined)) old[k] = v; });
@@ -6092,7 +6101,67 @@ function flujoMigrar(F){
     }
     F.version = 3;
   }
+  // Versión 3 → 4: escenario "Según el contador" (ventas y compras como Base,
+  // sin la mejora de margen y con las compras como % de la venta: 54,05 %, lo que
+  // cuesta la mercadería marcándola 85 % sobre el costo).
+  if(F.version < 4){
+    if(!F.escenarios.contador){
+      const b = F.escenarios.base || {sup:{}};
+      const orden = Math.max(0, ...Object.values(F.escenarios).map(e=>+e.orden||0)) + 1;
+      F.escenarios.contador = {nombre:'Según el contador', orden, auto:'contador', ventasMes:{},
+        sup:Object.assign({}, b.sup, {margen:0, comprasModo:'pct', comprasPct:FLUJO_PCT_COSTO_85})};
+    }
+    F.version = 4;
+  }
   return F;
+}
+
+// Venta de un mes cerrado: la del contador si está cargada; si no, la de
+// Carga Diaria cuando el mes tiene casi todos los días cargados.
+function flujoVentaMesReal(m){
+  const h = +(state.flujo.historia||{})[m];
+  if(h > 0) return h;
+  let dias = 0, tot = 0;
+  for(const [d, x] of Object.entries(state.dias||{})){
+    if(d.slice(0,7)!==m) continue;
+    let v = 0; (x.cajas||[]).forEach(c=>{ v += n(c.efectivo) + n(c.ajusteEfectivo) + n(c.tarjetas); });
+    if(v > 0){ dias++; tot += v; }
+  }
+  return dias >= Math.min(25, fDiasMes(m+'-01') - 3) ? tot : 0;
+}
+function fPascua(y){
+  const a = y%19, b = Math.floor(y/100), c = y%100, d = Math.floor(b/4), e = b%4, f = Math.floor((b+8)/25), g = Math.floor((b-f+1)/3);
+  const h = (19*a+b-d-g+15)%30, i = Math.floor(c/4), k = c%4, l = (32+2*e+2*i-h-k)%7, m = Math.floor((a+11*h+22*l)/451);
+  const mes = Math.floor((h+l-7*m+114)/31), dia = ((h+l-7*m+114)%31)+1;
+  return `${y}-${String(mes).padStart(2,'0')}-${String(dia).padStart(2,'0')}`;
+}
+// Mes anterior / del año pasado (formato AAAA-MM).
+function fMesMas(m, k){ return fSumarMeses(m+'-01', k).slice(0,7); }
+// {crece, base:[meses usados], meses:{m:{est, ant, pascua}}} para los meses que vienen.
+function flujoVentasContador(hasta){
+  const hoyM = todayStr().slice(0,7), usados = [];
+  let a = 0, b = 0;
+  for(let m = fMesMas(hoyM, -1); usados.length < FLUJO_CRECE_MESES && m > fMesMas(hoyM, -18); m = fMesMas(m, -1)){
+    const x = flujoVentaMesReal(m), y = flujoVentaMesReal(fMesMas(m, -12));
+    if(x > 0 && y > 0){ a += x; b += y; usados.push(m); }
+  }
+  const crece = b > 0 ? a / b : 0, meses = {};
+  if(!crece) return {crece, base:usados, meses};
+  for(let m = fMesMas(hoyM, 1); m <= hasta; m = fMesMas(m, 1)){
+    const ant = flujoVentaMesReal(fMesMas(m, -12));
+    if(ant > 0) meses[m] = {est: ant * crece, ant};
+  }
+  // Semana Santa: si este año cae en otro mes que el año pasado (marzo/abril),
+  // el "mes de Pascua" se lleva la misma parte de marzo + abril que el año pasado.
+  Object.keys(meses).filter(m=>m.slice(5)==='03').forEach(mar=>{
+    const y = +mar.slice(0,4), abr = mar.slice(0,4)+'-04', pNow = +fPascua(y).slice(5,7), pAnt = +fPascua(y-1).slice(5,7);
+    if(!meses[abr] || pNow===pAnt || ![3,4].includes(pNow) || ![3,4].includes(pAnt)) return;
+    const vm = meses[mar].ant, va = meses[abr].ant, pool = vm + va, parte = (pAnt===4 ? va : vm) / pool;
+    const enPascua = pool * parte * crece, otro = pool * (1 - parte) * crece;
+    meses[mar].est = pNow===3 ? enPascua : otro; meses[abr].est = pNow===4 ? enPascua : otro;
+    meses[mar].pascua = meses[abr].pascua = true;
+  });
+  return {crece, base:usados, meses};
 }
 
 const FLUJO_GRUPOS = {deuda:'Deuda fiscal atrasada', afip:'Plan AFIP', visa:'Visa: cuotas', otro:'Otros pagos'};
@@ -6145,6 +6214,14 @@ function flujoSup(escId){
     S.caja0 = f ? (+state.finales[f].efectivo||0) : 0; S._cajaAuto = f || true;
   }
   S.ventasMes = E.ventasMes || {};
+  if(E.auto==='contador'){
+    const hoyS = todayStr(), finS = fMax(S.fin || fSumarMeses(hoyS, 12), fDia(hoyS, 30));
+    S._contador = flujoVentasContador(finS.slice(0,7));
+    const vm = {};
+    Object.entries(S._contador.meses).forEach(([m, x])=>{ vm[m] = r2(x.est); });
+    Object.entries(E.ventasMes || {}).forEach(([m, v])=>{ if(+v > 0) vm[m] = +v; });   // lo cargado a mano manda
+    S.ventasMes = vm;
+  }
   S._escNombre = E.nombre || '';
   // Saldo cargado a la tarde = el día de hoy ya está adentro: se proyecta desde mañana.
   const hoy = todayStr();
@@ -6514,11 +6591,32 @@ function renderFlujo(){
   const det = (id, tit, cuerpo)=>`<details class="card mb16" ${flujoAbiertos[id]?'open':''} ontoggle="flujoAbiertos['${id}']=this.open"><summary style="cursor:pointer;list-style:none;">${titulo(tit+' ▾')}</summary><div style="margin-top:12px;">${cuerpo}</div></details>`;
 
   // ---------- Venta estimada por mes (del escenario activo)
-  const ventasHtml = `<p class="hint" style="margin-bottom:10px;">Escenario <b>${escHtml(S._escNombre)}</b>. Venta total del mes (efectivo + tarjetas). Vacío = el promedio de Carga Diaria. Si cargás un número, los días que faltan de ese mes se escalan para llegar a ese total. En el mes en curso ya se descuenta lo vendido.</p>
-    <div style="overflow-x:auto;"><table><thead><tr><th>Mes</th><th class="num">Ya vendido</th><th class="num">Por promedio (mes entero)</th><th class="num">Venta estimada</th><th class="num">Diferencia</th></tr></thead><tbody>
-    ${Object.keys(R.ventaProm).map(m=>{ const v = +R.ventasMes[m] || 0, pr = R.ventaProm[m], ya = R.ventaReal[m]||0; return `<tr><td style="font-family:var(--sans);">${fMes(m+'-01')}</td><td class="num" style="white-space:nowrap;">${ya ? pesos2(ya) : '—'}</td><td class="num" style="white-space:nowrap;">${pesos2(pr)}</td>
-      <td class="num">${inpt('money', v || '', `flujoSetVenta('${m}', this.value)`, 'placeholder="Promedio"')}</td>
+  const C = S._contador, manual = (F.escenarios[F.escActivo].ventasMes) || {};
+  const pctTxt = x=>(x*100).toLocaleString('es-AR',{minimumFractionDigits:1, maximumFractionDigits:1})+' %';
+  const contadorTxt = !C ? '' : (C.crece
+    ? `<p class="hint" style="margin-bottom:10px;">Cada mes que viene = la venta del mismo mes del año pasado <b>${C.crece >= 1 ? 'más' : 'menos'} un ${pctTxt(Math.abs(C.crece - 1))}</b>, que es lo que ${C.crece >= 1 ? 'creció' : 'bajó'} la venta en ${C.base.length} meses (${C.base.slice().reverse().map(m=>fMes(m+'-01')).join(', ')}) contra los mismos meses del año anterior${C.base.length < FLUJO_CRECE_MESES ? '. Hay pocos meses para comparar: cargá la historia del contador para que sea más preciso' : ''}. Si un mes no tiene datos del año pasado, se usa el promedio. Si cargás un número a mano, manda ese.</p>`
+    : `<p class="hint" style="margin-bottom:10px;color:var(--yellow);">Para calcular este escenario hace falta la venta de cada mes del año pasado. Cargá los cierres del contador con "Importar" (en Supuestos) o en la tabla "Venta real mes a mes". Mientras tanto se usa el promedio.</p>`);
+  const ventasHtml = `<p class="hint" style="margin-bottom:10px;">Escenario <b>${escHtml(S._escNombre)}</b>. Venta total del mes (efectivo + tarjetas). Vacío = ${C ? 'lo que calcula el contador o, si no hay datos, ' : ''}el promedio de Carga Diaria. Si cargás un número, los días que faltan de ese mes se escalan para llegar a ese total. En el mes en curso ya se descuenta lo vendido.</p>
+    ${contadorTxt}
+    <div style="overflow-x:auto;"><table><thead><tr><th>Mes</th>${C ? '<th class="num">Año pasado</th>' : ''}<th class="num">Ya vendido</th><th class="num">Por promedio (mes entero)</th><th class="num">Venta estimada</th><th class="num">Diferencia</th></tr></thead><tbody>
+    ${Object.keys(R.ventaProm).map(m=>{
+      const v = +R.ventasMes[m] || 0, mano = +manual[m] || 0, cx = C && C.meses[m], pr = R.ventaProm[m], ya = R.ventaReal[m]||0;
+      const ph = cx ? pesos2(cx.est).replace('$','') : 'Promedio';
+      return `<tr><td style="font-family:var(--sans);">${fMes(m+'-01')}${cx && cx.pascua ? ' <span class="hint" title="Semana Santa cae en otro mes que el año pasado">(Pascua)</span>' : ''}</td>${C ? `<td class="num" style="white-space:nowrap;">${cx ? pesos2(cx.ant) : '—'}</td>` : ''}<td class="num" style="white-space:nowrap;">${ya ? pesos2(ya) : '—'}</td><td class="num" style="white-space:nowrap;">${pesos2(pr)}</td>
+      <td class="num">${inpt('money', C ? (mano || '') : (v || ''), `flujoSetVenta('${m}', this.value)`, `placeholder="${ph}"`)}</td>
       <td class="num" style="white-space:nowrap;color:var(--${v ? (v < pr ? 'red' : 'green') : 'muted'});">${v ? pesos2(v - pr) : '—'}</td></tr>`; }).join('')}
+    </tbody></table></div>`;
+
+  // ---------- Venta real mes a mes (cierres del contador)
+  const hoyM = hoy.slice(0,7), mesesHist = [];
+  for(let m = fMesMas(hoyM, -24); m < hoyM; m = fMesMas(m, 1)) mesesHist.push(m);
+  const histHtml = `<p class="hint" style="margin-bottom:10px;">"Ventas del mes" de cada cierre del contador. Es la misma venta que Carga Diaria (efectivo + tarjetas). La usa el escenario "Según el contador" para saber cuánto se vende cada mes del año. Si un mes está vacío, se toma Carga Diaria cuando ese mes está completo.</p>
+    <div style="overflow:auto;max-height:420px;"><table><thead><tr><th>Mes</th><th class="num">Contador</th><th class="num">Carga Diaria</th><th class="num">Contra el año anterior</th></tr></thead><tbody>
+    ${mesesHist.slice().reverse().map(m=>{
+      const h = +(F.historia||{})[m] || 0, real = flujoVentaMesReal(m), ant = flujoVentaMesReal(fMesMas(m, -12));
+      const cd = (()=>{ let t = 0; Object.entries(state.dias||{}).forEach(([d, x])=>{ if(d.slice(0,7)===m) (x.cajas||[]).forEach(c=>{ t += n(c.efectivo) + n(c.ajusteEfectivo) + n(c.tarjetas); }); }); return t; })();
+      return `<tr><td style="font-family:var(--sans);">${fMes(m+'-01')}</td><td class="num">${inpt('money', h || '', `flujoSetHist('${m}', this.value)`, 'placeholder="—"')}</td><td class="num" style="white-space:nowrap;">${cd ? pesos2(cd) : '—'}</td><td class="num" style="white-space:nowrap;">${real && ant ? (real >= ant ? '+' : '−') + pctTxt(Math.abs(real/ant - 1)) : '—'}</td></tr>`;
+    }).join('')}
     </tbody></table></div>`;
 
   // ---------- Compras nuevas por mes
@@ -6528,7 +6626,7 @@ function renderFlujo(){
     </tbody></table></div>`;
 
   // ---------- Supuestos
-  const supHtml = `<p class="hint" style="margin-bottom:10px;">Los de "Ventas y compras" son del escenario <b>${escHtml(S._escNombre)}</b>; los demás valen para los tres.</p><div class="grid2">${FLUJO_SUP.map(s=>{
+  const supHtml = `<p class="hint" style="margin-bottom:10px;">Los de "Ventas y compras" son del escenario <b>${escHtml(S._escNombre)}</b>; los demás valen para todos.</p><div class="grid2">${FLUJO_SUP.map(s=>{
     if(s.length===1) return `<div style="grid-column:1/-1;font-size:11px;letter-spacing:2px;color:var(--gold);margin-top:8px;">${s[0]}</div>`;
     const [k, lab, tipo, , ayuda, alc] = s;
     if(FLUJO_SUP_ARRIBA.includes(k)) return '';
@@ -6597,7 +6695,7 @@ function renderFlujo(){
   // ---------- Comparación de escenarios
   const escTabla = `<div style="overflow-x:auto;"><table><thead><tr><th>Escenario</th><th class="num">Al ${fmtFecha(meta.t)}</th><th class="num">Día más justo hasta ahí</th></tr></thead><tbody>
     ${escs.map(e=>{ const X = todos[e.id], z = flujoMeta(X), q = flujoMin(X.rows.filter(r=>r.t<=z.t)); return `<tr style="${e.id===F.escActivo?'font-weight:700;':''}"><td style="font-family:var(--sans);">${escHtml(e.nombre)}</td><td class="num" style="white-space:nowrap;color:var(--${z.total<0?'red':'text'});">${fM(z.total)}</td><td class="num" style="white-space:nowrap;">${fM(q.total)} el ${fmtFecha(q.t)}</td></tr>`; }).join('')}
-    </tbody></table></div><p class="hint" style="margin-top:8px;">Cada escenario tiene sus propias ventas y compras. Lo demás es igual para los tres.</p>`;
+    </tbody></table></div><p class="hint" style="margin-top:8px;">Cada escenario tiene sus propias ventas y compras. Lo demás es igual para todos.</p>`;
 
   root.innerHTML = `
   <p class="hint mb16">Banco + efectivo, desde el ${fmtFecha(R.ini)} hasta el ${fmtFecha(fin)}. Se recalcula solo con Cheques, Deuda Proveedores, Bancos y Carga Diaria.</p>
@@ -6619,6 +6717,7 @@ function renderFlujo(){
       ${det('mes','RESUMEN POR MES', tablaMeses)}
       ${det('esc','COMPARACIÓN DE ESCENARIOS', escTabla)}
       ${det('ventas','VENTA ESTIMADA POR MES', ventasHtml)}
+      ${det('hist','VENTA REAL MES A MES (CIERRES DEL CONTADOR)', histHtml)}
       ${det('compras','COMPRAS NUEVAS POR MES', comprasHtml)}
       ${det('sup','SUPUESTOS', supHtml)}
       ${det('fijos','GASTOS FIJOS POR MES', fijosHtml)}
@@ -6723,6 +6822,13 @@ function flujoSetVenta(m, v){
   e.ventasMes[m] = x && x > 0 ? x : null;
   save(); renderFlujo();
 }
+function flujoSetHist(m, v){
+  const x = flujoParse('money', v);
+  const F = state.flujo;
+  if(!F.historia) F.historia = {};
+  F.historia[m] = x && x > 0 ? x : null;
+  save(); renderFlujo();
+}
 function flujoSetCheque(id, cuenta){
   if(cuenta) delete state.flujo.chequesCuentan[id]; else state.flujo.chequesCuentan[id] = false;
   save(); renderFlujo();
@@ -6736,6 +6842,7 @@ function flujoAplicarDatos(d){
   Object.entries(d.escVentas || {}).forEach(([id, v])=>{ if(F.escenarios[id]) Object.assign(F.escenarios[id].ventasMes, v); });
   ['tramos','extras'].forEach(k=>{ if(Array.isArray(d[k])) F[k] = d[k]; });
   if(d.atrasos) F.atrasos = d.atrasos;
+  if(d.historia && typeof d.historia==='object') Object.entries(d.historia).forEach(([m, v])=>{ if(/^\d{4}-\d{2}$/.test(m) && +v > 0) F.historia[m] = r2(+v); });
   (d.pagosPagados || []).forEach(id=>{ const p = F.pagos.find(x=>x.id===id); if(p && !p.pagado){ p.pagado = true; p.pagadoEl = todayStr(); } });
   (d.fijosNuevos || []).forEach(f=>{ const x = F.fijos.find(y=>y.id===f.id); if(x) Object.assign(x, f); else F.fijos.push(f); });
   Object.entries(d.fijosDesde || {}).forEach(([id, f])=>{ const x = F.fijos.find(y=>y.id===id); if(x) x.desde = f; });
