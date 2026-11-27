@@ -5634,6 +5634,37 @@ function nvConteoHoy(id, valor){
   a.conteoFecha = nvHoy();
   nvCambio(['articulo', id]);
 }
+// Dos artículos que son el mismo producto (ej. "Postre Mantecol 111" y "Mantecol
+// de 111"): pasa todo lo del artículo "desde" al "hacia" (modelos, cambios de los
+// pedidos y lo comprado o apartado) y borra el "desde".
+function nvUnirArticulo(desde, hacia){
+  const a = nvData.articulos[desde], b = nvData.articulos[hacia];
+  if(!a || !b || desde===hacia){ nvRender(); return; }
+  const ap = nvR2((+a.apartado||0) + (+b.apartado||0));
+  if(!confirm(`¿Unir "${a.nombre}" con "${b.nombre}"?\n\nQueda uno solo, llamado "${b.nombre}". Las cajas y pedidos que usan "${a.nombre}" pasan a usar "${b.nombre}", y lo comprado o apartado se suma (queda ${nvCant(ap)}).`)){ nvRender(); return; }
+  Object.values(nvData.modelos).forEach(m=>{
+    if(!m.items || !(desde in m.items)) return;
+    m.items[hacia] = (+m.items[hacia]||0) + (+m.items[desde]||0);
+    delete m.items[desde];
+    nvSave('modelo', m.id);
+  });
+  nvPedidos().forEach(p=>{
+    if(!p.ajustes || !p.ajustes[desde]) return;
+    const x = p.ajustes[desde], y = p.ajustes[hacia];
+    if(y) y.cant = (+y.cant||0) + (+x.cant||0); else p.ajustes[hacia] = x;
+    delete p.ajustes[desde];
+    if(p.ajustes[hacia] && !(+p.ajustes[hacia].cant)) delete p.ajustes[hacia];
+    nvSave('pedido', p.id);
+  });
+  b.apartado = ap;
+  if((a.conteoFecha||'') > (b.conteoFecha||'')) b.conteoFecha = a.conteoFecha;
+  if(!(+b.costo) && +a.costo) b.costo = a.costo;
+  if(!(+b.precio) && +a.precio) b.precio = a.precio;
+  if(!b.ref && a.ref) b.ref = a.ref;
+  nvSave('articulo', hacia);
+  nvDelete('articulo', desde);
+  toast(`Listo: "${a.nombre}" quedó unido a "${b.nombre}"`);
+}
 function nvBorrarArticulo(id){
   const usado = Object.values(nvData.modelos).some(m=>m.items && m.items[id]) || nvPedidos().some(p=>p.ajustes && p.ajustes[id]);
   if(usado){ toast('No se puede borrar: está en un modelo o en un pedido. Sacalo de ahí primero.', 'err'); return; }
@@ -5918,14 +5949,17 @@ function nvHtml(){
     const arts = Object.values(nvData.articulos).sort((a,b)=>a.nombre.localeCompare(b.nombre));
     html += `<div class="nv-card">
       <div class="nv-row" style="justify-content:space-between;margin-bottom:6px;"><div class="nv-tit" style="margin:0;">Artículos de las cajas</div><button class="nv-btn" onclick="nvTraerCostos()">Traer costos del catálogo</button></div>
-      <p class="nv-hint" style="margin-bottom:10px;">Precio de lista y costo vienen del catálogo de la app al agregar el artículo. Los que no tienen costo cargado allá, o los del catálogo del local, se completan acá a mano.</p>
+      <p class="nv-hint" style="margin-bottom:10px;">Precio de lista y costo vienen del catálogo de la app al agregar el artículo. Los que no tienen costo cargado allá, o los del catálogo del local, se completan acá a mano. Si dos artículos son el mismo producto, en el que sobra elegí "Unir con…" y el otro: queda uno solo.</p>
       ${arts.length ? `<div class="nv-tw"><table>
         <thead><tr><th>Artículo</th><th class="r">Costo unitario</th><th class="r">Precio de lista</th><th class="r">Comprado o apartado</th><th></th></tr></thead>
         <tbody>${arts.map(a=>`<tr><td style="min-width:180px;">${nvInput('nvAN_'+a.id, a.nombre, `nvArticuloCampo('${a.id}','nombre',this.value)`, {tipo:'text', ancho:'100%'})}</td>
           <td class="r">${nvInput('nvAC_'+a.id, a.costo||0, `nvArticuloCampo('${a.id}','costo',this.value)`)}</td>
           <td class="r">${nvInput('nvAP_'+a.id, a.precio||0, `nvArticuloCampo('${a.id}','precio',this.value)`)}</td>
           <td class="r">${nvInput('nvAA_'+a.id, a.apartado||0, `nvArticuloCampo('${a.id}','apartado',this.value)`, {ancho:'90px'})}</td>
-          <td class="r"><button class="nv-btn" onclick="nvBorrarArticulo('${a.id}')">Borrar</button></td></tr>`).join('')}</tbody></table></div>` : ''}
+          <td class="r"><div class="nv-row" style="justify-content:flex-end;flex-wrap:nowrap;">
+            ${arts.length>1 ? `<select style="width:auto;max-width:170px;" title="Si es el mismo producto que otro de la lista, unilos en uno solo" onchange="if(this.value) nvUnirArticulo('${a.id}', this.value)">
+              <option value="">Unir con…</option>${arts.filter(o=>o.id!==a.id).map(o=>`<option value="${o.id}">${escapeHtml(o.nombre)}</option>`).join('')}</select>` : ''}
+            <button class="nv-btn" onclick="nvBorrarArticulo('${a.id}')">Borrar</button></div></td></tr>`).join('')}</tbody></table></div>` : ''}
       ${nvBuscador({tipo:'articulos'}, 'Buscar un artículo para agregar a la lista')}
     </div>`;
   }
