@@ -47,6 +47,13 @@
 }
 
 * { margin:0; padding:0; box-sizing:border-box; }
+/* Barras de desplazamiento oscuras, del color de la pantalla (no blancas). */
+html { color-scheme: dark; }
+* { scrollbar-color: var(--border) var(--surface); }
+::-webkit-scrollbar { width:10px; height:10px; }
+::-webkit-scrollbar-track { background: var(--surface); border-radius:8px; }
+::-webkit-scrollbar-thumb { background: var(--border); border-radius:8px; }
+::-webkit-scrollbar-thumb:hover { background: var(--muted); }
 
 body {
   background: var(--bg);
@@ -6241,19 +6248,32 @@ function flujoCalc(escId, op){
   // Promedios por día de la semana (Carga Diaria) y venta real por día
   const desde = fDia(hoy, -Math.round((+S.meses||5)*30.4));
   const acc = Array.from({length:7}, ()=>({n:0, ef:0, tj:0, g:0}));
-  const tjReal = {}, ventaRealDia = {};
+  const tjReal = {}, ventaRealDia = {}, especiales = [];
+  // Ventas especiales (cajas navideñas y otras ventas grandes cobradas casi sin
+  // tickets ni efectivo): cuentan como plata que entró ese día, pero no van al
+  // promedio, porque no se repiten todas las semanas.
+  const esEspecial = c=>{
+    const ef = n(c.efectivo) + n(c.ajusteEfectivo), v = ef + n(c.tarjetas);
+    return v >= 1000000 && n(c.tickets) <= 3 && ef <= v * 0.2;
+  };
   // Los "SUELDOS" de caja son el efectivo que se deposita para pagarlos por
   // banco. Si están cargados como gasto fijo, no se cuentan también acá.
   const sueldosFijos = (F.fijos||[]).some(x=>/^\s*sueldos/i.test(x.concepto||'') && +x.monto > 0);
   for(const [d, x] of Object.entries(state.dias||{})){
-    let ef = 0, tj = 0, g = 0;
+    let ef = 0, tj = 0, g = 0, efE = 0, tjE = 0;
     (x.cajas||[]).forEach(c=>{
-      ef += n(c.efectivo) + n(c.ajusteEfectivo); tj += n(c.tarjetas);
+      if(esEspecial(c)){
+        efE += n(c.efectivo) + n(c.ajusteEfectivo); tjE += n(c.tarjetas);
+        if(d >= desde && d < hoy) especiales.push({d, cajero:c.cajero||'', monto:n(c.efectivo) + n(c.ajusteEfectivo) + n(c.tarjetas)});
+      } else { ef += n(c.efectivo) + n(c.ajusteEfectivo); tj += n(c.tarjetas); }
       (c.gastos||[]).forEach(gg=>{ if(/DEPOSITO/i.test(gg.concepto||'') || (sueldosFijos && /^\s*sueldos?\s*$/i.test(gg.concepto||''))) return; g += n(gg.monto); });
     });
-    if(ef + tj > 0){
-      tjReal[d] = tj; ventaRealDia[d] = ef + tj;
-      if(d >= desde && d < hoy){ const a = acc[fDow(d)]; a.n++; a.ef += ef; a.tj += tj; a.g += g; }
+    if(ef + tj + efE + tjE > 0){
+      // Lo cobrado en una venta especial no se proyecta como tarjeta a acreditar:
+      // su cobro va en "Cajas navideñas y otros cobros" (puede facturarse antes
+      // de que entre la plata).
+      tjReal[d] = tj; ventaRealDia[d] = ef + tj + efE + tjE;
+      if(ef + tj > 0 && d >= desde && d < hoy){ const a = acc[fDow(d)]; a.n++; a.ef += ef; a.tj += tj; a.g += g; }
     }
   }
   // Un día de la semana con muy pocos registros (ej: un domingo que se abrió
@@ -6411,7 +6431,7 @@ function flujoCalc(escId, op){
     r.salidas = r.gastos + r.provef + r.saleBanco + (exS.efectivo[t]||0);
     rows.push(r);
   }
-  return {S, hoy, ini, fin, rows, prom, viejos, facturas, ventaProm, ventaReal, ventaEst, ventasMes, compraMes, simDesde, capTot, vence1,
+  return {S, hoy, ini, fin, rows, prom, especiales, viejos, facturas, ventaProm, ventaReal, ventaEst, ventasMes, compraMes, simDesde, capTot, vence1,
     deuda:{banco:Math.max(0, -(+S.saldo0||0)), prestamo:capTot, cheques:pendChq, facturas:deudaFac, cuotas:pendCuo, fiscal:pendFiscal}, avisos:{sinFecha}};
 }
 
@@ -6690,7 +6710,11 @@ function renderFlujo(){
   const promHtml = `<p class="hint" style="margin-bottom:10px;">Promedio de Carga Diaria de los últimos ${S.meses} meses, por día de la semana. Los gastos de caja no incluyen los depósitos al banco ni, si están en Gastos fijos, los sueldos.</p>
     <div style="overflow-x:auto;"><table><thead><tr><th>Día</th><th class="num">Días con datos</th><th class="num">Efectivo</th><th class="num">Tarjetas</th><th class="num">Gastos de caja</th></tr></thead><tbody>
     ${[1,2,3,4,5,6,0].map(i=>{ const p = R.prom[i]; return `<tr><td style="font-family:var(--sans);">${dn[i]}</td><td class="num">${p.n}${p.cerrado && p.n ? ' (se toma como cerrado)' : ''}</td><td class="num">${pesos2(p.ef)}</td><td class="num">${pesos2(p.tj)}</td><td class="num">${pesos2(p.g)}</td></tr>`; }).join('')}
-    </tbody></table></div>`;
+    </tbody></table></div>
+    ${R.especiales.length ? `<p class="hint" style="margin-top:12px;">No entran en el promedio ${R.especiales.length === 1 ? 'esta venta especial' : `estas ${R.especiales.length} ventas especiales`} (más de $1.000.000 con 3 tickets o menos y casi sin efectivo, como las cajas navideñas). Sí cuentan como plata que entró ese día:</p>
+    <div style="overflow-x:auto;"><table><thead><tr><th>Fecha</th><th>Cajero</th><th class="num">Monto</th></tr></thead><tbody>
+    ${R.especiales.map(x=>`<tr><td>${fmtFecha(x.d)}</td><td style="font-family:var(--sans);">${escHtml(x.cajero)}</td><td class="num">${pesos2(x.monto)}</td></tr>`).join('')}
+    <tr style="font-weight:700;"><td colspan="2" style="font-family:var(--sans);">Total</td><td class="num">${pesos2(R.especiales.reduce((s,x)=>s+x.monto,0))}</td></tr></tbody></table></div>` : ''}`;
 
   // ---------- Comparación de escenarios
   const escTabla = `<div style="overflow-x:auto;"><table><thead><tr><th>Escenario</th><th class="num">Al ${fmtFecha(meta.t)}</th><th class="num">Día más justo hasta ahí</th></tr></thead><tbody>
