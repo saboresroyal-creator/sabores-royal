@@ -5407,6 +5407,97 @@ async function nvPDF(id){
   doc.save(`Presupuesto_${(p.cliente||'cliente').replace(/[^\w]+/g,'_')}.pdf`);
 }
 
+// Remito y hoja de armado: datos del cliente, qué cajas lleva y cómo se arma cada
+// una (contenido por caja y total a preparar), para imprimir y darle a los armadores.
+// Sin nada de plata (ni precios ni saldo): es solo el detalle para armar y entregar.
+function nvRemito(id){
+  const p = nvData.pedidos[id]; if(!p) return;
+  const win = window.open('', '_blank');
+  if(!win){ toast('El navegador bloqueó la ventana. Permití las ventanas emergentes.', 'err'); return; }
+  const e = s=>escapeHtml(String(s==null?'':s));
+  const dig = (p.tel||'').replace(/\D/g,'').slice(-10);
+  const cli = (dig && Object.values(state.clients||{}).find(c=>(c.phone||'').replace(/\D/g,'').slice(-10)===dig)) || {};
+  const cajas = nvCajas(p).filter(c=>(+c.cant||0)>0);
+  const ajustes = nvAjustes(p).filter(a=>+a.cant);
+  const totalCajas = nvCantCajas(p), armadas = nvArmadoTotal(p);
+  // Total de cada artículo a preparar: cajas × contenido + cambios del pedido.
+  const necesita = {};
+  cajas.forEach(c=>{ const m = nvModelo(c.modelo); Object.entries((m&&m.items)||{}).forEach(([a,q])=>{ necesita[a] = (necesita[a]||0) + q*(+c.cant||0); }); });
+  ajustes.forEach(a=>{ necesita[a.art] = (necesita[a.art]||0) + (+a.cant||0); });
+  const totales = Object.entries(necesita).filter(([,q])=>q>0).map(([a,q])=>({nombre:nvArt(a).nombre, q})).sort((x,y)=>x.nombre.localeCompare(y.nombre));
+  const caja = '<span class="chk"></span>';
+  const bloquesCaja = cajas.map(c=>{
+    const m = nvModelo(c.modelo);
+    const items = Object.entries((m&&m.items)||{}).map(([a,q])=>({nombre:nvArt(a).nombre, q})).sort((x,y)=>x.nombre.localeCompare(y.nombre));
+    return `<div class="caja">
+      <h4>${nvCant(c.cant)} × Caja ${e(m?m.nombre:'(modelo borrado)')}${m&&m.especial?' <small>(armada a pedido)</small>':''}</h4>
+      <table><thead><tr><th style="width:26px;"></th><th>Artículo</th><th class="r">Por caja</th><th class="r">Total (${nvCant(c.cant)} cajas)</th></tr></thead>
+      <tbody>${items.map(i=>`<tr><td>${caja}</td><td>${e(i.nombre)}</td><td class="r">${nvCant(i.q)}</td><td class="r"><b>${nvCant(i.q*(+c.cant||0))}</b></td></tr>`).join('') || '<tr><td></td><td colspan="3">Esta caja no tiene artículos cargados.</td></tr>'}</tbody></table>
+    </div>`;
+  }).join('');
+  win.document.write(`<!DOCTYPE html><html lang="es"><head><meta charset="UTF-8"><meta name="viewport" content="width=device-width,initial-scale=1">
+  <title>Remito ${e(p.cliente||'')} - Sabores Royal</title>
+  <style>
+    *{margin:0;padding:0;box-sizing:border-box;}
+    body{font-family:Arial,sans-serif;color:#1a1a1a;padding:24px 28px;font-size:12.5px;max-width:780px;margin:0 auto;background:#fff;}
+    .head{display:flex;justify-content:space-between;align-items:flex-start;border-bottom:3px solid #c5a028;padding-bottom:12px;margin-bottom:14px;gap:12px;}
+    .head h1{font-size:21px;color:#0f1c45;}
+    .head p{font-size:11px;color:#666;line-height:1.6;}
+    .doc{text-align:right;}
+    .doc b{display:block;font-size:17px;color:#0f1c45;text-transform:uppercase;letter-spacing:.5px;}
+    .doc span{font-size:11px;color:#666;line-height:1.6;}
+    h3{font-size:10px;text-transform:uppercase;letter-spacing:.8px;color:#0f1c45;border-bottom:1px solid #ccc;padding-bottom:4px;margin:16px 0 8px;}
+    .datos{display:grid;grid-template-columns:1fr 1fr;gap:4px 18px;line-height:1.7;}
+    .datos div span{color:#777;}
+    .resumen{display:flex;flex-wrap:wrap;gap:6px;}
+    .resumen span{border:1.5px solid #0f1c45;border-radius:6px;padding:5px 10px;font-weight:700;}
+    .caja{margin-bottom:12px;page-break-inside:avoid;}
+    .caja h4{font-size:13.5px;background:#0f1c45;color:#fff;padding:6px 9px;border-radius:5px 5px 0 0;}
+    .caja h4 small{font-weight:400;color:#e5d08a;}
+    table{width:100%;border-collapse:collapse;}
+    th{text-align:left;font-size:9.5px;text-transform:uppercase;color:#777;border-bottom:1px solid #bbb;padding:5px 6px;}
+    td{padding:6px;border-bottom:1px solid #e6e6e6;vertical-align:middle;}
+    .r{text-align:right;}
+    .chk{display:inline-block;width:14px;height:14px;border:1.5px solid #555;border-radius:3px;}
+    .nota{border:1px dashed #999;border-radius:6px;padding:8px 10px;white-space:pre-wrap;line-height:1.5;}
+    .firmas{display:grid;grid-template-columns:repeat(3,1fr);gap:22px;margin-top:40px;}
+    .firmas div{border-top:1px solid #333;padding-top:5px;text-align:center;font-size:11px;color:#444;}
+    .acciones{display:flex;gap:8px;justify-content:center;margin-bottom:16px;}
+    .acciones button{padding:10px 18px;font-size:14px;border-radius:8px;border:none;background:#0f1c45;color:#fff;cursor:pointer;}
+    .acciones button.sec{background:#eee;color:#222;}
+    @media (max-width:560px){ body{padding:14px;} .datos{grid-template-columns:1fr;} .firmas{grid-template-columns:1fr;gap:30px;} }
+    @media print{ .acciones{display:none;} body{padding:0;} @page{margin:12mm;} }
+  </style></head><body>
+  <div class="acciones"><button onclick="window.print()">Imprimir</button><button class="sec" onclick="window.close()">Cerrar</button></div>
+  <div class="head">
+    <div><h1>Sabores Royal</h1><p>Maipú 734 - Rosario</p></div>
+    <div class="doc"><b>Remito / Hoja de armado</b><span>Cajas navideñas<br>Pedido N° ${e(p.id.slice(-6).toUpperCase())}<br>Emitido: ${nvFecha(nvHoy())}</span></div>
+  </div>
+  <h3>Cliente</h3>
+  <div class="datos">
+    <div><span>Nombre:</span> <b>${e(p.cliente||'—')}</b></div>
+    <div><span>Teléfono:</span> ${e(p.tel||'—')}</div>
+    <div><span>Dirección:</span> ${e(cli.address||'—')}</div>
+    <div><span>Fecha de entrega:</span> <b>${p.entrega?nvFecha(p.entrega):'—'}</b></div>
+    <div><span>Estado:</span> ${e(nvEstado(p.estado)[1])}</div>
+    <div><span>Cajas armadas:</span> ${nvCant(armadas)} de ${nvCant(totalCajas)}</div>
+  </div>
+  <h3>Cajas del pedido (${nvCant(totalCajas)} en total)</h3>
+  <div class="resumen">${cajas.map(c=>{ const m = nvModelo(c.modelo); return `<span>${nvCant(c.cant)} × Caja ${e(m?m.nombre:'')}</span>`; }).join('') || 'Sin cajas cargadas.'}</div>
+  <h3>Cómo se arma cada caja</h3>
+  ${bloquesCaja || '<p>Sin cajas cargadas.</p>'}
+  ${ajustes.length ? `<h3>Cambios de este cliente (sobre el total de sus cajas)</h3>
+  <table><thead><tr><th style="width:26px;"></th><th>Artículo</th><th class="r">Cantidad</th></tr></thead>
+  <tbody>${ajustes.map(a=>`<tr><td>${caja}</td><td>${a.cant<0?'<b>SACAR:</b> ':'<b>AGREGAR:</b> '}${e(nvArt(a.art).nombre)}</td><td class="r"><b>${nvCant(Math.abs(a.cant))}</b></td></tr>`).join('')}</tbody></table>` : ''}
+  <h3>Total de mercadería a preparar</h3>
+  <table><thead><tr><th style="width:26px;"></th><th>Artículo</th><th class="r">Cantidad total</th></tr></thead>
+  <tbody>${totales.map(i=>`<tr><td>${caja}</td><td>${e(i.nombre)}</td><td class="r"><b>${nvCant(i.q)}</b></td></tr>`).join('') || '<tr><td></td><td colspan="2">Nada para preparar.</td></tr>'}</tbody></table>
+  ${p.notas ? `<h3>Notas</h3><div class="nota">${e(p.notas)}</div>` : ''}
+  <div class="firmas"><div>Armó</div><div>Controló</div><div>Recibí conforme (firma y aclaración)</div></div>
+  </body></html>`);
+  win.document.close();
+}
+
 // ---- Presupuesto desde una foto ----
 // La foto va a /api/factura-foto (modo presupuesto), que la lee con IA. Con lo
 // que devuelve se arma un modelo de caja propio de ese cliente y el pedido en
@@ -5872,6 +5963,7 @@ function nvHtmlPedido(p){
       <button class="nv-btn" onclick="nvPedidoSel=null;nvCatRes=[];nvRender()">← Volver a la lista</button>
       <div class="nv-row">
         <button class="nv-btn" onclick="nvPDF('${p.id}')">PDF del presupuesto</button>
+        <button class="nv-btn gold" onclick="nvRemito('${p.id}')">Remito / hoja de armado</button>
         <button class="nv-btn ok" onclick="nvWhatsApp('${p.id}')">Enviar por WhatsApp</button>
         <button class="nv-btn red" onclick="nvBorrarPedido('${p.id}')">Borrar</button>
       </div>

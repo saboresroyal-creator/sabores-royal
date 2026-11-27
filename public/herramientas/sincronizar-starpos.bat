@@ -34,7 +34,21 @@ function Terminar($codigo){
 
 # Que no corran dos a la vez (si una pasada tarda, la siguiente se saltea).
 $mutex = New-Object Threading.Mutex($false, 'SaboresRoyalSincronizarStarPOS')
-if(-not $mutex.WaitOne(0)){ if(-not $auto){ Write-Host 'Ya se esta sincronizando, espera un momento.' }; Terminar 0 }
+$libre = $false
+try{ $libre = $mutex.WaitOne(0) }catch [Threading.AbandonedMutexException]{ $libre = $true }  # una pasada anterior se cortó: el candado queda libre
+if(-not $libre){
+  # Si una pasada quedó colgada hace más de 1 hora, se la corta y se sigue.
+  $viejas = @(Get-WmiObject Win32_Process -Filter "Name='powershell.exe'" -ErrorAction SilentlyContinue | Where-Object {
+    $_.ProcessId -ne $PID -and $_.CommandLine -like '*SR_SELF*' -and
+    ((Get-Date) - $_.ConvertToDateTime($_.CreationDate)).TotalMinutes -gt 60 })
+  if($viejas.Count -gt 0){
+    foreach($v in $viejas){ try{ Stop-Process -Id $v.ProcessId -Force }catch{} }
+    Get-Process psql -ErrorAction SilentlyContinue | Stop-Process -Force -ErrorAction SilentlyContinue
+    Start-Sleep -Seconds 2
+    try{ $libre = $mutex.WaitOne(5000) }catch [Threading.AbandonedMutexException]{ $libre = $true }
+  }
+}
+if(-not $libre){ if(-not $auto){ Write-Host 'Ya se esta sincronizando, espera un momento.' }; Terminar 0 }
 
 # ---------- Instalacion (la primera vez, o al bajar una version nueva) ----------
 if($env:SR_SELF -ne $DEST){
@@ -78,7 +92,8 @@ function Consultar($sql){
   [IO.File]::WriteAllText($sqlFile, 'COPY (' + $sql + ') TO STDOUT WITH CSV HEADER;', (New-Object Text.UTF8Encoding($false)))
   $psi = New-Object Diagnostics.ProcessStartInfo
   $psi.FileName = $psql
-  $psi.Arguments = '-h 127.0.0.1 -U admin -d starpos -X -q -f "' + $sqlFile + '"'
+  # -w: si la clave está mal, que falle en vez de quedarse esperando que alguien la escriba.
+  $psi.Arguments = '-h 127.0.0.1 -U admin -d starpos -X -q -w -f "' + $sqlFile + '"'
   $psi.UseShellExecute = $false
   $psi.RedirectStandardOutput = $true
   $psi.RedirectStandardError = $true
@@ -88,8 +103,13 @@ function Consultar($sql){
   $psi.EnvironmentVariables['PGCLIENTENCODING'] = 'UTF8'
   $proc = [Diagnostics.Process]::Start($psi)
   $errTask = $proc.StandardError.ReadToEndAsync()
-  $salida = $proc.StandardOutput.ReadToEnd()
-  $proc.WaitForExit()
+  $outTask = $proc.StandardOutput.ReadToEndAsync()
+  # Nunca más de 10 minutos por consulta: si se cuelga, se corta y la próxima pasada reintenta.
+  if(-not $proc.WaitForExit(600000)){
+    try{ $proc.Kill() }catch{}
+    throw 'StarPOS tardo mas de 10 minutos en responder; se corto la consulta.'
+  }
+  $salida = $outTask.Result
   if($proc.ExitCode -ne 0){ throw ('StarPOS no respondio: ' + $errTask.Result) }
   return @(($salida -split "`r?`n") | Where-Object { $_ -ne '' } | ConvertFrom-Csv)
 }
@@ -155,6 +175,8 @@ WHERE p.active
 
 # ---------- 2) Ventas, turnos, anulaciones, retiros y stock (cada 5 minutos) ----------
 function MandarDatos($tipo, $filas){
+  # Con una sola fila PowerShell no devuelve una lista: se arma siempre una (y sin vacíos).
+  $filas = @($filas | Where-Object { $_ -ne $null })
   $n = 400
   for($i = 0; $i -lt $filas.Count; $i += $n){
     $fin = [Math]::Min($i + $n, $filas.Count) - 1
