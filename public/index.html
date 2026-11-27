@@ -5816,11 +5816,12 @@ function nvHtml(){
   if(nvVista==='faltantes'){
     const nec = nvNecesidades(firmes), sies = nvNecesidades(presup), usado = nvUsado(firmes);
     const ids = [...new Set([...Object.keys(nec), ...Object.keys(sies)])].sort((a,b)=>nvArt(a).nombre.localeCompare(nvArt(b).nombre));
-    let costoFalta = 0;
+    let costoFalta = 0, costoSobra = 0;
     const filas = ids.map(a=>{
       const art = nvArt(a), n = nec[a]||0, u = Math.min(n, usado[a]||0), ap = +art.apartado||0;
-      const para = Math.max(0, n-u), dep = Math.max(0, ap-u), falta = Math.max(0, n-ap), conPres = Math.max(0, n+(sies[a]||0)-ap);
+      const para = Math.max(0, n-u), dep = Math.max(0, ap-u), falta = Math.max(0, n-ap), sobra = Math.max(0, ap-n), conPres = Math.max(0, n+(sies[a]||0)-ap);
       costoFalta += falta*(+art.costo||0);
+      costoSobra += sobra*(+art.costo||0);
       return `<tr><td>${escapeHtml(art.nombre)}</td>
         <td class="r" style="font-weight:700;">${nvCant(n)}</td>
         <td class="r" style="opacity:.7;">${nvCant(u)}</td>
@@ -5828,6 +5829,7 @@ function nvHtml(){
         <td class="r">${nvData.articulos[a] ? nvInput('nvAp_'+a, art.apartado||0, `nvArticuloCampo('${a}','apartado',this.value)`, {ancho:'80px'}) : '-'}</td>
         <td class="r">${nvData.articulos[a] ? nvInput('nvDep_'+a, dep, `nvConteoHoy('${a}',this.value)`, {ancho:'80px'}) : nvCant(dep)}${art.conteoFecha?`<div style="font-size:10.5px;opacity:.5;">Contado ${nvFecha(art.conteoFecha).slice(0,5)}</div>`:''}</td>
         <td class="r" style="font-weight:700;color:${falta>0?'var(--danger)':'var(--ok)'};">${falta>0?nvCant(falta):'✓'}</td>
+        <td class="r" style="font-weight:700;color:${sobra>0?'var(--gold2)':'inherit'};${sobra>0?'':'opacity:.4;'}">${sobra>0?nvCant(sobra):'-'}</td>
         <td class="r" style="opacity:.6;">${nvCant(conPres)}</td></tr>`;
     }).join('');
     // Cajas a armar por modelo, sumando todos los pedidos confirmados
@@ -5851,9 +5853,9 @@ function nvHtml(){
       <div class="nv-tit">Lo que falta comprar o apartar</div>
       <p class="nv-hint" style="margin-bottom:10px;">"Necesito en total" junta todos los pedidos confirmados, armados y entregados de todos los clientes: las cajas de cada modelo por lo que lleva cada una, más los cambios de cada pedido. "Ya usado" es la mercadería de las cajas que ya se armaron, y "Para armar" la de las que faltan. Para cargar tu stock usá una de las dos columnas: en <b>"En depósito hoy"</b> poné lo que contaste hoy en el depósito (la app le suma sola lo ya usado), o en "Comprado o apartado" el total que compraste o separaste para Navidad en toda la temporada.</p>
       ${ids.length ? `<div class="nv-tw"><table class="nv-falta">
-        <thead><tr><th>Artículo</th><th class="r">Necesito en total</th><th class="r">Ya usado</th><th class="r">Para armar</th><th class="r">Comprado o apartado</th><th class="r">En depósito hoy</th><th class="r">Falta comprar</th><th class="r">Falta si se confirman los presupuestos</th></tr></thead>
+        <thead><tr><th>Artículo</th><th class="r">Necesito en total</th><th class="r">Ya usado</th><th class="r">Para armar</th><th class="r">Comprado o apartado</th><th class="r">En depósito hoy</th><th class="r">Falta comprar</th><th class="r">Sobra</th><th class="r">Falta si se confirman los presupuestos</th></tr></thead>
         <tbody>${filas}</tbody></table></div>
-        <p class="nv-hint" style="margin-top:10px;">Costo de lo que falta: <b style="color:var(--white);">${nvMoney(costoFalta)}</b></p>` : '<p class="nv-hint">Todavía no hay pedidos.</p>'}
+        <p class="nv-hint" style="margin-top:10px;">Costo de lo que falta: <b style="color:var(--white);">${nvMoney(costoFalta)}</b>${costoSobra>0?` · Valor de lo que sobra: <b style="color:var(--gold2);">${nvMoney(costoSobra)}</b>`:''}</p>` : '<p class="nv-hint">Todavía no hay pedidos.</p>'}
     </div>`;
   }
 
