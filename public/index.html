@@ -4861,11 +4861,20 @@ async function nvCargar(){
     const d = {articulos:{}, modelos:{}, pedidos:{}};
     rows.forEach(r=>{ if(NV_COL[r.tipo] && r.data) d[NV_COL[r.tipo]][r.id] = r.data; });
     nvData = d;
+    nvNumerarPedidos();
   }catch(e){
     nvError = /navidad_docs/.test(e.message||'') ? 'Falta crear la tabla en Supabase: corré supabase-migration-cajas-navidenas.sql en el SQL Editor.' : 'No se pudieron cargar las cajas navideñas: ' + (e.message||e);
   }
   nvCargando = false;
   nvRender();
+}
+// Pedidos numerados 1, 2, 3...: los que no tienen número lo reciben por orden de
+// creación, después del más alto que ya exista. Los nuevos toman el siguiente.
+function nvSiguienteNumero(){ return Object.values(nvData.pedidos).reduce((m,p)=>Math.max(m, +p.numero||0), 0) + 1; }
+function nvNumerarPedidos(){
+  Object.values(nvData.pedidos).filter(p=>!(+p.numero))
+    .sort((a,b)=>(a.creado||'').localeCompare(b.creado||'') || a.id.localeCompare(b.id))
+    .forEach(p=>{ p.numero = nvSiguienteNumero(); nvSave('pedido', p.id); });
 }
 async function nvSave(tipo, id){
   const obj = nvData[NV_COL[tipo]][id];
@@ -5069,7 +5078,7 @@ function nvNuevoPedido(){
   const modelos = nvModelosFijos();
   const cajas = {};
   if(modelos.length===1) cajas[nvId('nl')] = {modelo: modelos[0].id, cant: 1, precio: +modelos[0].precio||0};
-  nvData.pedidos[id] = {id, cliente:'', tel:'', entrega:'', estado:'presupuesto', notas:'', creado: nvHoy(), cajas, ajustes:{}, pagos:{}};
+  nvData.pedidos[id] = {id, numero: nvSiguienteNumero(), cliente:'', tel:'', entrega:'', estado:'presupuesto', notas:'', creado: nvHoy(), cajas, ajustes:{}, pagos:{}};
   nvPedidoSel = id; nvVista = 'pedidos'; nvCatRes = [];
   nvCambio(['pedido', id]);
 }
@@ -5410,6 +5419,8 @@ async function nvPDF(id){
 // Remito y hoja de armado: datos del cliente, qué cajas lleva y cómo se arma cada
 // una (contenido por caja y total a preparar), para imprimir y darle a los armadores.
 // Sin nada de plata (ni precios ni saldo): es solo el detalle para armar y entregar.
+// Número de pedido correlativo (1, 2, 3...): se guarda en el pedido (campo numero).
+function nvNumeroPedido(p){ return p && p.numero ? String(p.numero).padStart(4, '0') : '—'; }
 function nvRemito(id){
   const p = nvData.pedidos[id]; if(!p) return;
   const win = window.open('', '_blank');
@@ -5431,47 +5442,50 @@ function nvRemito(id){
     const items = Object.entries((m&&m.items)||{}).map(([a,q])=>({nombre:nvArt(a).nombre, q})).sort((x,y)=>x.nombre.localeCompare(y.nombre));
     return `<div class="caja">
       <h4>${nvCant(c.cant)} × Caja ${e(m?m.nombre:'(modelo borrado)')}${m&&m.especial?' <small>(armada a pedido)</small>':''}</h4>
-      <table><thead><tr><th style="width:26px;"></th><th>Artículo</th><th class="r">Por caja</th><th class="r">Total (${nvCant(c.cant)} cajas)</th></tr></thead>
-      <tbody>${items.map(i=>`<tr><td>${caja}</td><td>${e(i.nombre)}</td><td class="r">${nvCant(i.q)}</td><td class="r"><b>${nvCant(i.q*(+c.cant||0))}</b></td></tr>`).join('') || '<tr><td></td><td colspan="3">Esta caja no tiene artículos cargados.</td></tr>'}</tbody></table>
+      <table><thead><tr><th style="width:26px;"></th><th class="c" style="width:70px;">Por caja</th><th>Artículo</th><th class="r">Total (${nvCant(c.cant)} cajas)</th></tr></thead>
+      <tbody>${items.map(i=>`<tr><td>${caja}</td><td class="c"><span class="cant">${nvCant(i.q)}</span></td><td>${e(i.nombre)}</td><td class="r">${nvCant(i.q*(+c.cant||0))}</td></tr>`).join('') || '<tr><td></td><td colspan="3">Esta caja no tiene artículos cargados.</td></tr>'}</tbody></table>
     </div>`;
   }).join('');
   win.document.write(`<!DOCTYPE html><html lang="es"><head><meta charset="UTF-8"><meta name="viewport" content="width=device-width,initial-scale=1">
   <title>Remito ${e(p.cliente||'')} - Sabores Royal</title>
   <style>
     *{margin:0;padding:0;box-sizing:border-box;}
-    body{font-family:Arial,sans-serif;color:#1a1a1a;padding:24px 28px;font-size:12.5px;max-width:780px;margin:0 auto;background:#fff;}
-    .head{display:flex;justify-content:space-between;align-items:flex-start;border-bottom:3px solid #c5a028;padding-bottom:12px;margin-bottom:14px;gap:12px;}
-    .head h1{font-size:21px;color:#0f1c45;}
-    .head p{font-size:11px;color:#666;line-height:1.6;}
+    body{font-family:Arial,sans-serif;color:#1a1a1a;padding:20px 24px;font-size:11.5px;max-width:780px;margin:0 auto;background:#fff;}
+    .head{display:flex;justify-content:space-between;align-items:flex-start;border-bottom:3px solid #c5a028;padding-bottom:8px;margin-bottom:8px;gap:12px;}
+    .head h1{font-size:19px;color:#0f1c45;}
+    .head p{font-size:10.5px;color:#666;line-height:1.5;}
     .doc{text-align:right;}
-    .doc b{display:block;font-size:17px;color:#0f1c45;text-transform:uppercase;letter-spacing:.5px;}
-    .doc span{font-size:11px;color:#666;line-height:1.6;}
-    h3{font-size:10px;text-transform:uppercase;letter-spacing:.8px;color:#0f1c45;border-bottom:1px solid #ccc;padding-bottom:4px;margin:16px 0 8px;}
-    .datos{display:grid;grid-template-columns:1fr 1fr;gap:4px 18px;line-height:1.7;}
+    .doc b{display:block;font-size:15px;color:#0f1c45;text-transform:uppercase;letter-spacing:.5px;}
+    .doc .num{font-size:20px;color:#c5a028;}
+    .doc span{font-size:10.5px;color:#666;line-height:1.5;}
+    h3{font-size:9.5px;text-transform:uppercase;letter-spacing:.8px;color:#0f1c45;border-bottom:1px solid #ccc;padding-bottom:3px;margin:10px 0 5px;}
+    .datos{display:grid;grid-template-columns:1fr 1fr;gap:1px 18px;line-height:1.55;}
     .datos div span{color:#777;}
     .resumen{display:flex;flex-wrap:wrap;gap:6px;}
-    .resumen span{border:1.5px solid #0f1c45;border-radius:6px;padding:5px 10px;font-weight:700;}
-    .caja{margin-bottom:12px;page-break-inside:avoid;}
-    .caja h4{font-size:13.5px;background:#0f1c45;color:#fff;padding:6px 9px;border-radius:5px 5px 0 0;}
+    .resumen span{border:1.5px solid #0f1c45;border-radius:6px;padding:3px 9px;font-weight:700;}
+    .caja{margin-bottom:8px;page-break-inside:avoid;}
+    .caja h4{font-size:12.5px;background:#0f1c45;color:#fff;padding:4px 8px;border-radius:5px 5px 0 0;}
     .caja h4 small{font-weight:400;color:#e5d08a;}
     table{width:100%;border-collapse:collapse;}
-    th{text-align:left;font-size:9.5px;text-transform:uppercase;color:#777;border-bottom:1px solid #bbb;padding:5px 6px;}
-    td{padding:6px;border-bottom:1px solid #e6e6e6;vertical-align:middle;}
+    th{text-align:left;font-size:9px;text-transform:uppercase;color:#777;border-bottom:1px solid #bbb;padding:3px 6px;}
+    td{padding:3px 6px;border-bottom:1px solid #e6e6e6;vertical-align:middle;}
     .r{text-align:right;}
-    .chk{display:inline-block;width:14px;height:14px;border:1.5px solid #555;border-radius:3px;}
-    .nota{border:1px dashed #999;border-radius:6px;padding:8px 10px;white-space:pre-wrap;line-height:1.5;}
-    .firmas{display:grid;grid-template-columns:repeat(3,1fr);gap:22px;margin-top:40px;}
+    .c{text-align:center;}
+    .cant{display:inline-block;min-width:34px;padding:1px 6px;border:2px solid #0f1c45;border-radius:5px;font-size:14px;font-weight:800;color:#0f1c45;text-align:center;}
+    .chk{display:inline-block;width:12px;height:12px;border:1.5px solid #555;border-radius:3px;}
+    .nota{border:1px dashed #999;border-radius:6px;padding:5px 8px;white-space:pre-wrap;line-height:1.4;}
+    .firmas{display:grid;grid-template-columns:repeat(3,1fr);gap:48px;margin-top:70px;}
     .firmas div{border-top:1px solid #333;padding-top:5px;text-align:center;font-size:11px;color:#444;}
     .acciones{display:flex;gap:8px;justify-content:center;margin-bottom:16px;}
     .acciones button{padding:10px 18px;font-size:14px;border-radius:8px;border:none;background:#0f1c45;color:#fff;cursor:pointer;}
     .acciones button.sec{background:#eee;color:#222;}
     @media (max-width:560px){ body{padding:14px;} .datos{grid-template-columns:1fr;} .firmas{grid-template-columns:1fr;gap:30px;} }
-    @media print{ .acciones{display:none;} body{padding:0;} @page{margin:12mm;} }
+    @media print{ .acciones{display:none;} body{padding:0;} @page{size:A4;margin:10mm;} }
   </style></head><body>
   <div class="acciones"><button onclick="window.print()">Imprimir</button><button class="sec" onclick="window.close()">Cerrar</button></div>
   <div class="head">
     <div><h1>Sabores Royal</h1><p>Maipú 734 - Rosario</p></div>
-    <div class="doc"><b>Remito / Hoja de armado</b><span>Cajas navideñas<br>Pedido N° ${e(p.id.slice(-6).toUpperCase())}<br>Emitido: ${nvFecha(nvHoy())}</span></div>
+    <div class="doc"><b>Remito / Hoja de armado</b><b class="num">N° ${nvNumeroPedido(p)}</b><span>Cajas navideñas<br>Emitido: ${nvFecha(nvHoy())}</span></div>
   </div>
   <h3>Cliente</h3>
   <div class="datos">
@@ -5487,11 +5501,11 @@ function nvRemito(id){
   <h3>Cómo se arma cada caja</h3>
   ${bloquesCaja || '<p>Sin cajas cargadas.</p>'}
   ${ajustes.length ? `<h3>Cambios de este cliente (sobre el total de sus cajas)</h3>
-  <table><thead><tr><th style="width:26px;"></th><th>Artículo</th><th class="r">Cantidad</th></tr></thead>
-  <tbody>${ajustes.map(a=>`<tr><td>${caja}</td><td>${a.cant<0?'<b>SACAR:</b> ':'<b>AGREGAR:</b> '}${e(nvArt(a.art).nombre)}</td><td class="r"><b>${nvCant(Math.abs(a.cant))}</b></td></tr>`).join('')}</tbody></table>` : ''}
-  <h3>Total de mercadería a preparar</h3>
-  <table><thead><tr><th style="width:26px;"></th><th>Artículo</th><th class="r">Cantidad total</th></tr></thead>
-  <tbody>${totales.map(i=>`<tr><td>${caja}</td><td>${e(i.nombre)}</td><td class="r"><b>${nvCant(i.q)}</b></td></tr>`).join('') || '<tr><td></td><td colspan="2">Nada para preparar.</td></tr>'}</tbody></table>
+  <table><thead><tr><th style="width:26px;"></th><th class="c" style="width:70px;">Cantidad</th><th>Artículo</th></tr></thead>
+  <tbody>${ajustes.map(a=>`<tr><td>${caja}</td><td class="c"><span class="cant">${nvCant(Math.abs(a.cant))}</span></td><td>${a.cant<0?'<b>SACAR:</b> ':'<b>AGREGAR:</b> '}${e(nvArt(a.art).nombre)}</td></tr>`).join('')}</tbody></table>` : ''}
+  ${cajas.length>1 || ajustes.length ? `<h3>Total de mercadería a preparar</h3>
+  <table><thead><tr><th style="width:26px;"></th><th class="c" style="width:70px;">Total</th><th>Artículo</th></tr></thead>
+  <tbody>${totales.map(i=>`<tr><td>${caja}</td><td class="c"><span class="cant">${nvCant(i.q)}</span></td><td>${e(i.nombre)}</td></tr>`).join('') || '<tr><td></td><td colspan="2">Nada para preparar.</td></tr>'}</tbody></table>` : ''}
   ${p.notas ? `<h3>Notas</h3><div class="nota">${e(p.notas)}</div>` : ''}
   <div class="firmas"><div>Armó</div><div>Controló</div><div>Recibí conforme (firma y aclaración)</div></div>
   </body></html>`);
@@ -5575,7 +5589,7 @@ async function nvPedidoDesdeLectura(r){
   // Es una caja a medida de este pedido: queda como caja especial
   nvData.modelos[mid] = {id: mid, nombre: 'Caja ' + (r.cliente || 'del presupuesto'), precio, items, especial: true, pedido: pid};
   nvSave('modelo', mid);
-  nvData.pedidos[pid] = {id: pid, cliente: r.cliente||'', tel: nvTel(r.telefono), entrega: r.fechaEntrega||'', estado:'presupuesto',
+  nvData.pedidos[pid] = {id: pid, numero: nvSiguienteNumero(), cliente: r.cliente||'', tel: nvTel(r.telefono), entrega: r.fechaEntrega||'', estado:'presupuesto',
     notas: 'Cargado desde una foto.' + (r.observaciones ? ' ' + r.observaciones : ''), creado: nvHoy(),
     cajas: {[nvId('nl')]: {modelo: mid, cant, precio, precioManual: true}}, ajustes: {}, pagos: {}};
   nvSave('pedido', pid);
@@ -5960,7 +5974,8 @@ function nvHtmlPedido(p){
   const clientes = Object.values(state.clients||{}).filter(c=>c.name).map(c=>c.name).sort();
   return `<div class="nv-card">
     <div class="nv-row" style="justify-content:space-between;margin-bottom:12px;">
-      <button class="nv-btn" onclick="nvPedidoSel=null;nvCatRes=[];nvRender()">← Volver a la lista</button>
+      <div class="nv-row"><button class="nv-btn" onclick="nvPedidoSel=null;nvCatRes=[];nvRender()">← Volver a la lista</button>
+        <b style="color:var(--gold2);font-size:15px;">Pedido N° ${nvNumeroPedido(p)}</b></div>
       <div class="nv-row">
         <button class="nv-btn" onclick="nvPDF('${p.id}')">PDF del presupuesto</button>
         <button class="nv-btn gold" onclick="nvRemito('${p.id}')">Remito / hoja de armado</button>
