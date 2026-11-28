@@ -7494,11 +7494,37 @@ function cmpDiffAgainstPrevList(items, prov, provId){
     if(!old) return {status:'new'};
     const oldUnit=pricePerUnit?old.price:old.price/(old.unitQty||1);
     if(!(oldUnit>0) || Math.abs(newUnit-oldUnit)<0.01) return {status:'same'};
-    const pct=Math.round((newUnit-oldUnit)/oldUnit*100);
-    return {status:pct>0?'up':'down', pct, oldUnit};
+    const pct=Math.round((newUnit-oldUnit)/oldUnit*1000)/10;
+    return {status:newUnit>oldUnit?'up':'down', pct, oldUnit, newUnit, name:it.name};
   });
   const discontinued=oldLista.rows.filter(r=>!newNorms[r.norm]);
   return {perItem, discontinued};
+}
+
+// Detalle de los cambios de precio contra la lista anterior: qué artículos
+// subieron y cuáles bajaron, con precio anterior, nuevo y %. Se muestra en la
+// vista previa y otra vez en un cartel al terminar de importar.
+function cmpHtmlCambios(diff, abierto){
+  if(!diff) return '';
+  const fmtPct=n=>(n>0?'+':'')+n.toLocaleString('es-AR',{maximumFractionDigits:1})+'%';
+  const lista=(st, titulo, color)=>{
+    const xs=diff.perItem.filter(d=>d.status===st).sort((a,b)=>st==='up'?b.pct-a.pct:a.pct-b.pct);
+    if(!xs.length) return `<div style="font-size:12px;color:rgba(255,255,255,0.4);margin:6px 0;">${titulo}: ninguno.</div>`;
+    const MAX=1000, ver=xs.slice(0,MAX);
+    return `<details ${abierto?'open':''} style="margin:8px 0;">
+      <summary style="cursor:pointer;font-weight:700;color:${color};font-size:13px;">${titulo} (${xs.length})</summary>
+      <div class="cmp-tbl-wrap" style="max-height:340px;overflow-y:auto;margin-top:6px;"><table>
+        <tr><th>Producto</th><th style="text-align:right;">Antes</th><th style="text-align:right;">Ahora</th><th style="text-align:right;">%</th></tr>
+        ${ver.map(d=>`<tr><td>${cmpEsc(d.name)}</td><td style="text-align:right;white-space:nowrap;opacity:.6;">${cmpMoney(d.oldUnit)}</td><td style="text-align:right;white-space:nowrap;font-weight:700;">${cmpMoney(d.newUnit)}</td><td style="text-align:right;white-space:nowrap;color:${color};font-weight:700;">${fmtPct(d.pct)}</td></tr>`).join('')}
+      </table></div>
+      ${xs.length>MAX?`<div style="font-size:11px;color:rgba(255,255,255,0.4);">Mostrando ${MAX} de ${xs.length}.</div>`:''}
+    </details>`;
+  };
+  return `<div style="margin-bottom:12px;">
+    <div style="font-size:11px;font-weight:700;color:var(--gold2);text-transform:uppercase;letter-spacing:.5px;">Cambios de precio (por unidad)</div>
+    ${lista('up','▲ Subieron','var(--warn)')}
+    ${lista('down','▼ Bajaron','var(--ok)')}
+  </div>`;
 }
 
 function cmpRenderAiPreview(){
@@ -7526,8 +7552,8 @@ function cmpRenderAiPreview(){
     const finalPrice=cmpApplyAdjustPcts(it.price,adjPcts);
     const d=diff?diff.perItem[i]:null;
     let diffBadge='';
-    if(d&&d.status==='up') diffBadge=`<div style="font-size:10px;color:var(--warn);margin-top:2px;">▲ +${d.pct}% (antes ${cmpMoney(d.oldUnit)}/u)</div>`;
-    else if(d&&d.status==='down') diffBadge=`<div style="font-size:10px;color:var(--ok);margin-top:2px;">▼ ${d.pct}% (antes ${cmpMoney(d.oldUnit)}/u)</div>`;
+    if(d&&d.status==='up') diffBadge=`<div style="font-size:10px;color:var(--warn);margin-top:2px;">▲ +${d.pct.toLocaleString("es-AR")}% (antes ${cmpMoney(d.oldUnit)}/u)</div>`;
+    else if(d&&d.status==='down') diffBadge=`<div style="font-size:10px;color:var(--ok);margin-top:2px;">▼ ${d.pct.toLocaleString("es-AR")}% (antes ${cmpMoney(d.oldUnit)}/u)</div>`;
     else if(d&&d.status==='new') diffBadge=`<div style="font-size:10px;color:var(--gold2);margin-top:2px;">NUEVO</div>`;
     return `
     <tr>
@@ -7549,7 +7575,7 @@ function cmpRenderAiPreview(){
       <input class="cmp-inp" id="cmp-import-adj" value="${cmpEsc(_cmpImportAdjustStr)}" placeholder="Ej: -2, -3, 21" oninput="cmpImportAdjustChanged(this.value)">
       <div style="font-size:11px;color:rgba(255,255,255,0.4);margin-top:4px;">% en cascada sobre el precio de la columna, descuentos primero (negativos) e IVA al final. Se guarda para la próxima importación de este proveedor.${hasAdj?` Ejemplo: ${cmpEsc(cmpAdjustPreviewText(adjPcts,items[0]?items[0].price:1000))}`:''}</div>
     </div>
-    ${diff?`<div class="cmp-note" style="margin-bottom:12px;">Comparado con la lista anterior de este proveedor: <b style="color:var(--warn)">${upCount} subieron</b>, <b style="color:var(--ok)">${downCount} bajaron</b>, <b style="color:var(--gold2)">${newCount} nuevos</b>${diff.discontinued.length?`, y <b style="color:var(--danger)">${diff.discontinued.length} ya no están en este archivo</b> y van a dejar de listarse para este proveedor al importar`:''}.</div>`:''}
+    ${diff?`<div class="cmp-note" style="margin-bottom:12px;">Comparado con la lista anterior de este proveedor: <b style="color:var(--warn)">${upCount} subieron</b>, <b style="color:var(--ok)">${downCount} bajaron</b>, <b style="color:var(--gold2)">${newCount} nuevos</b>${diff.discontinued.length?`, y <b style="color:var(--danger)">${diff.discontinued.length} ya no están en este archivo</b> y van a dejar de listarse para este proveedor al importar`:''}.</div>${cmpHtmlCambios(diff,false)}`:''}
     <div style="display:flex;gap:10px;margin-bottom:12px;">
       <button class="btn-primary" style="flex:1;" onclick="cmpDoAiImport()">Importar ${items.length} producto(s)</button>
       ${_cmpGrid?`<button class="btn-secondary" style="flex:none;font-size:12.5px;" onclick="cmpMapBack()">Columnas</button>`:''}
@@ -7597,6 +7623,7 @@ async function cmpDoAiImport(){
     name:it.name, price:cmpApplyAdjustPcts(it.price,adjPcts), priceRaw:it.price, unit:it.unit||'', unitQty:it.unitQty||1, code:it.code||'', ean:it.ean||'', norm:cmpNorm(it.name)
   }));
   if(!rows.length){ toast('No hay productos para importar','err'); return; }
+  const cambios=cmpDiffAgainstPrevList(items, prov, provId);
   const now=new Date().toISOString();
   const lista={provId,rows,at:now};
   const idx=cmpDB.listas.findIndex(l=>l.provId===provId);
@@ -7620,6 +7647,13 @@ async function cmpDoAiImport(){
     toast(msg);
     if(remap.lost.length) console.warn('Vínculos sin encontrar tras importar:', remap.lost.map(l=>l.name));
     state.cmpTab='comparar'; render();
+    if(cambios && cambios.perItem.some(d=>d.status==='up'||d.status==='down')){
+      const up=cambios.perItem.filter(d=>d.status==='up').length, down=cambios.perItem.filter(d=>d.status==='down').length;
+      cmpOpenModal(`<div class="cmp-modal-title">Lista de ${cmpEsc(prov?prov.name:'proveedor')} importada</div>
+        <p style="font-size:13px;color:rgba(255,255,255,0.6);margin-bottom:8px;">Contra la lista anterior: <b style="color:var(--warn)">${up} subieron</b> y <b style="color:var(--ok)">${down} bajaron</b>.</p>
+        ${cmpHtmlCambios(cambios,true)}
+        <button class="btn-primary" style="width:100%;" onclick="cmpCloseModal()">Listo</button>`);
+    }
   }catch(e){ toast('Error guardando: '+e.message,'err'); }
 }
 
