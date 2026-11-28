@@ -1646,8 +1646,27 @@ function normalizeState(){
   if(!state.cajeros) state.cajeros = ['Gastón','Matías','Gabriel','Emanuel'];
   if(!state.dias) state.dias = {};
   if(!state.updatedAt) state.updatedAt = 0;
+  unificarProveedores();
 }
-function save() { snapshotFinalesHoy(); state.updatedAt = Date.now(); localStorage.setItem('cajasApp_v2', JSON.stringify(state)); updateBadge(); scheduleRemoteSync(); }
+// Nombres distintos de un mismo proveedor. Todo lo que coincide se guarda con
+// el nombre de la izquierda: deudas, facturas, cheques y cuenta corriente.
+const PROV_MISMA_EMPRESA = [
+  ['El Emporio', /emporio|nicebe/i],   // Nicebe, Hugo Nicebe, Emporio
+];
+function provCanon(nombre){
+  const n = nombre || '';
+  for(const [canon, re] of PROV_MISMA_EMPRESA) if(re.test(n)) return canon;
+  return n;
+}
+function unificarProveedores(){
+  ['facturas','cheques','chequesBorrador','ctaCteHist'].forEach(k=>(state[k]||[]).forEach(x=>{
+    if(x && x.proveedor){ const c = provCanon(x.proveedor); if(c!==x.proveedor) x.proveedor = c; }
+  }));
+  const reKey = obj=>{ if(!obj) return; Object.keys(obj).forEach(k=>{ const c = provKey(k); if(c!==k){ if(!obj[c]) obj[c] = obj[k]; delete obj[k]; } }); };
+  reKey(state.proveedoresTel);
+  if(state.flujo && state.flujo.atrasos) reKey(state.flujo.atrasos.prov);
+}
+function save() { unificarProveedores(); snapshotFinalesHoy(); state.updatedAt = Date.now(); localStorage.setItem('cajasApp_v2', JSON.stringify(state)); updateBadge(); scheduleRemoteSync(); }
 function load() {
   const s = localStorage.getItem('cajasApp_v2');
   if(s) { try { state = JSON.parse(s); } catch(e){} }
@@ -4420,7 +4439,7 @@ function confirmarPagoACuenta() {
 // ── INFORMAR PAGO AL PROVEEDOR ──
 let informarPagoId = null;
 function grupoDePago(f) { return f.pagoId ? state.facturas.filter(x=>x.pagoId===f.pagoId) : [f]; }
-function provKey(nombre) { return (nombre||'').trim().toUpperCase(); }
+function provKey(nombre) { return provCanon(nombre).trim().toUpperCase(); }
 // WhatsApp argentino: 54 + 9 + área sin 0 + número sin 15.
 function telWhatsApp(tel) {
   let d = (tel||'').replace(/\D/g,'');
