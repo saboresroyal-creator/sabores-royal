@@ -1927,12 +1927,22 @@ function renderCajas(day, d) {
       ${!esCentral ? `
       <div style="display:flex;flex-wrap:wrap;gap:10px;margin-bottom:8px;">
         <div style="flex:1;min-width:120px;">
-          <label>Tarjeta ($)</label>
-          <input type="number" placeholder="0" value="${caja.tarjetas}" oninput="setCajaField('${d}',${i},'tarjetas',this.value)">
+          <label>Tarjeta Payway ($)</label>
+          <input type="number" placeholder="0" value="${tarjPaywayVal(caja)}" oninput="setTarjeta('${d}',${i},'tarjPayway',this.value)">
         </div>
         <div style="flex:1;min-width:120px;">
-          <label>N° Lote</label>
+          <label>N° Lote Payway</label>
           <input type="text" placeholder="Ej: 001234" value="${caja.lote||''}" oninput="setCajaField('${d}',${i},'lote',this.value)">
+        </div>
+      </div>
+      <div style="display:flex;flex-wrap:wrap;gap:10px;margin-bottom:8px;">
+        <div style="flex:1;min-width:120px;">
+          <label>Tarjeta Fiserv ($)</label>
+          <input type="number" placeholder="0" value="${caja.tarjFiserv||''}" oninput="setTarjeta('${d}',${i},'tarjFiserv',this.value)">
+        </div>
+        <div style="flex:1;min-width:120px;">
+          <label>N° Lote Fiserv</label>
+          <input type="text" placeholder="Ej: 001234" value="${caja.loteFiserv||''}" oninput="setCajaField('${d}',${i},'loteFiserv',this.value)">
         </div>
       </div>` : ''}
       ${!esCentral ? `
@@ -2094,6 +2104,20 @@ function updateEfectivoRealCentral(d) {
   if(elTotal) elTotal.textContent = pesos(totalFondos);
 }
 
+// Tarjetas separadas por procesadora (Payway y Fiserv). "tarjetas" sigue siendo
+// el total, que es lo que usan reportes, resumen y flujo de caja. Los días
+// cargados antes de separarlas tienen solo "tarjetas": se muestran en Payway.
+function tarjPaywayVal(c){
+  if(c.tarjPayway!=null) return c.tarjPayway;
+  return c.tarjFiserv==null ? (c.tarjetas||'') : '';
+}
+function setTarjeta(d,i,field,val){
+  const c = state.dias[d].cajas[i];
+  if(c.tarjPayway==null && c.tarjFiserv==null) c.tarjPayway = c.tarjetas||'';
+  c[field] = val;
+  const tot = (parseFloat(c.tarjPayway)||0) + (parseFloat(c.tarjFiserv)||0);
+  setCajaField(d,i,'tarjetas', (c.tarjPayway===''&&(c.tarjFiserv||'')==='') ? '' : String(Math.round(tot*100)/100));
+}
 function setCajaField(d,i,field,val) {
   state.dias[d].cajas[i][field] = val;
   save();
