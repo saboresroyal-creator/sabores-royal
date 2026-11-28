@@ -280,6 +280,7 @@ td { padding:10px 12px; border-bottom:1px solid var(--border); font-family:var(-
 .green { color:var(--green); }
 .red { color:var(--red); }
 .blue { color:#60a5fa; }
+.fiserv { color:#f472b6; }
 .purple { color:var(--purple); }
 tr:hover td { background:var(--surface2); }
 
@@ -483,6 +484,7 @@ tr:hover td { background:var(--surface2); }
     <div class="res-item">
       <div class="res-label">Tarjeta</div>
       <div class="res-val blue" id="resTarjeta">$0</div>
+      <div style="font-size:10px;margin-top:2px;" id="resTarjetaSplit"></div>
     </div>
     <div class="res-sep"></div>
     <div class="res-item">
@@ -2238,6 +2240,7 @@ function updateResumen(d) {
   document.getElementById('resTotal').textContent = pesos(s.total);
   document.getElementById('resEfectivo').textContent = pesos(s.efectivo);
   document.getElementById('resTarjeta').textContent = pesos(s.tarjeta);
+  { const el = document.getElementById('resTarjetaSplit'); if(el) el.innerHTML = `<span class="blue">Payway ${pesos(s.payway)}</span> · <span class="fiserv">Fiserv ${pesos(s.fiserv)}</span>`; }
   document.getElementById('resNegro').textContent = pesos(s.negro);
   const pct = s.total>0 ? Math.round(s.negro/s.total*100) : 0;
   document.getElementById('resNegroPct').textContent = pct + '% del total';
@@ -2372,8 +2375,8 @@ function getDateRange(days) {
 
 function dayStats(dateStr) {
   const day = state.dias[dateStr];
-  if(!day) return {total:0,tarjeta:0,gastos:0,tickets:0,efectivo:0,negro:0,gastosCentral:0};
-  let total=0,tarjeta=0,gastos=0,tickets=0,efectivo=0,negro=0,gastosCentral=0;
+  if(!day) return {total:0,tarjeta:0,payway:0,fiserv:0,gastos:0,tickets:0,efectivo:0,negro:0,gastosCentral:0};
+  let total=0,tarjeta=0,payway=0,fiserv=0,gastos=0,tickets=0,efectivo=0,negro=0,gastosCentral=0;
   day.cajas.forEach((c,i)=>{
     if(i === 2) {
       // Caja Central: NO suma a venta. Solo contabilizamos sus salidas aparte.
@@ -2381,27 +2384,35 @@ function dayStats(dateStr) {
       return;
     }
     const ef=(parseFloat(c.efectivo)||0)+(parseFloat(c.ajusteEfectivo)||0);
-    const tar=parseFloat(c.tarjetas)||0, neg=parseFloat(c.negro)||0;
-    total+=ef+tar; tarjeta+=tar; efectivo+=ef; negro+=neg;
+    const tar=parseFloat(c.tarjetas)||0, neg=parseFloat(c.negro)||0, fs=tarjFiservNum(c);
+    total+=ef+tar; tarjeta+=tar; efectivo+=ef; negro+=neg; fiserv+=fs; payway+=tar-fs;
     tickets+=parseInt(c.tickets)||0;
     (c.gastos||[]).forEach(g=>gastos+=parseFloat(g.monto)||0);
   });
   // Remove double-counted gastos from optional cajas (3 and 4) if they overlap
   // No change needed: cajas 3 and 4 are regular cajas, they already counted correctly above
-  return {total,tarjeta,gastos,tickets,efectivo,negro,gastosCentral};
+  return {total,tarjeta,payway,fiserv,gastos,tickets,efectivo,negro,gastosCentral};
+}
+// Lo cobrado por Fiserv. Payway es el resto del total de tarjetas, así los días
+// cargados antes de separarlas quedan todos como Payway.
+function tarjFiservNum(c){ return Math.min(parseFloat(c.tarjetas)||0, parseFloat(c.tarjFiserv)||0); }
+// Debajo del total de tarjetas: cuánto fue por cada una.
+function tarjSplitHtml(pw, fs){
+  return `<div style="font-size:11px;margin-top:4px;"><span class="blue">Payway ${pesos(pw)}</span> · <span class="fiserv">Fiserv ${pesos(fs)}</span></div>`;
 }
 
 // ── STATS TODAS LAS CAJAS ──
 function dayCajaStats(dateStr, cajaIdx) {
   const day = state.dias[dateStr];
-  if(!day || !day.cajas[cajaIdx]) return {total:0,tarjeta:0,gastos:0,tickets:0,efectivo:0,negro:0};
+  if(!day || !day.cajas[cajaIdx]) return {total:0,tarjeta:0,payway:0,fiserv:0,gastos:0,tickets:0,efectivo:0,negro:0};
   const c = day.cajas[cajaIdx];
   const ef = (parseFloat(c.efectivo)||0) + (parseFloat(c.ajusteEfectivo)||0);
   const tar = parseFloat(c.tarjetas)||0;
   const neg = parseFloat(c.negro)||0;
   const tkt = parseInt(c.tickets)||0;
   const gst = (c.gastos||[]).reduce((s,g)=>s+(parseFloat(g.monto)||0),0);
-  return { total: ef+tar, tarjeta: tar, efectivo: ef, negro: neg, tickets: tkt, gastos: gst, cajero: c.cajero||'—' };
+  const fs = tarjFiservNum(c);
+  return { total: ef+tar, tarjeta: tar, payway: tar-fs, fiserv: fs, efectivo: ef, negro: neg, tickets: tkt, gastos: gst, cajero: c.cajero||'—' };
 }
 
 function renderStatsTodas(container, range) {
@@ -2410,6 +2421,7 @@ function renderStatsTodas(container, range) {
   const sumTotal = totals.reduce((a,b)=>a+b.total,0);
   const sumEf = totals.reduce((a,b)=>a+b.efectivo,0);
   const sumTar = totals.reduce((a,b)=>a+b.tarjeta,0);
+  const sumPw = totals.reduce((a,b)=>a+b.payway,0), sumFs = totals.reduce((a,b)=>a+b.fiserv,0);
   const sumNeg = totals.reduce((a,b)=>a+b.negro,0);
   const sumTk = totals.reduce((a,b)=>a+b.tickets,0);
   const sumGst = totals.reduce((a,b)=>a+b.gastos,0);
@@ -2423,7 +2435,8 @@ function renderStatsTodas(container, range) {
   const esDia = range.length === 1;
   const chartLabels = range.map(d=>d.slice(5));
   const chartTotal = range.map(d=>dayStats(d).total);
-  const chartTar = range.map(d=>dayStats(d).tarjeta);
+  const chartPw = range.map(d=>dayStats(d).payway);
+  const chartFs = range.map(d=>dayStats(d).fiserv);
   const chartEf = range.map(d=>dayStats(d).efectivo);
   const chartTk = range.map(d=>dayStats(d).tickets);
 
@@ -2433,7 +2446,7 @@ function renderStatsTodas(container, range) {
       <div class="grid4 mb16">
         <div class="stat"><div class="stat-label">Venta Total</div><div class="stat-value gold">${pesos(sumTotal)}</div></div>
         <div class="stat"><div class="stat-label">Efectivo</div><div class="stat-value green">${pesos(sumEf)}</div></div>
-        <div class="stat"><div class="stat-label">Tarjeta</div><div class="stat-value blue">${pesos(sumTar)}</div></div>
+        <div class="stat"><div class="stat-label">Tarjeta</div><div class="stat-value blue">${pesos(sumTar)}</div>${tarjSplitHtml(sumPw,sumFs)}</div>
         <div class="stat"><div class="stat-label">Gastos</div><div class="stat-value red">${pesos(sumGst)}</div></div>
       </div>
       <div class="grid4">
@@ -2469,7 +2482,8 @@ function renderStatsTodas(container, range) {
       makeLineChart('chartTotalVentas', chartLabels, [
         {label:'Total',data:chartTotal,color:'#c5a028'},
         {label:'Efectivo',data:chartEf,color:'#22c55e'},
-        {label:'Tarjeta',data:chartTar,color:'#60a5fa'}
+        {label:'Payway',data:chartPw,color:'#60a5fa'},
+        {label:'Fiserv',data:chartFs,color:'#f472b6'}
       ]);
       makeBarChart('chartTotalTk', chartLabels, chartTk, '#c5a028');
     }, 50);
@@ -2491,7 +2505,8 @@ function renderTablaDiariaTodas(range) {
       <td class="yellow" style="font-weight:700;">${fecha}${fechaBadges}</td>
       <td style="color:var(--muted);font-size:11px;">TOTAL DÍA</td>
       <td class="num green">${pesos(ds.efectivo)}</td>
-      <td class="num blue">${pesos(ds.tarjeta)}</td>
+      <td class="num blue">${pesos(ds.payway)}</td>
+      <td class="num fiserv">${pesos(ds.fiserv)}</td>
       <td class="num purple">${pesos(ds.negro)}</td>
       <td class="num" style="color:var(--muted)">${ds.total>0?Math.round(ds.negro/ds.total*100):0}%</td>
       <td class="num gold">${pesos(ds.total)}</td>
@@ -2506,7 +2521,8 @@ function renderTablaDiariaTodas(range) {
         <td></td>
         <td style="padding-left:16px;color:var(--muted);font-size:12px;">↳ ${nombres[i]||'Caja '+(i+1)}${!esCentral&&c.cajero?` <span style="color:var(--text);font-size:11px;">(${c.cajero})</span>`:''}</td>
         <td class="num green">${esCentral?'—':pesos(cs.efectivo)}</td>
-        <td class="num blue">${esCentral?'—':pesos(cs.tarjeta)}</td>
+        <td class="num blue">${esCentral?'—':pesos(cs.payway)}</td>
+        <td class="num fiserv">${esCentral?'—':pesos(cs.fiserv)}</td>
         <td class="num purple">${esCentral?'—':pesos(cs.negro)}</td>
         <td class="num" style="color:var(--muted)">${esCentral?'—':cs.total>0?Math.round(cs.negro/cs.total*100)+'%':'0%'}</td>
         <td class="num yellow">${esCentral?'—':pesos(cs.total)}</td>
@@ -2524,7 +2540,8 @@ function renderTablaDiariaTodas(range) {
         <thead><tr>
           <th>Fecha</th><th>Caja</th>
           <th class="num green">Efectivo</th>
-          <th class="num blue">Tarjeta</th>
+          <th class="num blue">Payway</th>
+          <th class="num fiserv">Fiserv</th>
           <th class="num" style="color:var(--purple)">Negro</th>
           <th class="num">% Negro</th>
           <th class="num yellow">Total</th>
@@ -2545,11 +2562,11 @@ function renderStatsCajaIndividual(container, range, cajaIdx) {
   const color = colores[cajaIdx] || '#c5a028';
 
   // Acumular stats del período para esta caja
-  let sumTotal=0,sumEf=0,sumTar=0,sumNeg=0,sumTk=0,sumGst=0;
+  let sumTotal=0,sumEf=0,sumTar=0,sumPw=0,sumFs=0,sumNeg=0,sumTk=0,sumGst=0;
   const diasConDatos = range.filter(d=>state.dias[d]&&state.dias[d].cajas[cajaIdx]);
   diasConDatos.forEach(d=>{
     const cs=dayCajaStats(d,cajaIdx);
-    sumTotal+=cs.total; sumEf+=cs.efectivo; sumTar+=cs.tarjeta;
+    sumTotal+=cs.total; sumEf+=cs.efectivo; sumTar+=cs.tarjeta; sumPw+=cs.payway; sumFs+=cs.fiserv;
     sumNeg+=cs.negro; sumTk+=cs.tickets; sumGst+=cs.gastos;
   });
   const ventasDias = diasConDatos.map(d=>dayCajaStats(d,cajaIdx).total).filter(v=>v>0);
@@ -2564,7 +2581,8 @@ function renderStatsCajaIndividual(container, range, cajaIdx) {
   const chartLabels = range.map(d=>d.slice(5));
   const chartTotal = range.map(d=>dayCajaStats(d,cajaIdx).total);
   const chartEf = range.map(d=>dayCajaStats(d,cajaIdx).efectivo);
-  const chartTar = range.map(d=>dayCajaStats(d,cajaIdx).tarjeta);
+  const chartPw = range.map(d=>dayCajaStats(d,cajaIdx).payway);
+  const chartFs = range.map(d=>dayCajaStats(d,cajaIdx).fiserv);
   const chartNeg = range.map(d=>dayCajaStats(d,cajaIdx).negro);
   const chartTk = range.map(d=>dayCajaStats(d,cajaIdx).tickets);
 
@@ -2574,7 +2592,7 @@ function renderStatsCajaIndividual(container, range, cajaIdx) {
       <div class="grid4 mb16">
         <div class="stat"><div class="stat-label">Venta Total</div><div class="stat-value" style="color:${color}">${pesos(sumTotal)}</div></div>
         <div class="stat"><div class="stat-label">Efectivo</div><div class="stat-value green">${pesos(sumEf)}</div></div>
-        <div class="stat"><div class="stat-label">Tarjeta</div><div class="stat-value blue">${pesos(sumTar)}</div></div>
+        <div class="stat"><div class="stat-label">Tarjeta</div><div class="stat-value blue">${pesos(sumTar)}</div>${tarjSplitHtml(sumPw,sumFs)}</div>
         <div class="stat"><div class="stat-label">Gastos</div><div class="stat-value red">${pesos(sumGst)}</div></div>
       </div>
       <div class="grid4">
@@ -2611,7 +2629,8 @@ function renderStatsCajaIndividual(container, range, cajaIdx) {
       makeLineChart('chartCajaVentas', chartLabels, [
         {label:'Total',data:chartTotal,color},
         {label:'Efectivo',data:chartEf,color:'#22c55e'},
-        {label:'Tarjeta',data:chartTar,color:'#60a5fa'},
+        {label:'Payway',data:chartPw,color:'#60a5fa'},
+        {label:'Fiserv',data:chartFs,color:'#f472b6'},
         {label:'Negro',data:chartNeg,color:'#a855f7'}
       ]);
       makeBarChart('chartCajaTk', chartLabels, chartTk, color);
@@ -2650,16 +2669,16 @@ function renderStatsComparativoMeses(container, cajaIdx) {
   const statsFn = isTodas ? dayStats : (d=>dayCajaStats(d, cajaIdx));
 
   const filas = Object.keys(porMes).sort().map(mesKey => {
-    let sumTotal=0,sumEf=0,sumTar=0,sumNeg=0,sumTk=0,sumGst=0,diasLaborables=0,diasFeriados=0;
+    let sumTotal=0,sumEf=0,sumTar=0,sumPw=0,sumFs=0,sumNeg=0,sumTk=0,sumGst=0,diasLaborables=0,diasFeriados=0;
     const fechasLaborables = [];
     porMes[mesKey].forEach(d=>{
       const s = statsFn(d);
-      sumTotal+=s.total; sumEf+=s.efectivo; sumTar+=s.tarjeta; sumNeg+=s.negro; sumTk+=s.tickets; sumGst+=s.gastos;
+      sumTotal+=s.total; sumEf+=s.efectivo; sumTar+=s.tarjeta; sumPw+=s.payway; sumFs+=s.fiserv; sumNeg+=s.negro; sumTk+=s.tickets; sumGst+=s.gastos;
       if(s.total>0) { diasLaborables++; fechasLaborables.push(d); }
       if(state.dias[d] && state.dias[d].feriado) diasFeriados++;
     });
     const climaLab = climaStatsFechas(fechasLaborables);
-    return { mesKey, sumTotal, sumEf, sumTar, sumNeg, sumTk, sumGst, diasLaborables, diasFeriados, climaLab, promDiario: diasLaborables>0?sumTotal/diasLaborables:0, ticketProm: sumTk>0?sumTotal/sumTk:0, resultado: sumTotal-sumGst };
+    return { mesKey, sumTotal, sumEf, sumTar, sumPw, sumFs, sumNeg, sumTk, sumGst, diasLaborables, diasFeriados, climaLab, promDiario: diasLaborables>0?sumTotal/diasLaborables:0, ticketProm: sumTk>0?sumTotal/sumTk:0, resultado: sumTotal-sumGst };
   });
 
   filas.forEach((f,i)=>{
@@ -2671,7 +2690,8 @@ function renderStatsComparativoMeses(container, cajaIdx) {
       <td style="font-weight:700;">${nombreMes(f.mesKey)}</td>
       <td class="num yellow">${pesos(f.sumTotal)}</td>
       <td class="num green">${pesos(f.sumEf)}</td>
-      <td class="num blue">${pesos(f.sumTar)}</td>
+      <td class="num blue">${pesos(f.sumPw)}</td>
+      <td class="num fiserv">${pesos(f.sumFs)}</td>
       <td class="num purple">${pesos(f.sumNeg)}</td>
       <td class="num red">${pesos(f.sumGst)}</td>
       <td class="num ${f.resultado>=0?'green':'red'}">${pesos(f.resultado)}</td>
@@ -2699,7 +2719,8 @@ function renderStatsComparativoMeses(container, cajaIdx) {
             <th>Mes</th>
             <th class="num yellow">Venta Total</th>
             <th class="num green">Efectivo</th>
-            <th class="num blue">Tarjeta</th>
+            <th class="num blue">Payway</th>
+          <th class="num fiserv">Fiserv</th>
             <th class="num" style="color:var(--purple)">Negro</th>
             <th class="num red">Gastos</th>
             <th class="num">Resultado neto</th>
@@ -2753,7 +2774,8 @@ function renderTablaDiariaCaja(range, cajaIdx, nombre, color) {
       <td class="yellow" style="font-weight:600;">${fecha}${diaBadgesHtml(day)}</td>
       <td style="font-size:12px;color:var(--muted)">${cs.cajero}</td>
       <td class="num green">${pesos(cs.efectivo)}</td>
-      <td class="num blue">${pesos(cs.tarjeta)}</td>
+      <td class="num blue">${pesos(cs.payway)}</td>
+      <td class="num fiserv">${pesos(cs.fiserv)}</td>
       <td class="num purple">${pesos(cs.negro)}</td>
       <td class="num" style="color:var(--muted)">${pctNeg}%</td>
       <td class="num" style="color:${color};font-weight:600;">${pesos(cs.total)}</td>
@@ -2763,8 +2785,8 @@ function renderTablaDiariaCaja(range, cajaIdx, nombre, color) {
   }).join('');
 
   // Totales
-  let tEf=0,tTar=0,tNeg=0,tTot=0,tGst=0,tTk=0;
-  diasConDatos.forEach(d=>{const cs=dayCajaStats(d,cajaIdx);tEf+=cs.efectivo;tTar+=cs.tarjeta;tNeg+=cs.negro;tTot+=cs.total;tGst+=cs.gastos;tTk+=cs.tickets;});
+  let tEf=0,tTar=0,tPw=0,tFs=0,tNeg=0,tTot=0,tGst=0,tTk=0;
+  diasConDatos.forEach(d=>{const cs=dayCajaStats(d,cajaIdx);tEf+=cs.efectivo;tTar+=cs.tarjeta;tPw+=cs.payway;tFs+=cs.fiserv;tNeg+=cs.negro;tTot+=cs.total;tGst+=cs.gastos;tTk+=cs.tickets;});
 
   return `<div class="card mb16">
     <div class="card-title"><div class="dot" style="background:${color}"></div>HISTÓRICO DIARIO — ${nombre}</div>
@@ -2773,7 +2795,8 @@ function renderTablaDiariaCaja(range, cajaIdx, nombre, color) {
         <thead><tr>
           <th>Fecha</th><th>Cajero</th>
           <th class="num green">Efectivo</th>
-          <th class="num blue">Tarjeta</th>
+          <th class="num blue">Payway</th>
+          <th class="num fiserv">Fiserv</th>
           <th class="num" style="color:var(--purple)">Negro</th>
           <th class="num">% Negro</th>
           <th class="num" style="color:${color}">Total</th>
@@ -2785,7 +2808,8 @@ function renderTablaDiariaCaja(range, cajaIdx, nombre, color) {
           <tr style="border-top:2px solid var(--border);font-weight:700;background:rgba(255,255,255,0.03);">
             <td colspan="2" style="color:var(--muted);font-size:11px;letter-spacing:1px;">TOTALES</td>
             <td class="num green">${pesos(tEf)}</td>
-            <td class="num blue">${pesos(tTar)}</td>
+            <td class="num blue">${pesos(tPw)}</td>
+            <td class="num fiserv">${pesos(tFs)}</td>
             <td class="num purple">${pesos(tNeg)}</td>
             <td class="num" style="color:var(--muted)">${tTot>0?Math.round(tNeg/tTot*100):0}%</td>
             <td class="num" style="color:${color}">${pesos(tTot)}</td>
@@ -2853,14 +2877,14 @@ function exportarExcel(opts) {
   // ── HOJA 1: Resumen diario (todas las cajas) ──
   if(opts.resumen){
     const resumenRows = [
-      ['Fecha','Efectivo Total','Tarjeta Total','Negro Total','% Negro','Venta Total','Gastos Total','Tickets','Resultado Neto']
+      ['Fecha','Efectivo Total','Tarjeta Total','Payway','Fiserv','Negro Total','% Negro','Venta Total','Gastos Total','Tickets','Resultado Neto']
     ];
     range.filter(d=>state.dias[d]).forEach(d=>{
       const s = dayStats(d);
       const fecha = d.slice(8)+'/'+d.slice(5,7)+'/'+d.slice(0,4);
       resumenRows.push([
         fecha,
-        s.efectivo, s.tarjeta, s.negro,
+        s.efectivo, s.tarjeta, s.payway, s.fiserv, s.negro,
         s.total>0?+(s.negro/s.total*100).toFixed(1):0,
         s.total, s.gastos, s.tickets,
         s.total-s.gastos
@@ -2871,18 +2895,13 @@ function exportarExcel(opts) {
       const data = resumenRows.slice(1);
       resumenRows.push([
         'TOTALES',
-        data.reduce((a,r)=>a+r[1],0),
-        data.reduce((a,r)=>a+r[2],0),
-        data.reduce((a,r)=>a+r[3],0),
+        ...[1,2,3,4,5].map(k=>data.reduce((a,r)=>a+r[k],0)),
         '',
-        data.reduce((a,r)=>a+r[5],0),
-        data.reduce((a,r)=>a+r[6],0),
-        data.reduce((a,r)=>a+r[7],0),
-        data.reduce((a,r)=>a+r[8],0),
+        ...[7,8,9,10].map(k=>data.reduce((a,r)=>a+r[k],0)),
       ]);
     }
     const wsResumen = XLSX.utils.aoa_to_sheet(resumenRows);
-    wsResumen['!cols'] = [{wch:12},{wch:16},{wch:16},{wch:14},{wch:10},{wch:16},{wch:14},{wch:10},{wch:16}];
+    wsResumen['!cols'] = [{wch:12},{wch:16},{wch:16},{wch:14},{wch:14},{wch:14},{wch:10},{wch:16},{wch:14},{wch:10},{wch:16}];
     XLSX.utils.book_append_sheet(wb, wsResumen, 'Resumen Diario');
   }
 
@@ -2891,13 +2910,13 @@ function exportarExcel(opts) {
     [0,1,3,4].forEach(ci => {
       const nombre = nombres[ci];
       const cajaRows = [
-        ['Fecha','Cajero','Efectivo','Tarjeta','Negro','% Negro','Total','Gastos','Tickets']
+        ['Fecha','Cajero','Efectivo','Tarjeta','Payway','Fiserv','Negro','% Negro','Total','Gastos','Tickets']
       ];
       range.filter(d=>state.dias[d]&&state.dias[d].cajas[ci]).forEach(d=>{
         const cs = dayCajaStats(d,ci);
         const fecha = d.slice(8)+'/'+d.slice(5,7)+'/'+d.slice(0,4);
         cajaRows.push([
-          fecha, cs.cajero, cs.efectivo, cs.tarjeta, cs.negro,
+          fecha, cs.cajero, cs.efectivo, cs.tarjeta, cs.payway, cs.fiserv, cs.negro,
           cs.total>0?+(cs.negro/cs.total*100).toFixed(1):0,
           cs.total, cs.gastos, cs.tickets
         ]);
@@ -2907,17 +2926,13 @@ function exportarExcel(opts) {
         const data = cajaRows.slice(1);
         cajaRows.push([
           'TOTALES','',
-          data.reduce((a,r)=>a+r[2],0),
-          data.reduce((a,r)=>a+r[3],0),
-          data.reduce((a,r)=>a+r[4],0),
+          ...[2,3,4,5,6].map(k=>data.reduce((a,r)=>a+r[k],0)),
           '',
-          data.reduce((a,r)=>a+r[6],0),
-          data.reduce((a,r)=>a+r[7],0),
-          data.reduce((a,r)=>a+r[8],0),
+          ...[8,9,10].map(k=>data.reduce((a,r)=>a+r[k],0)),
         ]);
       }
       const ws = XLSX.utils.aoa_to_sheet(cajaRows);
-      ws['!cols'] = [{wch:12},{wch:14},{wch:14},{wch:14},{wch:12},{wch:10},{wch:14},{wch:12},{wch:10}];
+      ws['!cols'] = [{wch:12},{wch:14},{wch:14},{wch:14},{wch:14},{wch:14},{wch:12},{wch:10},{wch:14},{wch:12},{wch:10}];
       XLSX.utils.book_append_sheet(wb, ws, nombre);
     });
   }
@@ -2953,29 +2968,29 @@ function exportarExcelCompleto() {
   const wb = XLSX.utils.book_new();
 
   // Hoja resumen general
-  const resRows = [['Fecha','Efectivo','Tarjeta','Negro','% Negro','Total','Gastos','Tickets','Neto']];
+  const resRows = [['Fecha','Efectivo','Tarjeta','Payway','Fiserv','Negro','% Negro','Total','Gastos','Tickets','Neto']];
   allDates.forEach(d=>{
     const s=dayStats(d);
     const f=d.slice(8)+'/'+d.slice(5,7)+'/'+d.slice(0,4);
-    resRows.push([f,s.efectivo,s.tarjeta,s.negro,s.total>0?+(s.negro/s.total*100).toFixed(1):0,s.total,s.gastos,s.tickets,s.total-s.gastos]);
+    resRows.push([f,s.efectivo,s.tarjeta,s.payway,s.fiserv,s.negro,s.total>0?+(s.negro/s.total*100).toFixed(1):0,s.total,s.gastos,s.tickets,s.total-s.gastos]);
   });
   const wsR=XLSX.utils.aoa_to_sheet(resRows);
-  wsR['!cols']=[{wch:12},{wch:14},{wch:14},{wch:12},{wch:10},{wch:14},{wch:12},{wch:10},{wch:14}];
+  wsR['!cols']=[{wch:12},{wch:14},{wch:14},{wch:14},{wch:14},{wch:12},{wch:10},{wch:14},{wch:12},{wch:10},{wch:14}];
   XLSX.utils.book_append_sheet(wb,wsR,'Resumen General');
 
   // Hoja detalle completo (una fila por caja por día)
-  const detRows=[['Fecha','Caja','Cajero','Efectivo','Tarjeta','Negro','% Negro','Total','Gastos','Tickets']];
+  const detRows=[['Fecha','Caja','Cajero','Efectivo','Tarjeta','Payway','Fiserv','Negro','% Negro','Total','Gastos','Tickets']];
   allDates.forEach(d=>{
     const day=state.dias[d];
     const f=d.slice(8)+'/'+d.slice(5,7)+'/'+d.slice(0,4);
     day.cajas.forEach((c,i)=>{
       if(i===2) return; // omitir Central en ventas
       const cs=dayCajaStats(d,i);
-      detRows.push([f,nombres[i]||'Caja '+(i+1),cs.cajero,cs.efectivo,cs.tarjeta,cs.negro,cs.total>0?+(cs.negro/cs.total*100).toFixed(1):0,cs.total,cs.gastos,cs.tickets]);
+      detRows.push([f,nombres[i]||'Caja '+(i+1),cs.cajero,cs.efectivo,cs.tarjeta,cs.payway,cs.fiserv,cs.negro,cs.total>0?+(cs.negro/cs.total*100).toFixed(1):0,cs.total,cs.gastos,cs.tickets]);
     });
   });
   const wsD=XLSX.utils.aoa_to_sheet(detRows);
-  wsD['!cols']=[{wch:12},{wch:12},{wch:14},{wch:14},{wch:14},{wch:12},{wch:10},{wch:14},{wch:12},{wch:10}];
+  wsD['!cols']=[{wch:12},{wch:12},{wch:14},{wch:14},{wch:14},{wch:14},{wch:14},{wch:12},{wch:10},{wch:14},{wch:12},{wch:10}];
   XLSX.utils.book_append_sheet(wb,wsD,'Detalle por Caja');
 
   // Hoja gastos
@@ -2996,14 +3011,14 @@ function exportarExcelCompleto() {
   // Hojas individuales por caja
   [0,1,3,4].forEach(ci=>{
     const nombre=nombres[ci];
-    const cRows=[['Fecha','Cajero','Efectivo','Tarjeta','Negro','% Negro','Total','Gastos','Tickets']];
+    const cRows=[['Fecha','Cajero','Efectivo','Tarjeta','Payway','Fiserv','Negro','% Negro','Total','Gastos','Tickets']];
     allDates.filter(d=>state.dias[d]&&state.dias[d].cajas[ci]).forEach(d=>{
       const cs=dayCajaStats(d,ci);
       const f=d.slice(8)+'/'+d.slice(5,7)+'/'+d.slice(0,4);
-      cRows.push([f,cs.cajero,cs.efectivo,cs.tarjeta,cs.negro,cs.total>0?+(cs.negro/cs.total*100).toFixed(1):0,cs.total,cs.gastos,cs.tickets]);
+      cRows.push([f,cs.cajero,cs.efectivo,cs.tarjeta,cs.payway,cs.fiserv,cs.negro,cs.total>0?+(cs.negro/cs.total*100).toFixed(1):0,cs.total,cs.gastos,cs.tickets]);
     });
     const ws=XLSX.utils.aoa_to_sheet(cRows);
-    ws['!cols']=[{wch:12},{wch:14},{wch:14},{wch:14},{wch:12},{wch:10},{wch:14},{wch:12},{wch:10}];
+    ws['!cols']=[{wch:12},{wch:14},{wch:14},{wch:14},{wch:14},{wch:14},{wch:12},{wch:10},{wch:14},{wch:12},{wch:10}];
     XLSX.utils.book_append_sheet(wb,ws,nombre);
   });
 
